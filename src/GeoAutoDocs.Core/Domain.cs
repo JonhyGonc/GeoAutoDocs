@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json.Serialization;
 
 namespace GeoAutoDocs.Core;
 
@@ -24,7 +25,19 @@ public sealed class Project
 
     public List<Report> Reports { get; set; } = [];
     public List<Location> Locations { get; set; } = [];
-    public List<PendingCapture> PendingCaptures { get; set; } = [];
+    public List<Capture> Captures { get; set; } = [];
+
+    [NotMapped]
+    [JsonPropertyName("PendingCaptures")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<Capture>? LegacyPendingCaptures
+    {
+        get => null;
+        set
+        {
+            if (value is { Count: > 0 } && Captures.Count == 0) Captures = value;
+        }
+    }
 
     public Report CreateReport(string? name = null)
     {
@@ -152,6 +165,7 @@ public sealed class VideoReference
     public string? Description { get; set; }
     public DateTime? CreatedAt { get; set; }
     [NotMapped] public MediaReferenceStatus Status => MediaPathClassifier.Classify(FilePath);
+    [NotMapped] public bool IsAvailable => File.Exists(FilePath);
 }
 
 public enum OccurrenceLocationMode { SpecificMeterage, Interval, EntireSection, NotApplicable }
@@ -192,14 +206,22 @@ public sealed class Evidence
     public string? Caption { get; set; }
 }
 
-public sealed class PendingCapture
+public enum CaptureStatus { Pending, Assigned }
+
+public sealed class Capture
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid ProjectId { get; set; }
+    public Guid SectionId { get; set; }
+    public Guid VideoReferenceId { get; set; }
     public string FilePath { get; set; } = string.Empty;
     public string? VideoFilePath { get; set; }
     public TimeSpan VideoTimestamp { get; set; }
     public DateTime CreatedAt { get; set; }
+    public CaptureStatus Status { get; set; } = CaptureStatus.Pending;
+    public int Order { get; set; }
+    public bool ManagedByGeoAutoDocs { get; set; } = true;
+    public string? SharedFilePath { get; set; }
 }
 
 public sealed class CustomSection

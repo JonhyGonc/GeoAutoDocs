@@ -109,4 +109,38 @@ public sealed class SharedProjectTests : IAsyncLifetime
         Assert.Equal(99, error.Actual);
         Assert.Contains("encontrado 99", error.Message, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task ManagedCaptureCheckpointsToServerAndRestoresIntoAnotherLocalCache()
+    {
+        var directory = Path.Combine(_root, "capture-sync");
+        var sourcePng = Path.Combine(_root, "capture.png");
+        await File.WriteAllBytesAsync(sourcePng, Convert.FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFElEQVR42mP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"));
+        var location = new Location { ProjectId = _project.Id, Name = "Local" };
+        var section = new InspectionSection { LocationId = location.Id, Name = "Trecho" };
+        var video = new VideoReference { InspectionSectionId = section.Id, FilePath = @"C:\video.mp4", DisplayName = "Vídeo" };
+        section.VideoReferences.Add(video); location.Sections.Add(section); _project.Locations.Add(location);
+        var capture = new Capture
+        {
+            ProjectId = _project.Id, SectionId = section.Id, VideoReferenceId = video.Id,
+            FilePath = sourcePng, VideoTimestamp = TimeSpan.FromSeconds(3), CreatedAt = DateTime.UtcNow,
+            Status = CaptureStatus.Pending, ManagedByGeoAutoDocs = true
+        };
+        _project.Captures.Add(capture);
+        var service = new SharedProjectService(_paths);
+        var editor = await service.OpenAsync(_project, directory);
+
+        await editor.CheckpointAsync();
+        Assert.True(File.Exists(editor.Project.Captures[0].SharedFilePath));
+        await editor.CloseAsync();
+
+        var secondPaths = new AppDataPaths(Path.Combine(_root, "other-local"));
+        secondPaths.EnsureDirectories();
+        var reader = await new SharedProjectService(secondPaths).OpenAsync(
+            new Project { Id = _project.Id, Name = _project.Name }, directory, readOnly: true);
+        Assert.True(File.Exists(reader.Project.Captures[0].FilePath));
+        Assert.StartsWith(secondPaths.CacheDirectory, reader.Project.Captures[0].FilePath, StringComparison.OrdinalIgnoreCase);
+        await reader.CloseAsync();
+    }
 }

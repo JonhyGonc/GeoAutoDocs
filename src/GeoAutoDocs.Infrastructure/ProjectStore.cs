@@ -44,7 +44,7 @@ public sealed class ProjectStore : IProjectStore
             .Include(x => x.Locations).ThenInclude(x => x.Sections).ThenInclude(x => x.VideoReferences)
             .Include(x => x.Locations).ThenInclude(x => x.Sections).ThenInclude(x => x.Occurrences).ThenInclude(x => x.Anomalies)
             .Include(x => x.Locations).ThenInclude(x => x.Sections).ThenInclude(x => x.Occurrences).ThenInclude(x => x.Evidence)
-            .Include(x => x.PendingCaptures)
+            .Include(x => x.Captures)
             .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
     }
 
@@ -128,6 +128,8 @@ public sealed class ProjectStore : IProjectStore
                 foreach (var occurrence in section.Occurrences) occurrence.InspectionSectionId = section.Id;
             }
         }
+
+        foreach (var capture in project.Captures) capture.ProjectId = project.Id;
     }
 
     private async Task RemoveMissingAggregateContentAsync(Project project, CancellationToken cancellationToken)
@@ -162,6 +164,11 @@ public sealed class ProjectStore : IProjectStore
                 .Where(x => sectionIds.Contains(x.InspectionSectionId)).ToListAsync(cancellationToken);
             db.RemoveRange(storedVideos.Where(x => !currentVideoIds.Contains(x.Id)));
         }
+
+        var currentCaptureIds = project.Captures.Select(x => x.Id).ToHashSet();
+        var storedCaptures = await db.Set<Capture>().Where(x => x.ProjectId == project.Id)
+            .ToListAsync(cancellationToken);
+        db.RemoveRange(storedCaptures.Where(x => !currentCaptureIds.Contains(x.Id)));
         await db.SaveChangesAsync(cancellationToken);
     }
 
@@ -200,6 +207,14 @@ public sealed class ProjectStore : IProjectStore
         foreach (var column in projectColumns) await AddColumnIfMissingAsync(db, "Projects", column.Item1, column.Item2, cancellationToken);
         foreach (var column in reportColumns) await AddColumnIfMissingAsync(db, "ReportConfiguration", column.Item1, column.Item2, cancellationToken);
         foreach (var column in videoColumns) await AddColumnIfMissingAsync(db, "VideoReference", column.Item1, column.Item2, cancellationToken);
+        var captureColumns = new (string, string)[]
+        {
+            ("SectionId", "TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000'"),
+            ("VideoReferenceId", "TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000'"),
+            ("Status", "INTEGER NOT NULL DEFAULT 0"), ("Order", "INTEGER NOT NULL DEFAULT 0"),
+            ("ManagedByGeoAutoDocs", "INTEGER NOT NULL DEFAULT 1"), ("SharedFilePath", "TEXT NULL")
+        };
+        foreach (var column in captureColumns) await AddColumnIfMissingAsync(db, "PendingCapture", column.Item1, column.Item2, cancellationToken);
         await AddColumnIfMissingAsync(db, "Occurrence", "VideoReferenceId", "TEXT NULL", cancellationToken);
         await AddColumnIfMissingAsync(db, "CustomSection", "ReportId", "TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000'", cancellationToken);
 
@@ -208,6 +223,9 @@ public sealed class ProjectStore : IProjectStore
         await db.Database.ExecuteSqlRawAsync("DROP INDEX IF EXISTS \"IX_VideoReference_InspectionSectionId\"", cancellationToken);
         await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS \"IX_VideoReference_InspectionSectionId\" ON \"VideoReference\" (\"InspectionSectionId\")", cancellationToken);
         await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS \"IX_Occurrence_VideoReferenceId\" ON \"Occurrence\" (\"VideoReferenceId\")", cancellationToken);
+        await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS \"IX_PendingCapture_ProjectId\" ON \"PendingCapture\" (\"ProjectId\")", cancellationToken);
+        await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS \"IX_PendingCapture_SectionId\" ON \"PendingCapture\" (\"SectionId\")", cancellationToken);
+        await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS \"IX_PendingCapture_VideoReferenceId\" ON \"PendingCapture\" (\"VideoReferenceId\")", cancellationToken);
         await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS \"IX_CustomSection_ReportId\" ON \"CustomSection\" (\"ReportId\")", cancellationToken);
         await db.Database.ExecuteSqlRawAsync("""
             CREATE TABLE IF NOT EXISTS "ReportSection" (

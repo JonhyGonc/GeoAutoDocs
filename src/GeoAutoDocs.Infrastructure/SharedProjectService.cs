@@ -81,6 +81,7 @@ public sealed class SharedProjectService(AppDataPaths paths)
 
             working.StorageKind = ProjectStorageKind.Shared;
             working.SharedProjectPath = sharedDirectory;
+            await RestoreCapturesToCacheAsync(working, cacheDirectory, cancellationToken);
             await WriteProjectAtomicallyAsync(cachePath, working, cancellationToken);
             return new SharedProjectSession(this, working, officialPath, cachePath, lockPath,
                 ownedLock, readOnly, working.ProjectDataVersion);
@@ -101,6 +102,8 @@ public sealed class SharedProjectService(AppDataPaths paths)
         if (official.ProjectDataVersion != session.BaseVersion)
             throw new ProjectVersionConflictException(session.BaseVersion, official.ProjectDataVersion);
         session.Project.ProjectDataVersion = session.BaseVersion + 1;
+        await SynchronizeCapturesToSharedAsync(session.Project,
+            Path.GetDirectoryName(session.OfficialPath)!, cancellationToken);
         await WriteProjectAtomicallyAsync(session.OfficialPath, session.Project, cancellationToken);
         session.BaseVersion = session.Project.ProjectDataVersion;
         await WriteProjectAtomicallyAsync(session.CachePath, session.Project, cancellationToken);
@@ -157,6 +160,64 @@ public sealed class SharedProjectService(AppDataPaths paths)
 
     private static async Task WriteProjectAtomicallyAsync(string path, Project project, CancellationToken cancellationToken) =>
         await AtomicWriteAsync(path, project, cancellationToken);
+
+    private static async Task SynchronizeCapturesToSharedAsync(Project project, string sharedDirectory,
+        CancellationToken cancellationToken)
+    {
+        var targetDirectory = Path.Combine(sharedDirectory, "captures");
+        foreach (var capture in project.Captures.Where(x => x.ManagedByGeoAutoDocs && File.Exists(x.FilePath)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Directory.CreateDirectory(targetDirectory);
+            var target = Path.Combine(targetDirectory, $"capture_{capture.Id:N}.png");
+            if (!PathsEqual(capture.FilePath, target)) await CopyAtomicallyAsync(capture.FilePath, target, cancellationToken);
+            capture.SharedFilePath = target;
+        }
+    }
+
+    private static async Task RestoreCapturesToCacheAsync(Project project, string cacheDirectory,
+        CancellationToken cancellationToken)
+    {
+        var captureDirectory = Path.Combine(cacheDirectory, "captures");
+        foreach (var capture in project.Captures.Where(x => x.ManagedByGeoAutoDocs))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var local = Path.Combine(captureDirectory, $"capture_{capture.Id:N}.png");
+            if (File.Exists(local))
+            {
+                capture.FilePath = local;
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(capture.SharedFilePath) || !File.Exists(capture.SharedFilePath)) continue;
+            Directory.CreateDirectory(captureDirectory);
+            await CopyAtomicallyAsync(capture.SharedFilePath, local, cancellationToken);
+            capture.FilePath = local;
+        }
+    }
+
+    private static async Task CopyAtomicallyAsync(string source, string destination, CancellationToken cancellationToken)
+    {
+        var temporary = destination + ".tmp." + Guid.NewGuid().ToString("N");
+        try
+        {
+            await using (var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read,
+                             81920, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            await using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                             81920, FileOptions.Asynchronous | FileOptions.WriteThrough))
+            {
+                await input.CopyToAsync(output, cancellationToken);
+                await output.FlushAsync(cancellationToken);
+            }
+            File.Move(temporary, destination, true);
+        }
+        finally
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
+    }
+
+    private static bool PathsEqual(string left, string right) =>
+        Path.GetFullPath(left).Equals(Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
 
     private static async Task AtomicWriteAsync<T>(string path, T value, CancellationToken cancellationToken)
     {

@@ -11,7 +11,7 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        var paths = new AppDataPaths();
+        var paths = new AppDataPaths(Environment.GetEnvironmentVariable("GEOAUTODOCS_DATA_ROOT"));
         paths.EnsureDirectories();
         _logger = new LocalLogger(paths.LogPath);
         _logger.Info("Aplicação iniciada.");
@@ -22,7 +22,8 @@ public partial class App : Application
         {
             var store = new ProjectStore(paths);
             await store.InitializeAsync();
-            new MainWindow(store, new WordReportService(paths), new SharedProjectService(paths), _logger).Show();
+            new MainWindow(store, new WordReportService(paths), new SharedProjectService(paths), _logger,
+                new FrameCaptureService(paths, _logger)).Show();
         }
         catch (Exception ex)
         {

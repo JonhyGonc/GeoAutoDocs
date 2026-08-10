@@ -18,7 +18,7 @@ public sealed class GeoAutoDocsDbContext(DbContextOptions<GeoAutoDocsDbContext> 
             entity.HasMany(x => x.Reports).WithOne()
                 .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
             entity.HasMany(x => x.Locations).WithOne().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
-            entity.HasMany(x => x.PendingCaptures).WithOne().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(x => x.Captures).WithOne().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Report>().ToTable("ReportConfiguration");
@@ -41,6 +41,11 @@ public sealed class GeoAutoDocsDbContext(DbContextOptions<GeoAutoDocsDbContext> 
             .HasForeignKey(x => x.InspectionSectionId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<InspectionSection>().HasMany(x => x.Occurrences).WithOne()
             .HasForeignKey(x => x.InspectionSectionId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<Capture>().ToTable("PendingCapture");
+        modelBuilder.Entity<Capture>().HasOne<InspectionSection>().WithMany()
+            .HasForeignKey(x => x.SectionId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<Capture>().HasOne<VideoReference>().WithMany()
+            .HasForeignKey(x => x.VideoReferenceId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<Occurrence>().HasMany(x => x.Evidence).WithOne()
             .HasForeignKey(x => x.OccurrenceId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<Occurrence>().HasOne<VideoReference>().WithMany()

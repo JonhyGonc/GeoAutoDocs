@@ -15,17 +15,17 @@ public sealed class WordReportService(AppDataPaths paths)
 {
     private const long EmusPerInch = 914400;
 
-    public Task<string> GenerateAsync(Project project, bool includeSection4TechnicalProof = true,
+    public Task<string> GenerateAsync(Project project, Report report, bool includeSection4TechnicalProof = true,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var report = project.ReportConfiguration;
+        if (report.ProjectId != project.Id) throw new InvalidOperationException("O relatório não pertence ao projeto selecionado.");
         RequireFile(report.TemplatePath, "Template Word");
 
         var diameters = FormatDiameters(report);
         var outputDirectory = Path.Combine(project.ProjectPath ?? Path.Combine(paths.ProjectsDirectory, project.Id.ToString("N")), "reports");
         Directory.CreateDirectory(outputDirectory);
-        var baseName = $"Relatorio_{SanitizeFileName(project.Name)}";
+        var baseName = $"Relatorio_{SanitizeFileName(project.Name)}_{SanitizeFileName(report.Name)}";
         var outputPath = Path.Combine(outputDirectory, baseName + ".docx");
         if (File.Exists(outputPath))
             outputPath = Path.Combine(outputDirectory, $"{baseName}_{DateTime.Now:yyyyMMdd_HHmmss}.docx");
@@ -44,7 +44,7 @@ public sealed class WordReportService(AppDataPaths paths)
             InsertClientLogo(mainPart, body, report.LogoPath);
             ApplyEquipmentSelection(mainPart, body, report.Equipments);
             ApplyOptionalModules(body, report);
-            InsertCustomSections(mainPart, body, project.CustomSections);
+            InsertCustomSections(mainPart, body, report.CustomSections);
             if (includeSection4TechnicalProof) ApplySection4TechnicalProof(mainPart, body);
             MarkFieldsForUpdate(mainPart);
             mainPart.Document.Save();
@@ -60,7 +60,7 @@ public sealed class WordReportService(AppDataPaths paths)
         return Task.FromResult(outputPath);
     }
 
-    private static void FillControlledText(Body body, ReportConfiguration report, string diameters)
+    private static void FillControlledText(Body body, Report report, string diameters)
     {
         ReplaceExact(body, "CLIENTE: XXX", $"CLIENTE: {report.Client}");
         ReplaceExact(body, "ÁREA: XXX", $"ÁREA: {report.Area}");
@@ -121,7 +121,7 @@ public sealed class WordReportService(AppDataPaths paths)
         }
     }
 
-    private static void ApplyOptionalModules(Body body, ReportConfiguration report)
+    private static void ApplyOptionalModules(Body body, Report report)
     {
         if (!report.IncludeInspectionOpening)
             RemoveBlock(body, "Além disso, foram realizadas intervenções", "Figuras 3.5 a 3.8");
@@ -354,7 +354,7 @@ public sealed class WordReportService(AppDataPaths paths)
         settingsPart.Settings.Save();
     }
 
-    private static string FormatDiameters(ReportConfiguration report)
+    private static string FormatDiameters(Report report)
     {
         var selected = new List<int>();
         var options = new[]

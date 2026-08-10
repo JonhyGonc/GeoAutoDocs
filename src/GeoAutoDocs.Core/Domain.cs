@@ -1,4 +1,8 @@
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace GeoAutoDocs.Core;
+
+public enum ProjectStorageKind { Local, Shared }
 
 public sealed class Project
 {
@@ -7,17 +11,49 @@ public sealed class Project
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public string? ProjectPath { get; set; }
-    public ReportConfiguration ReportConfiguration { get; set; } = new();
+    public ProjectStorageKind StorageKind { get; set; }
+    public string? SharedProjectPath { get; set; }
+    public long ProjectDataVersion { get; set; }
+
+    public string DefaultClient { get; set; } = string.Empty;
+    public string DefaultCnpj { get; set; } = string.Empty;
+    public string DefaultArea { get; set; } = string.Empty;
+    public string DefaultContract { get; set; } = string.Empty;
+    public string DefaultPurchaseOrder { get; set; } = string.Empty;
+    public string? DefaultLogoPath { get; set; }
+
+    public List<Report> Reports { get; set; } = [];
     public List<Location> Locations { get; set; } = [];
     public List<PendingCapture> PendingCaptures { get; set; } = [];
-    public List<CustomSection> CustomSections { get; set; } = [];
+
+    public Report CreateReport(string? name = null)
+    {
+        var order = Reports.Count == 0 ? 0 : Reports.Max(x => x.Order) + 1;
+        var report = new Report
+        {
+            ProjectId = Id,
+            Name = string.IsNullOrWhiteSpace(name) ? $"Report {order + 1:000}" : name.Trim(),
+            Order = order,
+            Client = DefaultClient,
+            Cnpj = DefaultCnpj,
+            Area = DefaultArea,
+            Contract = DefaultContract,
+            PurchaseOrder = DefaultPurchaseOrder,
+            LogoPath = DefaultLogoPath
+        };
+        Reports.Add(report);
+        return report;
+    }
 }
 
-public sealed class ReportConfiguration
+public sealed class Report
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid ProjectId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public int Order { get; set; }
     public string Client { get; set; } = string.Empty;
+    public string Cnpj { get; set; } = string.Empty;
     public string Area { get; set; } = string.Empty;
     public string Contract { get; set; } = string.Empty;
     public string PurchaseOrder { get; set; } = string.Empty;
@@ -34,30 +70,41 @@ public sealed class ReportConfiguration
     public string CustomDiameters { get; set; } = string.Empty;
     public bool IncludeInspectionOpening { get; set; }
     public bool IncludeGpr { get; set; }
+    public List<CustomSection> CustomSections { get; set; } = [];
+    public List<ReportSection> SectionLinks { get; set; } = [];
+
+    [NotMapped]
+    public IReadOnlyList<InspectionSection> Sections => SectionLinks
+        .OrderBy(x => x.Order).Select(x => x.Section).ToList();
+
+    public void SelectSection(InspectionSection section)
+    {
+        if (SectionLinks.Any(x => x.SectionId == section.Id)) return;
+        SectionLinks.Add(new ReportSection
+        {
+            ReportId = Id,
+            SectionId = section.Id,
+            Section = section,
+            Order = SectionLinks.Count
+        });
+    }
+}
+
+public sealed class ReportSection
+{
+    public Guid ReportId { get; set; }
+    public Guid SectionId { get; set; }
+    public int Order { get; set; }
+    public InspectionSection Section { get; set; } = null!;
 }
 
 [Flags]
-public enum EquipmentSelection
-{
-    None = 0,
-    Endoscope = 1,
-    Bug = 2,
-    Hunter = 4,
-    Spider = 8,
-    Tracker = 16
-}
+public enum EquipmentSelection { None = 0, Endoscope = 1, Bug = 2, Hunter = 4, Spider = 8, Tracker = 16 }
 
 [Flags]
 public enum StandardDiameterSelection
 {
-    None = 0,
-    Mm300 = 1,
-    Mm400 = 2,
-    Mm500 = 4,
-    Mm600 = 8,
-    Mm800 = 16,
-    Mm1000 = 32,
-    Mm1500 = 64
+    None = 0, Mm300 = 1, Mm400 = 2, Mm500 = 4, Mm600 = 8, Mm800 = 16, Mm1000 = 32, Mm1500 = 64
 }
 
 public enum LocationType { Street, Manhole, Site, Area, Other }
@@ -81,8 +128,18 @@ public sealed class InspectionSection
     public string? Reference { get; set; }
     public decimal? InvestigatedMeters { get; set; }
     public int Order { get; set; }
-    public VideoReference? VideoReference { get; set; }
+    public List<VideoReference> VideoReferences { get; set; } = [];
     public List<Occurrence> Occurrences { get; set; } = [];
+}
+
+public enum MediaReferenceStatus { LocalOnly, SharedUnc }
+
+public static class MediaPathClassifier
+{
+    public static MediaReferenceStatus Classify(string? path) =>
+        !string.IsNullOrWhiteSpace(path) && path.StartsWith(@"\\", StringComparison.Ordinal)
+            ? MediaReferenceStatus.SharedUnc
+            : MediaReferenceStatus.LocalOnly;
 }
 
 public sealed class VideoReference
@@ -90,6 +147,11 @@ public sealed class VideoReference
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid InspectionSectionId { get; set; }
     public string FilePath { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public int Order { get; set; }
+    public string? Description { get; set; }
+    public DateTime? CreatedAt { get; set; }
+    [NotMapped] public MediaReferenceStatus Status => MediaPathClassifier.Classify(FilePath);
 }
 
 public enum OccurrenceLocationMode { SpecificMeterage, Interval, EntireSection, NotApplicable }
@@ -98,6 +160,7 @@ public sealed class Occurrence
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid InspectionSectionId { get; set; }
+    public Guid? VideoReferenceId { get; set; }
     public OccurrenceLocationMode LocationMode { get; set; }
     public decimal? Meterage { get; set; }
     public decimal? EndMeterage { get; set; }
@@ -143,6 +206,7 @@ public sealed class CustomSection
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid ProjectId { get; set; }
+    public Guid ReportId { get; set; }
     public string? Title { get; set; }
     public string Text { get; set; } = string.Empty;
     public int Order { get; set; }

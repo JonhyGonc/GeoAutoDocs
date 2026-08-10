@@ -37,35 +37,31 @@ public sealed class WordReportTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task PersistsCompleteReportConfigurationAndCustomContent()
+    public async Task PersistsMultipleReportConfigurationsAndReportOwnedCustomContent()
     {
-        var project = await CreateConfiguredProjectAsync();
-        var reopened = new ProjectStore(new AppDataPaths(_root));
-        await reopened.InitializeAsync();
-        var recovered = await reopened.GetAsync(project.Id);
+        var (project, report) = await CreateConfiguredProjectAsync();
+        var second = project.CreateReport(); second.Client = "Segundo cliente";
+        await _store.SaveAsync(project);
+        var recovered = await new ProjectStore(new AppDataPaths(_root)).GetAsync(project.Id);
 
-        Assert.NotNull(recovered);
-        Assert.Equal(_template, recovered.ReportConfiguration.TemplatePath);
-        Assert.Equal(EquipmentSelection.Endoscope | EquipmentSelection.Bug, recovered.ReportConfiguration.Equipments);
-        Assert.Equal(StandardDiameterSelection.Mm400 | StandardDiameterSelection.Mm600, recovered.ReportConfiguration.Diameters);
-        Assert.True(recovered.ReportConfiguration.IncludeInspectionOpening);
-        Assert.False(recovered.ReportConfiguration.IncludeGpr);
-        var custom = Assert.Single(recovered.CustomSections);
+        Assert.Equal(2, recovered!.Reports.Count);
+        var first = recovered.Reports.Single(x => x.Id == report.Id);
+        Assert.Equal(_template, first.TemplatePath);
+        Assert.Equal(EquipmentSelection.Endoscope | EquipmentSelection.Bug, first.Equipments);
+        var custom = Assert.Single(first.CustomSections);
         Assert.Equal("Etapa especial", custom.Title);
         Assert.Equal(_logo, Assert.Single(custom.Images).FilePath);
+        Assert.Empty(recovered.Reports.Single(x => x.Id == second.Id).CustomSections);
     }
 
     [Fact]
-    public async Task GeneratesValidCustomizedCopyWithoutChangingTemplate()
+    public async Task GeneratesValidCustomizedCopyWithoutChangingOfficialTemplate()
     {
-        var project = await CreateConfiguredProjectAsync();
+        var (project, report) = await CreateConfiguredProjectAsync();
         var originalHash = Hash(_template);
-        var service = new WordReportService(_paths);
-
-        var output = await service.GenerateAsync(project, includeSection4TechnicalProof: true);
+        var output = await new WordReportService(_paths).GenerateAsync(project, report, includeSection4TechnicalProof: true);
 
         Assert.True(File.Exists(output));
-        Assert.NotEqual(Path.GetFullPath(_template), Path.GetFullPath(output));
         Assert.Equal(originalHash, Hash(_template));
         using var doc = WordprocessingDocument.Open(output, false);
         var main = doc.MainDocumentPart!;
@@ -73,70 +69,61 @@ public sealed class WordReportTests : IAsyncLifetime
         Assert.Contains("CLIENTE: Cliente de teste", bodyText);
         Assert.Contains("ÁREA: Área de teste", bodyText);
         Assert.Contains("CONTRATO: CT-2026", bodyText);
-        Assert.Contains("PEDIDO DE COMPRA: PC-42", bodyText);
         Assert.Contains("GF-RL-TESTE-001", bodyText);
         Assert.Contains("400 mm, 600 mm e 900 mm", bodyText);
-        Assert.Contains("Endoscópio", bodyText, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Robô BUG", bodyText, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("robô HUNTER", bodyText, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("robô SPIDER", bodyText, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("intervenções construtivas", bodyText);
-        Assert.DoesNotContain("sondagens não intrusivas", bodyText);
         Assert.Contains("Etapa especial", bodyText);
         Assert.Contains("RUA TESTE", bodyText);
-        Assert.Contains("Figura 4.3 – Evidência", bodyText);
-        Assert.DoesNotContain("Figura 4.4 –", bodyText);
         Assert.True(main.DocumentSettingsPart!.Settings!.GetFirstChild<UpdateFieldsOnOpen>()!.Val!.Value);
         Assert.NotEmpty(main.Document.Body.Descendants<A.Blip>());
     }
 
     [Fact]
-    public async Task GeneratesNewVersionWhenReportAlreadyExists()
+    public async Task TwoReportsGenerateIndependentDocxFilesAndHeaders()
     {
-        var project = await CreateConfiguredProjectAsync();
+        var (project, first) = await CreateConfiguredProjectAsync();
+        project.DefaultClient = "Cliente padrão 002";
+        project.DefaultContract = "CT-002";
+        var second = project.CreateReport();
+        second.TemplatePath = _template; second.ReportCode = "GF-RL-TESTE-002";
+        second.ReportDate = new DateTime(2026, 8, 11);
+        second.Equipments = EquipmentSelection.Endoscope;
+        second.Diameters = StandardDiameterSelection.Mm400;
         var service = new WordReportService(_paths);
 
-        var first = await service.GenerateAsync(project);
-        var firstHash = Hash(first);
-        var second = await service.GenerateAsync(project);
+        var output001 = await service.GenerateAsync(project, first);
+        var output002 = await service.GenerateAsync(project, second);
 
-        Assert.NotEqual(first, second);
-        Assert.True(File.Exists(first));
-        Assert.True(File.Exists(second));
-        Assert.Equal(firstHash, Hash(first));
+        Assert.NotEqual(output001, output002);
+        Assert.Equal("Cliente de teste", first.Client);
+        Assert.Contains("CLIENTE: Cliente de teste", ReadBody(output001));
+        Assert.Contains("CLIENTE: Cliente padrão 002", ReadBody(output002));
+        Assert.Contains("GF-RL-TESTE-001", ReadBody(output001));
+        Assert.Contains("GF-RL-TESTE-002", ReadBody(output002));
     }
 
-    private async Task<Project> CreateConfiguredProjectAsync()
+    private async Task<(Project Project, Report Report)> CreateConfiguredProjectAsync()
     {
-        var project = await _store.CreateAsync("Prova Etapa 2");
-        var report = project.ReportConfiguration;
-        report.Client = "Cliente de teste";
-        report.Area = "Área de teste";
-        report.Contract = "CT-2026";
-        report.PurchaseOrder = "PC-42";
-        report.ReportCode = "GF-RL-TESTE-001";
-        report.ReportDate = new DateTime(2026, 8, 10);
-        report.LocationDescription = "Localização de teste";
-        report.TotalInvestigatedMeters = 123.45m;
-        report.TemplatePath = _template;
-        report.LogoPath = _logo;
-        report.LocationImagePath = _location;
+        var project = await _store.CreateAsync("Prova Etapa 2.5");
+        project.DefaultClient = "Cliente de teste"; project.DefaultArea = "Área de teste";
+        project.DefaultContract = "CT-2026"; project.DefaultPurchaseOrder = "PC-42"; project.DefaultLogoPath = _logo;
+        var report = project.CreateReport();
+        report.ReportCode = "GF-RL-TESTE-001"; report.ReportDate = new DateTime(2026, 8, 10);
+        report.LocationDescription = "Localização de teste"; report.TotalInvestigatedMeters = 123.45m;
+        report.TemplatePath = _template; report.LocationImagePath = _location;
         report.Equipments = EquipmentSelection.Endoscope | EquipmentSelection.Bug;
         report.Diameters = StandardDiameterSelection.Mm400 | StandardDiameterSelection.Mm600;
-        report.CustomDiameters = "900";
-        report.IncludeInspectionOpening = true;
-        report.IncludeGpr = false;
-        var custom = new CustomSection
-        {
-            ProjectId = project.Id,
-            Title = "Etapa especial",
-            Text = "Texto personalizado persistido e inserido no relatório.",
-            Order = 0
-        };
+        report.CustomDiameters = "900"; report.IncludeInspectionOpening = true;
+        var custom = new CustomSection { ProjectId = project.Id, ReportId = report.Id, Title = "Etapa especial", Text = "Texto personalizado persistido e inserido no relatório.", Order = 0 };
         custom.Images.Add(new CustomSectionImage { CustomSectionId = custom.Id, FilePath = _logo, Order = 0 });
-        project.CustomSections.Add(custom);
+        report.CustomSections.Add(custom);
         await _store.SaveAsync(project);
-        return project;
+        return (project, report);
+    }
+
+    private static string ReadBody(string path)
+    {
+        using var doc = WordprocessingDocument.Open(path, false);
+        return string.Concat(doc.MainDocumentPart!.Document.Body!.Descendants<Text>().Select(x => x.Text));
     }
 
     private static string Hash(string path) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));

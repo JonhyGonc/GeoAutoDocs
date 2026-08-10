@@ -132,6 +132,22 @@ public sealed class ProjectStoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SchemaUsesMigrationCompatibleReportSectionTableName()
+    {
+        var dbPath = new AppDataPaths(_root).DatabasePath;
+        await using var connection = new SqliteConnection($"Data Source={dbPath};Pooling=False");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'ReportSection%'";
+        var tables = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync()) tables.Add(reader.GetString(0));
+
+        Assert.Contains("ReportSection", tables);
+        Assert.DoesNotContain("ReportSections", tables);
+    }
+
+    [Fact]
     public async Task DeletesProjectAndAssociatedData()
     {
         var project = await _store.CreateAsync("Excluir");

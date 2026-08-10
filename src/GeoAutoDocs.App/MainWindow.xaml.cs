@@ -29,6 +29,7 @@ public partial class MainWindow : Window
     private bool _hasPendingChanges;
     private bool _sharedDirty;
     private bool _closingAfterSave;
+    private bool _saveErrorNotified;
 
     public MainWindow(IProjectStore store, WordReportService wordReportService,
         SharedProjectService sharedProjects, LocalLogger logger)
@@ -262,9 +263,18 @@ public partial class MainWindow : Window
             await _store.SaveAsync(_currentProject);
             if (_sharedSession is not null) { await _sharedSession.SaveLocalAsync(); _sharedDirty = true; }
             _hasPendingChanges = false;
+            _saveErrorNotified = false;
             SaveStatus.Text = $"Salvo localmente • {_currentProject.UpdatedAt.ToLocalTime():dd/MM/yyyy HH:mm:ss}";
         }
-        catch (Exception ex) { SaveStatus.Text = "Falha ao salvar"; ShowError("Não foi possível salvar as alterações.", ex); }
+        catch (Exception ex)
+        {
+            SaveStatus.Text = "Falha ao salvar — consulte o log";
+            _logger.Error("Não foi possível salvar as alterações.", ex);
+            if (_saveErrorNotified) return;
+            _saveErrorNotified = true;
+            MessageBox.Show("Não foi possível salvar as alterações. Consulte o log.",
+                "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private async Task CheckpointSharedAsync()
@@ -309,7 +319,8 @@ public partial class MainWindow : Window
         if (_closingAfterSave || (_currentProject is null && !_hasPendingChanges)) return;
         e.Cancel = true;
         if (!await FinalizeCurrentProjectAsync()) return;
-        _closingAfterSave = true; Close();
+        _closingAfterSave = true;
+        _ = Dispatcher.BeginInvoke(Close);
     }
 
     private async void ShareProject_Click(object sender, RoutedEventArgs e)

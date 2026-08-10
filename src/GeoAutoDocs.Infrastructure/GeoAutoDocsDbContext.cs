@@ -26,6 +26,7 @@ public sealed class GeoAutoDocsDbContext(DbContextOptions<GeoAutoDocsDbContext> 
             .HasForeignKey(x => x.ReportId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<Report>().HasMany(x => x.SectionLinks).WithOne()
             .HasForeignKey(x => x.ReportId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<ReportSection>().ToTable("ReportSection");
         modelBuilder.Entity<ReportSection>().HasKey(x => new { x.ReportId, x.SectionId });
         modelBuilder.Entity<ReportSection>().HasOne(x => x.Section).WithMany()
             .HasForeignKey(x => x.SectionId).OnDelete(DeleteBehavior.Cascade);

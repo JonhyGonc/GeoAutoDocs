@@ -82,6 +82,9 @@ public partial class MainWindow : Window
             _sharedSession = null;
             if (project.StorageKind == ProjectStorageKind.Shared && !string.IsNullOrWhiteSpace(project.SharedProjectPath))
                 project = await OpenSharedProjectAsync(project);
+            var templateChanged = _wordReportService.ApplyStandardTemplate(project);
+            if (templateChanged && project.StorageKind == ProjectStorageKind.Local)
+                await _store.SaveAsync(project);
             _currentProject = project;
             LoadProject(project);
             ProjectsView.Visibility = Visibility.Collapsed;
@@ -216,6 +219,7 @@ public partial class MainWindow : Window
         if (_currentProject is null || _sharedSession?.IsReadOnly == true) return;
         ApplyFieldsToModel();
         var created = _currentProject.CreateReport();
+        created.TemplatePath = _wordReportService.DefaultTemplatePath;
         _loadingFields = true;
         ReportsCombo.ItemsSource = _currentProject.Reports.OrderBy(x => x.Order).ToList();
         _currentReport = created;

@@ -4,7 +4,6 @@ using DocumentFormat.OpenXml.Wordprocessing;
 using GeoAutoDocs.Core;
 using GeoAutoDocs.Infrastructure;
 using Xunit;
-using A = DocumentFormat.OpenXml.Drawing;
 
 namespace GeoAutoDocs.Tests;
 
@@ -23,7 +22,7 @@ public sealed class WordReportTests : IAsyncLifetime
         _paths = new AppDataPaths(_root);
         _store = new ProjectStore(_paths);
         await _store.InitializeAsync();
-        _template = Path.Combine(AppContext.BaseDirectory, "Fixtures", "MODELO DE RELATORIO.docx");
+        _template = Path.Combine(AppContext.BaseDirectory, "Templates", "modelo folha.docx");
         _logo = Path.Combine(_root, "logo.png");
         _location = Path.Combine(_root, "localizacao.png");
         await File.WriteAllBytesAsync(_logo, Convert.FromBase64String(TinyPng));
@@ -72,9 +71,41 @@ public sealed class WordReportTests : IAsyncLifetime
         Assert.Contains("GF-RL-TESTE-001", bodyText);
         Assert.Contains("400 mm, 600 mm e 900 mm", bodyText);
         Assert.Contains("Etapa especial", bodyText);
-        Assert.Contains("RUA TESTE", bodyText);
+        Assert.Contains("HISTÓRICO DE ALTERAÇÕES", bodyText);
+        Assert.Contains("TRECHOS, REGISTROS E EVIDÊNCIAS", bodyText);
+        Assert.DoesNotContain("RUA TESTE", bodyText);
+        Assert.True(main.Document.Body.Descendants<SectionProperties>().Count() >= 2);
         Assert.True(main.DocumentSettingsPart!.Settings!.GetFirstChild<UpdateFieldsOnOpen>()!.Val!.Value);
-        Assert.NotEmpty(main.Document.Body.Descendants<A.Blip>());
+        Assert.True(main.ImageParts.Count() >= 2);
+    }
+
+    [Fact]
+    public async Task UsesBundledStandardTemplateWhenNoTemplateWasSelected()
+    {
+        var project = await _store.CreateAsync("Template padrão");
+        var report = project.CreateReport();
+        report.Client = "Cliente padrão";
+        report.Diameters = StandardDiameterSelection.Mm400;
+
+        var service = new WordReportService(_paths);
+        var output = await service.GenerateAsync(project, report);
+
+        Assert.Equal(service.DefaultTemplatePath, report.TemplatePath);
+        Assert.Contains("CLIENTE: Cliente padrão", ReadBody(output));
+        Assert.Contains("HISTÓRICO DE ALTERAÇÕES", ReadBody(output));
+    }
+
+    [Fact]
+    public async Task MigratesLegacyTemplateSelectionToBundledStandard()
+    {
+        var project = await _store.CreateAsync("Migração de template");
+        var report = project.CreateReport();
+        report.TemplatePath = Path.Combine(_root, "MODELO DE RELATORIO.docx");
+        var service = new WordReportService(_paths);
+
+        Assert.True(service.ApplyStandardTemplate(project));
+        Assert.Equal(service.DefaultTemplatePath, report.TemplatePath);
+        Assert.False(service.ApplyStandardTemplate(project));
     }
 
     [Fact]

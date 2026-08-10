@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <ApplicationIcon />
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\GeoAutoDocs.Core\GeoAutoDocs.Core.csproj" />
+    <ProjectReference Include="..\GeoAutoDocs.Infrastructure\GeoAutoDocs.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>
+

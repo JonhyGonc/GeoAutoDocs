@@ -1,0 +1,85 @@
+<Window x:Class="GeoAutoDocs.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="GeoAutoDocs" Height="680" Width="980" MinHeight="560" MinWidth="780"
+        WindowStartupLocation="CenterScreen" Background="#F4F6F7">
+    <Grid>
+        <Grid x:Name="ProjectsView" Margin="38">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <TextBlock Text="PROJETOS" FontSize="28" FontWeight="SemiBold" Foreground="#173C44" />
+            <Button Grid.Row="1" Content="＋ Novo projeto" HorizontalAlignment="Left" Margin="0,22,0,18"
+                    Background="{StaticResource PrimaryBrush}" Foreground="White" Click="NewProject_Click" />
+            <Border Grid.Row="2" Background="White" CornerRadius="8" Padding="10">
+                <ListView x:Name="ProjectsList" BorderThickness="0">
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="10,8" Width="820">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="2*" />
+                                    <ColumnDefinition Width="2*" />
+                                    <ColumnDefinition Width="1.4*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding ReportConfiguration.Client}" Foreground="#66777A" />
+                                </StackPanel>
+                                <TextBlock Grid.Column="1" VerticalAlignment="Center" Foreground="#66777A"
+                                           Text="{Binding UpdatedAt, StringFormat='Modificado em {0:dd/MM/yyyy HH:mm}'}" />
+                                <StackPanel Grid.Column="3" Orientation="Horizontal">
+                                    <Button Content="Abrir" Tag="{Binding Id}" Click="OpenProject_Click" />
+                                    <Button Content="Renomear" Tag="{Binding Id}" Click="RenameProject_Click" />
+                                    <Button Content="Excluir" Tag="{Binding Id}" Click="DeleteProject_Click" Foreground="#9C2731" />
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Border>
+        </Grid>
+
+        <Grid x:Name="EditorView" Visibility="Collapsed" Margin="38">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <DockPanel>
+                <Button Content="← Voltar aos projetos" DockPanel.Dock="Right" Click="Back_Click" />
+                <StackPanel>
+                    <TextBlock Text="PROJETO" FontSize="13" Foreground="#66777A" />
+                    <TextBlock x:Name="ProjectTitle" FontSize="27" FontWeight="SemiBold" Foreground="#173C44" />
+                </StackPanel>
+            </DockPanel>
+            <ScrollViewer Grid.Row="1" Margin="0,22,0,12" VerticalScrollBarVisibility="Auto">
+                <Border Background="White" CornerRadius="8" Padding="28">
+                    <Grid MaxWidth="720" HorizontalAlignment="Left">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="340" />
+                            <ColumnDefinition Width="28" />
+                            <ColumnDefinition Width="340" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <StackPanel><TextBlock Text="Cliente" /><TextBox x:Name="ClientBox" TextChanged="FieldChanged" /></StackPanel>
+                        <StackPanel Grid.Column="2"><TextBlock Text="Área / Localização" /><TextBox x:Name="AreaBox" TextChanged="FieldChanged" /></StackPanel>
+                        <StackPanel Grid.Row="1"><TextBlock Text="Contrato" /><TextBox x:Name="ContractBox" TextChanged="FieldChanged" /></StackPanel>
+                        <StackPanel Grid.Row="1" Grid.Column="2"><TextBlock Text="Pedido de compra" /><TextBox x:Name="PurchaseOrderBox" TextChanged="FieldChanged" /></StackPanel>
+                        <StackPanel Grid.Row="2"><TextBlock Text="Código do relatório" /><TextBox x:Name="ReportCodeBox" TextChanged="FieldChanged" /></StackPanel>
+                        <StackPanel Grid.Row="2" Grid.Column="2"><TextBlock Text="Data" /><DatePicker x:Name="ReportDatePicker" Margin="0,4,0,12" Padding="6" SelectedDateChanged="FieldChanged" /></StackPanel>
+                        <StackPanel Grid.Row="3"><TextBlock Text="Descrição da localização" /><TextBox x:Name="LocationBox" TextChanged="FieldChanged" /></StackPanel>
+                        <StackPanel Grid.Row="3" Grid.Column="2"><TextBlock Text="Metragem total (m)" /><TextBox x:Name="MetersBox" TextChanged="FieldChanged" /></StackPanel>
+                    </Grid>
+                </Border>
+            </ScrollViewer>
+            <TextBlock Grid.Row="2" x:Name="SaveStatus" Text="Salvo automaticamente" Foreground="#4C7161" />
+        </Grid>
+    </Grid>
+</Window>
+

@@ -20,6 +20,10 @@ public sealed class GeoAutoDocsDbContext(DbContextOptions<GeoAutoDocsDbContext> 
             entity.HasMany(x => x.CustomSections).WithOne().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<CustomSection>().HasMany(x => x.Images).WithOne()
+            .HasForeignKey(x => x.CustomSectionId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<CustomSectionImage>().ToTable("CustomSectionImages");
+
         modelBuilder.Entity<Location>().HasMany(x => x.Sections).WithOne()
             .HasForeignKey(x => x.LocationId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<InspectionSection>().HasOne(x => x.VideoReference).WithOne()
@@ -38,4 +42,3 @@ public sealed class GeoAutoDocsDbContext(DbContextOptions<GeoAutoDocsDbContext> 
         modelBuilder.Entity<Occurrence>().Property(x => x.EndMeterage).HasPrecision(12, 3);
     }
 }
-

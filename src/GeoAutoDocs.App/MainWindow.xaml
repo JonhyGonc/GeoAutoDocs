@@ -55,31 +55,100 @@
                     <TextBlock x:Name="ProjectTitle" FontSize="27" FontWeight="SemiBold" Foreground="#173C44" />
                 </StackPanel>
             </DockPanel>
-            <ScrollViewer Grid.Row="1" Margin="0,22,0,12" VerticalScrollBarVisibility="Auto">
-                <Border Background="White" CornerRadius="8" Padding="28">
-                    <Grid MaxWidth="720" HorizontalAlignment="Left">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="340" />
-                            <ColumnDefinition Width="28" />
-                            <ColumnDefinition Width="340" />
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <StackPanel><TextBlock Text="Cliente" /><TextBox x:Name="ClientBox" TextChanged="FieldChanged" /></StackPanel>
-                        <StackPanel Grid.Column="2"><TextBlock Text="Área / Localização" /><TextBox x:Name="AreaBox" TextChanged="FieldChanged" /></StackPanel>
-                        <StackPanel Grid.Row="1"><TextBlock Text="Contrato" /><TextBox x:Name="ContractBox" TextChanged="FieldChanged" /></StackPanel>
-                        <StackPanel Grid.Row="1" Grid.Column="2"><TextBlock Text="Pedido de compra" /><TextBox x:Name="PurchaseOrderBox" TextChanged="FieldChanged" /></StackPanel>
-                        <StackPanel Grid.Row="2"><TextBlock Text="Código do relatório" /><TextBox x:Name="ReportCodeBox" TextChanged="FieldChanged" /></StackPanel>
-                        <StackPanel Grid.Row="2" Grid.Column="2"><TextBlock Text="Data" /><DatePicker x:Name="ReportDatePicker" Margin="0,4,0,12" Padding="6" SelectedDateChanged="FieldChanged" /></StackPanel>
-                        <StackPanel Grid.Row="3"><TextBlock Text="Descrição da localização" /><TextBox x:Name="LocationBox" TextChanged="FieldChanged" /></StackPanel>
-                        <StackPanel Grid.Row="3" Grid.Column="2"><TextBlock Text="Metragem total (m)" /><TextBox x:Name="MetersBox" TextChanged="FieldChanged" /></StackPanel>
-                    </Grid>
-                </Border>
-            </ScrollViewer>
+            <TabControl Grid.Row="1" Margin="0,22,0,12">
+                <TabItem Header="Dados básicos">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <Border Background="White" Padding="28">
+                            <Grid MaxWidth="720" HorizontalAlignment="Left">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="340" /><ColumnDefinition Width="28" /><ColumnDefinition Width="340" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <StackPanel><TextBlock Text="Cliente" /><TextBox x:Name="ClientBox" TextChanged="FieldChanged" /></StackPanel>
+                                <StackPanel Grid.Column="2"><TextBlock Text="Área / Localização" /><TextBox x:Name="AreaBox" TextChanged="FieldChanged" /></StackPanel>
+                                <StackPanel Grid.Row="1"><TextBlock Text="Contrato" /><TextBox x:Name="ContractBox" TextChanged="FieldChanged" /></StackPanel>
+                                <StackPanel Grid.Row="1" Grid.Column="2"><TextBlock Text="Pedido de compra" /><TextBox x:Name="PurchaseOrderBox" TextChanged="FieldChanged" /></StackPanel>
+                                <StackPanel Grid.Row="2"><TextBlock Text="Código do relatório" /><TextBox x:Name="ReportCodeBox" TextChanged="FieldChanged" /></StackPanel>
+                                <StackPanel Grid.Row="2" Grid.Column="2"><TextBlock Text="Data" /><DatePicker x:Name="ReportDatePicker" Margin="0,4,0,12" Padding="6" SelectedDateChanged="FieldChanged" /></StackPanel>
+                                <StackPanel Grid.Row="3"><TextBlock Text="Descrição da localização" /><TextBox x:Name="LocationBox" TextChanged="FieldChanged" /></StackPanel>
+                                <StackPanel Grid.Row="3" Grid.Column="2"><TextBlock Text="Metragem total (m)" /><TextBox x:Name="MetersBox" TextChanged="FieldChanged" /></StackPanel>
+                            </Grid>
+                        </Border>
+                    </ScrollViewer>
+                </TabItem>
+                <TabItem Header="Relatório">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <Border Background="White" Padding="28">
+                            <StackPanel MaxWidth="760" HorizontalAlignment="Left">
+                                <TextBlock Text="Arquivos" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,10" />
+                                <TextBlock Text="Template Word" />
+                                <DockPanel><Button Content="Selecionar" DockPanel.Dock="Right" Click="SelectTemplate_Click" /><TextBox x:Name="TemplateBox" IsReadOnly="True" /></DockPanel>
+                                <TextBlock Text="Logo do cliente" />
+                                <DockPanel><Button Content="Selecionar" DockPanel.Dock="Right" Click="SelectLogo_Click" /><TextBox x:Name="LogoBox" IsReadOnly="True" /></DockPanel>
+                                <TextBlock Text="Imagem de localização (Figura 1.1)" />
+                                <DockPanel><Button Content="Selecionar" DockPanel.Dock="Right" Click="SelectLocationImage_Click" /><TextBox x:Name="LocationImageBox" IsReadOnly="True" /></DockPanel>
+
+                                <TextBlock Text="Equipamentos utilizados" FontSize="18" FontWeight="SemiBold" Margin="0,12,0,8" />
+                                <WrapPanel>
+                                    <CheckBox x:Name="EndoscopeCheck" Content="Endoscópio" Margin="0,5,22,5" Checked="FieldChanged" Unchecked="FieldChanged" />
+                                    <CheckBox x:Name="BugCheck" Content="BUG" Margin="0,5,22,5" Checked="FieldChanged" Unchecked="FieldChanged" />
+                                    <CheckBox x:Name="HunterCheck" Content="HUNTER" Margin="0,5,22,5" Checked="FieldChanged" Unchecked="FieldChanged" />
+                                    <CheckBox x:Name="SpiderCheck" Content="SPIDER" Margin="0,5,22,5" Checked="FieldChanged" Unchecked="FieldChanged" />
+                                    <CheckBox x:Name="TrackerCheck" Content="TRACKER" Margin="0,5,22,5" Checked="FieldChanged" Unchecked="FieldChanged" />
+                                </WrapPanel>
+
+                                <TextBlock Text="Diâmetros filmados" FontSize="18" FontWeight="SemiBold" Margin="0,12,0,8" />
+                                <WrapPanel>
+                                    <CheckBox x:Name="D300Check" Content="300 mm" Margin="0,5,18,5" Checked="FieldChanged" Unchecked="FieldChanged" />
+                                    <CheckBox x:Name="D400Check" Content="400 mm" Margin="0,5,18,5" Checked="FieldChanged" Unchecked="FieldChanged" />
+                                    <CheckBox x:Name="D500Check" Content="500 mm" Margin="0,5,18,5" Checked="FieldChanged" Unchecked="FieldChanged" />
+                                    <CheckBox x:Name="D600Check" Content="600 mm" Margin="0,5,18,5" Checked="FieldChanged" Unchecked="FieldChanged" />
+                                    <CheckBox x:Name="D800Check" Content="800 mm" Margin="0,5,18,5" Checked="FieldChanged" Unchecked="FieldChanged" />
+                                    <CheckBox x:Name="D1000Check" Content="1000 mm" Margin="0,5,18,5" Checked="FieldChanged" Unchecked="FieldChanged" />
+                                    <CheckBox x:Name="D1500Check" Content="1500 mm" Margin="0,5,18,5" Checked="FieldChanged" Unchecked="FieldChanged" />
+                                </WrapPanel>
+                                <TextBlock Text="Outros valores (separe por vírgula)" Margin="0,6,0,0" />
+                                <TextBox x:Name="CustomDiametersBox" Width="300" HorizontalAlignment="Left" TextChanged="FieldChanged" />
+
+                                <TextBlock Text="Módulos opcionais" FontSize="18" FontWeight="SemiBold" Margin="0,8,0,8" />
+                                <CheckBox x:Name="OpeningCheck" Content="Abertura de inspeção" Margin="0,5" Checked="FieldChanged" Unchecked="FieldChanged" />
+                                <CheckBox x:Name="GprCheck" Content="Complemento GPR / Georadar" Margin="0,5" Checked="FieldChanged" Unchecked="FieldChanged" />
+
+                                <DockPanel Margin="0,16,0,6">
+                                    <Button Content="＋ Adicionar etapa personalizada" DockPanel.Dock="Right" Click="AddCustomSection_Click" />
+                                    <TextBlock Text="Etapas personalizadas" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                </DockPanel>
+                                <ItemsControl x:Name="CustomSectionsList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border BorderBrush="#D4DDDF" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,4">
+                                                <DockPanel>
+                                                    <Button Content="Remover" DockPanel.Dock="Right" Tag="{Binding Id}" Click="RemoveCustomSection_Click" />
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                                        <TextBlock Text="{Binding Text}" TextTrimming="CharacterEllipsis" MaxWidth="570" />
+                                                        <TextBlock Text="{Binding Images.Count, StringFormat='Imagens: {0}'}" Foreground="#66777A" />
+                                                    </StackPanel>
+                                                </DockPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <StackPanel Orientation="Horizontal" Margin="0,20,0,8">
+                                    <Button Content="GERAR RELATÓRIO DE TESTE" Background="{StaticResource PrimaryBrush}" Foreground="White" Click="GenerateReport_Click" />
+                                    <Button x:Name="OpenReportButton" Content="ABRIR NO WORD" IsEnabled="False" Click="OpenReport_Click" />
+                                </StackPanel>
+                                <TextBlock x:Name="GeneratedReportText" TextWrapping="Wrap" Foreground="#4C7161" />
+                            </StackPanel>
+                        </Border>
+                    </ScrollViewer>
+                </TabItem>
+            </TabControl>
             <TextBlock Grid.Row="2" x:Name="SaveStatus" Text="Salvo automaticamente" Foreground="#4C7161" />
         </Grid>
     </Grid>
 </Window>
-

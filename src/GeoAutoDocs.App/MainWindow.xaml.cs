@@ -1,17 +1,21 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
 using GeoAutoDocs.Core;
 using GeoAutoDocs.Infrastructure;
+using Microsoft.Win32;
 
 namespace GeoAutoDocs.App;
 
 public partial class MainWindow : Window
 {
     private readonly IProjectStore _store;
+    private readonly WordReportService _wordReportService;
     private readonly LocalLogger _logger;
     private readonly DispatcherTimer _saveTimer;
     private readonly ObservableCollection<Project> _projects = [];
@@ -20,10 +24,11 @@ public partial class MainWindow : Window
     private bool _hasPendingChanges;
     private bool _closingAfterSave;
 
-    public MainWindow(IProjectStore store, LocalLogger logger)
+    public MainWindow(IProjectStore store, WordReportService wordReportService, LocalLogger logger)
     {
         InitializeComponent();
         _store = store;
+        _wordReportService = wordReportService;
         _logger = logger;
         ProjectsList.ItemsSource = _projects;
         _saveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
@@ -107,6 +112,25 @@ public partial class MainWindow : Window
         PurchaseOrderBox.Text = report.PurchaseOrder; ReportCodeBox.Text = report.ReportCode;
         ReportDatePicker.SelectedDate = report.ReportDate; LocationBox.Text = report.LocationDescription;
         MetersBox.Text = report.TotalInvestigatedMeters?.ToString("0.###", CultureInfo.CurrentCulture) ?? "";
+        TemplateBox.Text = report.TemplatePath ?? ""; LogoBox.Text = report.LogoPath ?? "";
+        LocationImageBox.Text = report.LocationImagePath ?? "";
+        EndoscopeCheck.IsChecked = report.Equipments.HasFlag(EquipmentSelection.Endoscope);
+        BugCheck.IsChecked = report.Equipments.HasFlag(EquipmentSelection.Bug);
+        HunterCheck.IsChecked = report.Equipments.HasFlag(EquipmentSelection.Hunter);
+        SpiderCheck.IsChecked = report.Equipments.HasFlag(EquipmentSelection.Spider);
+        TrackerCheck.IsChecked = report.Equipments.HasFlag(EquipmentSelection.Tracker);
+        D300Check.IsChecked = report.Diameters.HasFlag(StandardDiameterSelection.Mm300);
+        D400Check.IsChecked = report.Diameters.HasFlag(StandardDiameterSelection.Mm400);
+        D500Check.IsChecked = report.Diameters.HasFlag(StandardDiameterSelection.Mm500);
+        D600Check.IsChecked = report.Diameters.HasFlag(StandardDiameterSelection.Mm600);
+        D800Check.IsChecked = report.Diameters.HasFlag(StandardDiameterSelection.Mm800);
+        D1000Check.IsChecked = report.Diameters.HasFlag(StandardDiameterSelection.Mm1000);
+        D1500Check.IsChecked = report.Diameters.HasFlag(StandardDiameterSelection.Mm1500);
+        CustomDiametersBox.Text = report.CustomDiameters;
+        OpeningCheck.IsChecked = report.IncludeInspectionOpening; GprCheck.IsChecked = report.IncludeGpr;
+        CustomSectionsList.ItemsSource = project.CustomSections;
+        GeneratedReportText.Text = report.GeneratedReportPath ?? "";
+        OpenReportButton.IsEnabled = File.Exists(report.GeneratedReportPath);
         SaveStatus.Text = $"Salvo automaticamente • {project.UpdatedAt.ToLocalTime():dd/MM/yyyy HH:mm}";
         _hasPendingChanges = false;
         _loadingFields = false;
@@ -134,6 +158,25 @@ public partial class MainWindow : Window
             report.LocationDescription = LocationBox.Text.Trim();
             report.TotalInvestigatedMeters = decimal.TryParse(MetersBox.Text, NumberStyles.Number,
                 CultureInfo.CurrentCulture, out var meters) ? meters : null;
+            report.TemplatePath = EmptyToNull(TemplateBox.Text); report.LogoPath = EmptyToNull(LogoBox.Text);
+            report.LocationImagePath = EmptyToNull(LocationImageBox.Text);
+            report.Equipments = EquipmentSelection.None
+                | (EndoscopeCheck.IsChecked == true ? EquipmentSelection.Endoscope : 0)
+                | (BugCheck.IsChecked == true ? EquipmentSelection.Bug : 0)
+                | (HunterCheck.IsChecked == true ? EquipmentSelection.Hunter : 0)
+                | (SpiderCheck.IsChecked == true ? EquipmentSelection.Spider : 0)
+                | (TrackerCheck.IsChecked == true ? EquipmentSelection.Tracker : 0);
+            report.Diameters = StandardDiameterSelection.None
+                | (D300Check.IsChecked == true ? StandardDiameterSelection.Mm300 : 0)
+                | (D400Check.IsChecked == true ? StandardDiameterSelection.Mm400 : 0)
+                | (D500Check.IsChecked == true ? StandardDiameterSelection.Mm500 : 0)
+                | (D600Check.IsChecked == true ? StandardDiameterSelection.Mm600 : 0)
+                | (D800Check.IsChecked == true ? StandardDiameterSelection.Mm800 : 0)
+                | (D1000Check.IsChecked == true ? StandardDiameterSelection.Mm1000 : 0)
+                | (D1500Check.IsChecked == true ? StandardDiameterSelection.Mm1500 : 0);
+            report.CustomDiameters = CustomDiametersBox.Text.Trim();
+            report.IncludeInspectionOpening = OpeningCheck.IsChecked == true;
+            report.IncludeGpr = GprCheck.IsChecked == true;
             await _store.SaveAsync(_currentProject);
             _hasPendingChanges = false;
             SaveStatus.Text = $"Salvo automaticamente • {_currentProject.UpdatedAt.ToLocalTime():dd/MM/yyyy HH:mm:ss}";
@@ -160,5 +203,91 @@ public partial class MainWindow : Window
         _logger.Error(message, ex);
         MessageBox.Show(message, "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
     }
-}
 
+    private void SelectTemplate_Click(object sender, RoutedEventArgs e) => SelectFile(TemplateBox, "Documento Word (*.docx)|*.docx");
+    private void SelectLogo_Click(object sender, RoutedEventArgs e) => SelectFile(LogoBox, "Imagens (*.png;*.jpg;*.jpeg)|*.png;*.jpg;*.jpeg");
+    private void SelectLocationImage_Click(object sender, RoutedEventArgs e) => SelectFile(LocationImageBox, "Imagens (*.png;*.jpg;*.jpeg)|*.png;*.jpg;*.jpeg");
+
+    private void SelectFile(TextBox target, string filter)
+    {
+        var dialog = new OpenFileDialog { Filter = filter, CheckFileExists = true };
+        if (dialog.ShowDialog(this) != true) return;
+        target.Text = dialog.FileName;
+        ScheduleSave();
+    }
+
+    private void AddCustomSection_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null) return;
+        var dialog = new CustomSectionWindow { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        var section = new CustomSection
+        {
+            ProjectId = _currentProject.Id,
+            Title = EmptyToNull(dialog.SectionTitle),
+            Text = dialog.SectionText,
+            Order = _currentProject.CustomSections.Count
+        };
+        section.Images.AddRange(dialog.ImagePaths.Select((path, index) => new CustomSectionImage
+        {
+            CustomSectionId = section.Id,
+            FilePath = path,
+            Order = index
+        }));
+        _currentProject.CustomSections.Add(section);
+        CustomSectionsList.Items.Refresh();
+        ScheduleSave();
+    }
+
+    private void RemoveCustomSection_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null || ((Button)sender).Tag is not Guid id) return;
+        var section = _currentProject.CustomSections.SingleOrDefault(x => x.Id == id);
+        if (section is null) return;
+        _currentProject.CustomSections.Remove(section);
+        CustomSectionsList.Items.Refresh();
+        ScheduleSave();
+    }
+
+    private async void GenerateReport_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null) return;
+        await SavePendingAsync();
+        try
+        {
+            GeneratedReportText.Text = "Gerando relatório...";
+            var path = await _wordReportService.GenerateAsync(_currentProject, includeSection4TechnicalProof: true);
+            await _store.SaveAsync(_currentProject);
+            GeneratedReportText.Text = path;
+            OpenReportButton.IsEnabled = true;
+            MessageBox.Show("Relatório de teste gerado com sucesso.", "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            GeneratedReportText.Text = "Falha ao gerar relatório.";
+            ShowError(ex.Message, ex);
+        }
+    }
+
+    private void OpenReport_Click(object sender, RoutedEventArgs e)
+    {
+        var path = _currentProject?.ReportConfiguration.GeneratedReportPath;
+        if (!File.Exists(path))
+        {
+            MessageBox.Show("O relatório gerado não foi encontrado.", "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        Process.Start(new ProcessStartInfo(path!) { UseShellExecute = true });
+    }
+
+    private void ScheduleSave()
+    {
+        if (_loadingFields || _currentProject is null) return;
+        _hasPendingChanges = true;
+        SaveStatus.Text = "Alterações pendentes...";
+        _saveTimer.Stop();
+        _saveTimer.Start();
+    }
+
+    private static string? EmptyToNull(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+}

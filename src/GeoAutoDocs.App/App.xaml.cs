@@ -22,7 +22,7 @@ public partial class App : Application
         {
             var store = new ProjectStore(paths);
             await store.InitializeAsync();
-            new MainWindow(store, _logger).Show();
+            new MainWindow(store, new WordReportService(paths), _logger).Show();
         }
         catch (Exception ex)
         {
@@ -41,4 +41,3 @@ public partial class App : Application
         e.Handled = true;
     }
 }
-

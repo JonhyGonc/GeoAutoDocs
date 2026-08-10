@@ -12,6 +12,6 @@
     <ProjectReference Include="..\GeoAutoDocs.Infrastructure\GeoAutoDocs.Infrastructure.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="..\..\Templates\modelo folha.docx" Link="Templates\modelo folha.docx" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\MODELO DE RELATORIO.docx" Link="Templates\MODELO DE RELATORIO.docx" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

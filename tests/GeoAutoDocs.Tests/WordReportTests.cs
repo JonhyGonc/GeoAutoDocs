@@ -74,7 +74,10 @@ public sealed class WordReportTests : IAsyncLifetime
         Assert.Contains("HISTÓRICO DE ALTERAÇÕES", bodyText);
         Assert.Contains("TRECHOS, REGISTROS E EVIDÊNCIAS", bodyText);
         Assert.DoesNotContain("RUA TESTE", bodyText);
-        Assert.True(main.Document.Body.Descendants<SectionProperties>().Count() >= 2);
+        Assert.Single(main.Document.Body.Descendants<SectionProperties>());
+        var contentCell = main.Document.Body.Elements<Table>().First()
+            .Elements<TableRow>().Last().Elements<TableCell>().First();
+        Assert.Contains("1. IDENTIFICAÇÃO", string.Concat(contentCell.Descendants<Text>().Select(x => x.Text)));
         Assert.True(main.DocumentSettingsPart!.Settings!.GetFirstChild<UpdateFieldsOnOpen>()!.Val!.Value);
         Assert.True(main.ImageParts.Count() >= 2);
     }

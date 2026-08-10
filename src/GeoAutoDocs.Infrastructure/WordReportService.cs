@@ -145,15 +145,11 @@ public sealed class WordReportService
         string diameters, bool includeSection4TechnicalProof)
     {
         _ = includeSection4TechnicalProof;
-        var sectionProperties = StartReportSection(body);
+        var contentCell = PrepareContentCell(body);
 
-        Add(body, sectionProperties, CreateHeading("RELATÓRIO DE INSPEÇÃO", 30, "002B55", true, 0, 90));
-        Add(body, sectionProperties, CreateParagraph(project.Name, true, 22, "595959", JustificationValues.Center, 0, 180));
-        if (!string.IsNullOrWhiteSpace(report.ReportCode))
-            Add(body, sectionProperties, CreateParagraph(report.ReportCode, false, 18, "7F7F7F", JustificationValues.Center, 0, 260));
-
-        Add(body, sectionProperties, CreateHeading("1. IDENTIFICAÇÃO", 24, "002B55", true, 140, 80));
-        Add(body, sectionProperties, CreateInfoTable([
+        Add(contentCell, CreateHeading("1. IDENTIFICAÇÃO", 20, "595959", true, 60, 50));
+        Add(contentCell, CreateInfoTable([
+            ("Projeto", project.Name),
             ("Relatório", report.Name),
             ("Cliente", report.Client),
             ("CNPJ", report.Cnpj),
@@ -167,42 +163,42 @@ public sealed class WordReportService
             ("Diâmetros", diameters)
         ]));
 
-        Add(body, sectionProperties, CreateHeading("2. OBJETO E ESCOPO", 24, "002B55", true, 220, 80));
+        Add(contentCell, CreateHeading("2. OBJETO E ESCOPO", 20, "595959", true, 120, 50));
         var location = string.IsNullOrWhiteSpace(report.LocationDescription) ? "a localização cadastrada" : report.LocationDescription.Trim();
-        Add(body, sectionProperties, CreateParagraph(
+        Add(contentCell, CreateParagraph(
             $"Este relatório reúne as informações registradas para a inspeção em {location}, abrangendo {FormatMeters(report.TotalInvestigatedMeters)} metros investigados e redes com diâmetros de {diameters}.",
-            false, 20, "333333", JustificationValues.Both, 0, 100));
+            false, 18, "595959", JustificationValues.Both, 0, 70));
         if (report.IncludeInspectionOpening)
-            Add(body, sectionProperties, CreateParagraph("Escopo complementar registrado: abertura de inspeção.", false, 20, "333333", JustificationValues.Left, 0, 70));
+            Add(contentCell, CreateParagraph("Escopo complementar registrado: abertura de inspeção.", false, 18, "595959", JustificationValues.Left, 0, 50));
         if (report.IncludeGpr)
-            Add(body, sectionProperties, CreateParagraph("Escopo complementar registrado: levantamento com GPR.", false, 20, "333333", JustificationValues.Left, 0, 70));
+            Add(contentCell, CreateParagraph("Escopo complementar registrado: levantamento com GPR.", false, 18, "595959", JustificationValues.Left, 0, 50));
 
         if (IsEmbeddableImage(report.LocationImagePath))
         {
-            Add(body, sectionProperties, CreateImageParagraph(mainPart, report.LocationImagePath!, 6.7, 4.6));
-            Add(body, sectionProperties, CreateCaption("Localização da área inspecionada."));
+            Add(contentCell, CreateImageParagraph(mainPart, report.LocationImagePath!, 6.35, 4.2));
+            Add(contentCell, CreateCaption("Localização da área inspecionada."));
         }
 
-        Add(body, sectionProperties, CreateHeading("3. EQUIPAMENTOS E PARÂMETROS", 24, "002B55", true, 220, 80));
-        Add(body, sectionProperties, CreateInfoTable([
+        Add(contentCell, CreateHeading("3. EQUIPAMENTOS E PARÂMETROS", 20, "595959", true, 120, 50));
+        Add(contentCell, CreateInfoTable([
             ("Equipamentos selecionados", FormatEquipment(report.Equipments)),
             ("Diâmetros", diameters),
             ("Extensão investigada", $"{FormatMeters(report.TotalInvestigatedMeters)} m")
         ]));
 
-        Add(body, sectionProperties, CreateHeading("4. TRECHOS, REGISTROS E EVIDÊNCIAS", 24, "002B55", true, 220, 80));
+        Add(contentCell, CreateHeading("4. TRECHOS, REGISTROS E EVIDÊNCIAS", 20, "595959", true, 120, 50));
         var sections = report.Sections;
         if (sections.Count == 0)
         {
-            Add(body, sectionProperties, CreateParagraph("Nenhum trecho de inspeção foi vinculado a este relatório.", false, 20, "595959", JustificationValues.Left, 0, 100));
+            Add(contentCell, CreateParagraph("Nenhum trecho de inspeção foi vinculado a este relatório.", false, 18, "595959", JustificationValues.Left, 0, 70));
         }
         else
         {
             var sectionNumber = 1;
             foreach (var inspection in sections)
             {
-                Add(body, sectionProperties, CreateHeading($"4.{sectionNumber} {inspection.Name}", 22, "595959", true, 160, 60));
-                Add(body, sectionProperties, CreateInfoTable([
+                Add(contentCell, CreateHeading($"4.{sectionNumber} {inspection.Name}", 19, "595959", true, 90, 40));
+                Add(contentCell, CreateInfoTable([
                     ("Referência", inspection.Reference ?? ""),
                     ("Diâmetro", inspection.Diameter is null ? "" : $"{FormatMeters(inspection.Diameter)} mm"),
                     ("Extensão", inspection.InvestigatedMeters is null ? "" : $"{FormatMeters(inspection.InvestigatedMeters)} m")
@@ -211,18 +207,18 @@ public sealed class WordReportService
                 foreach (var video in inspection.VideoReferences.OrderBy(x => x.Order))
                 {
                     var description = string.IsNullOrWhiteSpace(video.Description) ? "" : $" — {video.Description.Trim()}";
-                    Add(body, sectionProperties, CreateListParagraph(
+                    Add(contentCell, CreateListParagraph(
                         $"Vídeo: {video.DisplayName}{description} | Referência: {video.FilePath}"));
                 }
 
                 foreach (var occurrence in inspection.Occurrences.OrderBy(x => x.Order))
                 {
-                    Add(body, sectionProperties, CreateListParagraph(FormatOccurrence(occurrence)));
+                    Add(contentCell, CreateListParagraph(FormatOccurrence(occurrence)));
                     foreach (var evidence in occurrence.Evidence.OrderBy(x => x.Order))
                     {
                         if (!IsEmbeddableImage(evidence.FilePath)) continue;
-                        Add(body, sectionProperties, CreateImageParagraph(mainPart, evidence.FilePath, 6.25, 4.1));
-                        Add(body, sectionProperties, CreateCaption(
+                        Add(contentCell, CreateImageParagraph(mainPart, evidence.FilePath, 6.1, 4.0));
+                        Add(contentCell, CreateCaption(
                             string.IsNullOrWhiteSpace(evidence.Caption) ? "Evidência da ocorrência." : evidence.Caption));
                     }
                 }
@@ -232,19 +228,19 @@ public sealed class WordReportService
 
         if (report.CustomSections.Count > 0)
         {
-            Add(body, sectionProperties, CreateHeading("5. CONTEÚDO COMPLEMENTAR", 24, "002B55", true, 240, 80));
+            Add(contentCell, CreateHeading("5. CONTEÚDO COMPLEMENTAR", 20, "595959", true, 130, 50));
             var customNumber = 1;
             foreach (var custom in report.CustomSections.OrderBy(x => x.Order))
             {
                 if (!string.IsNullOrWhiteSpace(custom.Title))
-                    Add(body, sectionProperties, CreateHeading($"5.{customNumber} {custom.Title.Trim()}", 22, "595959", true, 150, 60));
+                    Add(contentCell, CreateHeading($"5.{customNumber} {custom.Title.Trim()}", 19, "595959", true, 90, 40));
                 foreach (var line in custom.Text.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                    Add(body, sectionProperties, CreateParagraph(line, false, 20, "333333", JustificationValues.Both, 0, 90));
+                    Add(contentCell, CreateParagraph(line, false, 18, "595959", JustificationValues.Both, 0, 60));
                 foreach (var image in custom.Images.OrderBy(x => x.Order))
                 {
                     if (!IsEmbeddableImage(image.FilePath)) continue;
-                    Add(body, sectionProperties, CreateImageParagraph(mainPart, image.FilePath, 6.25, 4.1));
-                    Add(body, sectionProperties, CreateCaption(
+                    Add(contentCell, CreateImageParagraph(mainPart, image.FilePath, 6.1, 4.0));
+                    Add(contentCell, CreateCaption(
                         string.IsNullOrWhiteSpace(custom.Title) ? "Imagem complementar." : $"Imagem complementar — {custom.Title.Trim()}."));
                 }
                 customNumber++;
@@ -252,36 +248,37 @@ public sealed class WordReportService
         }
     }
 
-    private static SectionProperties StartReportSection(Body body)
+    private static TableCell PrepareContentCell(Body body)
     {
-        var finalSection = body.Elements<SectionProperties>().LastOrDefault();
-        if (finalSection is null)
+        var table = body.Elements<Table>().FirstOrDefault()
+            ?? throw new InvalidDataException("A tabela principal do modelo padrão não foi encontrada.");
+        var templateRow = table.Elements<TableRow>().LastOrDefault()
+            ?? throw new InvalidDataException("A área de conteúdo do modelo padrão não foi encontrada.");
+        var row = (TableRow)templateRow.CloneNode(true);
+        table.AppendChild(row);
+        var cell = row.Elements<TableCell>().FirstOrDefault()
+            ?? throw new InvalidDataException("A célula de conteúdo do modelo padrão não foi encontrada.");
+
+        var rowProperties = row.GetFirstChild<TableRowProperties>() ?? row.PrependChild(new TableRowProperties());
+        var rowHeight = rowProperties.GetFirstChild<TableRowHeight>();
+        if (rowHeight is null)
+            rowProperties.AppendChild(new TableRowHeight { Val = 6200U, HeightType = HeightRuleValues.AtLeast });
+        else
         {
-            finalSection = new SectionProperties(
-                new PageSize { Width = 11907U, Height = 16840U },
-                new PageMargin { Top = 2520, Right = 720U, Bottom = 900, Left = 720U, Header = 142U, Footer = 164U });
-            body.AppendChild(finalSection);
+            rowHeight.Val = 6200U;
+            rowHeight.HeightType = HeightRuleValues.AtLeast;
         }
 
-        var coverSection = (SectionProperties)finalSection.CloneNode(true);
-        var coverType = coverSection.GetFirstChild<SectionType>();
-        if (coverType is null) coverSection.PrependChild(new SectionType { Val = SectionMarkValues.NextPage });
-        else coverType.Val = SectionMarkValues.NextPage;
-        body.InsertBefore(new Paragraph(new ParagraphProperties(coverSection)), finalSection);
-
-        var margin = finalSection.GetFirstChild<PageMargin>();
-        if (margin is null)
-        {
-            margin = new PageMargin();
-            finalSection.AppendChild(margin);
-        }
-        margin.Top = 2520;
-        margin.Bottom = 900;
-        return finalSection;
+        foreach (var child in cell.ChildElements.Where(x => x is not TableCellProperties).ToList()) child.Remove();
+        cell.AppendChild(new Paragraph());
+        return cell;
     }
 
-    private static void Add(Body body, SectionProperties finalSection, OpenXmlElement element) =>
-        body.InsertBefore(element, finalSection);
+    private static void Add(TableCell cell, OpenXmlElement element)
+    {
+        var trailingParagraph = cell.Elements<Paragraph>().Last();
+        cell.InsertBefore(element, trailingParagraph);
+    }
 
     private static Paragraph CreateHeading(string text, int halfPoints, string color, bool bold, int before, int after)
     {
@@ -301,7 +298,7 @@ public sealed class WordReportService
             {
                 Before = before.ToString(CultureInfo.InvariantCulture),
                 After = after.ToString(CultureInfo.InvariantCulture),
-                Line = "276",
+                Line = "240",
                 LineRule = LineSpacingRuleValues.Auto
             });
         return new Paragraph(properties, new Run(CreateRunProperties(bold, halfPoints, color),
@@ -310,14 +307,14 @@ public sealed class WordReportService
 
     private static Paragraph CreateListParagraph(string text)
     {
-        var paragraph = CreateParagraph($"- {text}", false, 19, "333333", JustificationValues.Left, 0, 60);
+        var paragraph = CreateParagraph($"- {text}", false, 18, "595959", JustificationValues.Left, 0, 45);
         paragraph.ParagraphProperties!.Indentation = new Indentation { Left = "360", Hanging = "180" };
         return paragraph;
     }
 
     private static Paragraph CreateCaption(string text)
     {
-        var paragraph = CreateParagraph(text, false, 17, "7F7F7F", JustificationValues.Center, 0, 130);
+        var paragraph = CreateParagraph(text, false, 16, "7F7F7F", JustificationValues.Center, 0, 90);
         paragraph.Descendants<RunProperties>().First().Italic = new Italic();
         return paragraph;
     }
@@ -325,25 +322,25 @@ public sealed class WordReportService
     private static Table CreateInfoTable(IEnumerable<(string Label, string Value)> items)
     {
         var table = new Table(new TableProperties(
-            new TableWidth { Width = "10400", Type = TableWidthUnitValues.Dxa },
+            new TableWidth { Width = "10250", Type = TableWidthUnitValues.Dxa },
             new TableBorders(
-                new TopBorder { Val = BorderValues.Single, Size = 4U, Color = "B7B7B7" },
-                new LeftBorder { Val = BorderValues.Single, Size = 4U, Color = "B7B7B7" },
-                new BottomBorder { Val = BorderValues.Single, Size = 4U, Color = "B7B7B7" },
-                new RightBorder { Val = BorderValues.Single, Size = 4U, Color = "B7B7B7" },
-                new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4U, Color = "D9D9D9" },
-                new InsideVerticalBorder { Val = BorderValues.Single, Size = 4U, Color = "D9D9D9" })));
+                new TopBorder { Val = BorderValues.Single, Size = 6U, Color = "595959" },
+                new LeftBorder { Val = BorderValues.Single, Size = 6U, Color = "595959" },
+                new BottomBorder { Val = BorderValues.Single, Size = 6U, Color = "595959" },
+                new RightBorder { Val = BorderValues.Single, Size = 6U, Color = "595959" },
+                new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4U, Color = "7F7F7F" },
+                new InsideVerticalBorder { Val = BorderValues.Single, Size = 4U, Color = "7F7F7F" })));
 
         foreach (var (label, value) in items.Where(x => !string.IsNullOrWhiteSpace(x.Value)))
         {
             var labelCell = new TableCell(
                 new TableCellProperties(
-                    new TableCellWidth { Width = "2700", Type = TableWidthUnitValues.Dxa },
-                    new Shading { Fill = "EAF0F5", Val = ShadingPatternValues.Clear }),
-                CreateParagraph(label, true, 18, "002B55", JustificationValues.Left, 0, 35));
+                    new TableCellWidth { Width = "2600", Type = TableWidthUnitValues.Dxa },
+                    new Shading { Fill = "F2F2F2", Val = ShadingPatternValues.Clear }),
+                CreateParagraph(label, true, 17, "595959", JustificationValues.Left, 0, 30));
             var valueCell = new TableCell(
-                new TableCellProperties(new TableCellWidth { Width = "7700", Type = TableWidthUnitValues.Dxa }),
-                CreateParagraph(value, false, 18, "333333", JustificationValues.Left, 0, 35));
+                new TableCellProperties(new TableCellWidth { Width = "7650", Type = TableWidthUnitValues.Dxa }),
+                CreateParagraph(value, false, 17, "595959", JustificationValues.Left, 0, 30));
             table.AppendChild(new TableRow(labelCell, valueCell));
         }
         return table;

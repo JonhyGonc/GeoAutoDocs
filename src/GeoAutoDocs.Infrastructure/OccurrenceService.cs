@@ -7,7 +7,7 @@ public sealed class OccurrenceService(AppDataPaths paths, LocalLogger logger)
     private static readonly HashSet<string> SupportedImageExtensions =
         new(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg" };
 
-    public Occurrence CreateDraft(InspectionSection section, Occurrence? source = null)
+    public Occurrence CreateDraft(InspectionSection section, Occurrence? source = null, bool duplicate = false)
     {
         if (source is null)
             return new Occurrence
@@ -17,28 +17,39 @@ public sealed class OccurrenceService(AppDataPaths paths, LocalLogger logger)
                 Order = section.Occurrences.Count == 0 ? 0 : section.Occurrences.Max(x => x.Order) + 1
             };
 
-        return new Occurrence
+        var draft = new Occurrence
         {
-            Id = source.Id, InspectionSectionId = source.InspectionSectionId,
-            VideoReferenceId = source.VideoReferenceId, VideoTimestamp = source.VideoTimestamp,
-            LocationMode = source.LocationMode, Meterage = source.Meterage, EndMeterage = source.EndMeterage,
+            Id = duplicate ? Guid.NewGuid() : source.Id, InspectionSectionId = source.InspectionSectionId,
+            VideoReferenceId = duplicate ? null : source.VideoReferenceId,
+            VideoTimestamp = duplicate ? null : source.VideoTimestamp,
+            LocationMode = source.LocationMode,
+            Meterage = duplicate ? null : source.Meterage, EndMeterage = duplicate ? null : source.EndMeterage,
             ReferencePoint = source.ReferencePoint, Position = source.Position, Notes = source.Notes,
-            CustomGeneratedText = source.CustomGeneratedText, GeneratedDescription = source.GeneratedDescription,
-            ManualDescriptionOverride = source.ManualDescriptionOverride, CreatedAt = source.CreatedAt,
-            UpdatedAt = source.UpdatedAt, Order = source.Order,
+            CustomGeneratedText = duplicate ? null : source.CustomGeneratedText,
+            GeneratedDescription = duplicate ? string.Empty : source.GeneratedDescription,
+            ManualDescriptionOverride = duplicate ? null : source.ManualDescriptionOverride,
+            CreatedAt = duplicate ? DateTime.UtcNow : source.CreatedAt,
+            UpdatedAt = DateTime.UtcNow,
+            Order = duplicate ? (section.Occurrences.Count == 0 ? 0 : section.Occurrences.Max(x => x.Order) + 1) : source.Order,
             Anomalies = source.Anomalies.OrderBy(x => x.Order).Select(x => new OccurrenceAnomaly
             {
-                OccurrenceId = source.Id, AnomalyTypeId = x.AnomalyTypeId, Position = x.Position,
+                OccurrenceId = duplicate ? Guid.Empty : source.Id, AnomalyTypeId = x.AnomalyTypeId,
+                Position = x.Position, Orientation = x.Orientation,
+                ApproximateExtension = x.ApproximateExtension, Dimension = x.Dimension,
+                Condition = x.Condition, InfiltrationCondition = x.InfiltrationCondition,
+                EstimatedPercentage = x.EstimatedPercentage, Notes = x.Notes,
                 CustomText = x.CustomText, Order = x.Order, AnomalyType = x.AnomalyType
             }).ToList(),
-            Evidence = source.Evidence.OrderBy(x => x.Order).Select(x => new Evidence
+            Evidence = duplicate ? [] : source.Evidence.OrderBy(x => x.Order).Select(x => new Evidence
             {
                 Id = x.Id, OccurrenceId = source.Id, CaptureId = x.CaptureId, SourceType = x.SourceType,
                 VideoReferenceId = x.VideoReferenceId, FilePath = x.FilePath,
                 VideoTimestamp = x.VideoTimestamp, Order = x.Order, Caption = x.Caption,
-                ManagedByGeoAutoDocs = x.ManagedByGeoAutoDocs, SharedFilePath = x.SharedFilePath
+                IsPrimary = x.IsPrimary, ManagedByGeoAutoDocs = x.ManagedByGeoAutoDocs, SharedFilePath = x.SharedFilePath
             }).ToList()
         };
+        foreach (var item in draft.Anomalies) item.OccurrenceId = draft.Id;
+        return draft;
     }
 
     public async Task<Occurrence> SaveAsync(Project project, InspectionSection section, Occurrence draft,
@@ -46,7 +57,7 @@ public sealed class OccurrenceService(AppDataPaths paths, LocalLogger logger)
     {
         EnsureWritable(isReadOnly);
         if (draft.InspectionSectionId != section.Id)
-            throw new InvalidOperationException("A ocorrência não pertence ao trecho selecionado.");
+            throw new InvalidOperationException("A anomalia não pertence ao trecho selecionado.");
 
         NormalizeLocation(draft);
         NormalizeChildren(draft);
@@ -64,7 +75,7 @@ public sealed class OccurrenceService(AppDataPaths paths, LocalLogger logger)
         if (existingIndex >= 0) section.Occurrences[existingIndex] = draft;
         else section.Occurrences.Add(draft);
         RefreshCaptureStatuses(project);
-        logger.Info($"Ocorrência {draft.Id} salva no trecho {section.Id} com {draft.Anomalies.Count} anomalia(s) e {draft.Evidence.Count} evidência(s).");
+        logger.Info($"Anomalia {draft.Id} salva no trecho {section.Id} com {draft.Anomalies.Count} tipo(s) e {draft.Evidence.Count} evidência(s).");
         return draft;
     }
 
@@ -73,7 +84,7 @@ public sealed class OccurrenceService(AppDataPaths paths, LocalLogger logger)
         EnsureWritable(isReadOnly);
         if (!section.Occurrences.Remove(occurrence)) return;
         RefreshCaptureStatuses(project);
-        logger.Info($"Ocorrência {occurrence.Id} excluída do trecho {section.Id}.");
+        logger.Info($"Anomalia {occurrence.Id} excluída do trecho {section.Id}.");
     }
 
     public static Evidence FromCapture(Capture capture) => new()
@@ -112,11 +123,11 @@ public sealed class OccurrenceService(AppDataPaths paths, LocalLogger logger)
             if (evidence.CaptureId is Guid captureId)
             {
                 if (assignedElsewhere.Contains(captureId))
-                    throw new InvalidOperationException("Uma das capturas já pertence a outra ocorrência.");
+                    throw new InvalidOperationException("Uma das capturas já pertence a outra anomalia.");
                 var capture = project.Captures.SingleOrDefault(x => x.Id == captureId)
                     ?? throw new InvalidOperationException("Captura de evidência não encontrada no projeto.");
                 if (capture.SectionId != section.Id)
-                    throw new InvalidOperationException("A evidência deve pertencer ao mesmo trecho da ocorrência.");
+                    throw new InvalidOperationException("A evidência deve pertencer ao mesmo trecho da anomalia.");
                 evidence.SourceType = EvidenceSourceType.VideoCapture;
                 evidence.FilePath = capture.FilePath;
                 evidence.VideoReferenceId = capture.VideoReferenceId;
@@ -162,11 +173,22 @@ public sealed class OccurrenceService(AppDataPaths paths, LocalLogger logger)
             occurrence.Anomalies[i].OccurrenceId = occurrence.Id;
             occurrence.Anomalies[i].Order = i;
             occurrence.Anomalies[i].CustomText = EmptyToNull(occurrence.Anomalies[i].CustomText);
+            occurrence.Anomalies[i].Dimension = EmptyToNull(occurrence.Anomalies[i].Dimension);
+            occurrence.Anomalies[i].Notes = EmptyToNull(occurrence.Anomalies[i].Notes);
         }
         for (var i = 0; i < occurrence.Evidence.Count; i++)
         {
             occurrence.Evidence[i].OccurrenceId = occurrence.Id;
             occurrence.Evidence[i].Order = i;
+        }
+        if (occurrence.Evidence.Count > 0 && occurrence.Evidence.All(x => !x.IsPrimary))
+            occurrence.Evidence[0].IsPrimary = true;
+        var primaryFound = false;
+        foreach (var evidence in occurrence.Evidence)
+        {
+            if (!evidence.IsPrimary) continue;
+            if (!primaryFound) primaryFound = true;
+            else evidence.IsPrimary = false;
         }
     }
 

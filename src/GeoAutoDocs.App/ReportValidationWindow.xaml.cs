@@ -9,7 +9,7 @@ public partial class ReportValidationWindow : Window
     {
         InitializeComponent();
         SummaryText.Text = $"✓ {result.SelectedSections} trecho(s) selecionado(s)\n" +
-                           $"✓ {result.Occurrences} ocorrência(s)\n" +
+                           $"✓ {result.Occurrences} anomalia(s)\n" +
                            $"✓ {result.Evidences} evidência(s)";
         ErrorsPanel.Visibility = result.Errors.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         WarningsPanel.Visibility = result.Warnings.Count == 0 ? Visibility.Collapsed : Visibility.Visible;

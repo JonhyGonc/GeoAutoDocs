@@ -191,7 +191,22 @@ public enum OccurrenceLocationMode
 
 public enum AnomalyPosition
 {
-    NotReported, UpperGenerator, LowerGenerator, LeftSide, RightSide, Circumferential, NotApplicable
+    NotReported = 0, UpperGenerator = 1, LowerGenerator = 2, LeftSide = 3, RightSide = 4,
+    Circumferential = 5, NotApplicable = 6, UpperLeft = 7, UpperRight = 8,
+    LowerLeft = 9, LowerRight = 10, PipeBottom = 11, PipeWall = 12, Joint = 13
+}
+
+public enum AnomalyOrientation
+{
+    NotReported = 0, Longitudinal = 1, Transverse = 2, Diagonal = 3,
+    Circumferential = 4, Irregular = 5
+}
+
+public enum AnomalyCondition { NotClassified = 0, Light = 1, Moderate = 2, Accentuated = 3 }
+
+public enum InfiltrationCondition
+{
+    NotReported = 0, MoistureEvidence = 1, Dripping = 2, ContinuousFlow = 3
 }
 
 public sealed class Occurrence
@@ -228,6 +243,13 @@ public sealed class AnomalyDefinition
     public int Order { get; set; }
     public bool RequiresPosition { get; set; }
     public bool AllowsCustomText { get; set; }
+    public bool SupportsPosition { get; set; } = true;
+    public bool SupportsOrientation { get; set; }
+    public bool SupportsExtension { get; set; }
+    public bool SupportsDimension { get; set; }
+    public bool SupportsCondition { get; set; }
+    public bool SupportsInfiltrationCondition { get; set; }
+    public bool SupportsPercentage { get; set; }
 }
 
 public sealed class OccurrenceAnomaly
@@ -235,6 +257,13 @@ public sealed class OccurrenceAnomaly
     public Guid OccurrenceId { get; set; }
     public Guid AnomalyTypeId { get; set; }
     public AnomalyPosition Position { get; set; } = AnomalyPosition.NotReported;
+    public AnomalyOrientation Orientation { get; set; } = AnomalyOrientation.NotReported;
+    public decimal? ApproximateExtension { get; set; }
+    public string? Dimension { get; set; }
+    public AnomalyCondition Condition { get; set; } = AnomalyCondition.NotClassified;
+    public InfiltrationCondition InfiltrationCondition { get; set; } = InfiltrationCondition.NotReported;
+    public decimal? EstimatedPercentage { get; set; }
+    public string? Notes { get; set; }
     public string? CustomText { get; set; }
     public int Order { get; set; }
     public AnomalyDefinition AnomalyType { get; set; } = null!;
@@ -253,6 +282,7 @@ public sealed class Evidence
     public TimeSpan? VideoTimestamp { get; set; }
     public int Order { get; set; }
     public string? Caption { get; set; }
+    public bool IsPrimary { get; set; }
     public bool ManagedByGeoAutoDocs { get; set; }
     public string? SharedFilePath { get; set; }
 }

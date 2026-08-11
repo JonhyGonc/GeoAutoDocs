@@ -14,22 +14,34 @@ namespace GeoAutoDocs.App;
 
 public partial class OccurrenceWindow : Window
 {
+    private readonly Project _project;
+    private readonly InspectionSection _section;
     private readonly Occurrence _draft;
     private readonly bool _readOnly;
     private readonly ObservableCollection<AnomalySelectionItem> _anomalyItems;
     public ObservableCollection<EvidenceSelectionItem> EvidenceItems { get; } = [];
     public Occurrence? SavedDraft { get; private set; }
+    public bool SaveAndCreateNext { get; private set; }
+    public Guid? RequestedVideoReferenceId { get; private set; }
+    public TimeSpan? RequestedVideoTimestamp { get; private set; }
 
     public OccurrenceWindow(Project project, InspectionSection section,
         IReadOnlyList<AnomalyDefinition> catalog, OccurrenceService service,
-        Occurrence? source = null, Capture? initialCapture = null, bool readOnly = false)
+        Occurrence? source = null, Capture? initialCapture = null, bool readOnly = false, bool duplicate = false)
     {
         InitializeComponent();
         DataContext = this;
+        _project = project;
+        _section = section;
         _readOnly = readOnly;
-        _draft = service.CreateDraft(section, source);
-        WindowTitle.Text = readOnly ? "CONSULTAR OCORRÊNCIA" : source is null ? "NOVA OCORRÊNCIA" : "EDITAR OCORRÊNCIA";
-        SectionText.Text = section.Diameter is null ? section.Name : $"{section.Name} — REDE {section.Diameter:N0} mm";
+        _draft = service.CreateDraft(section, source, duplicate);
+        WindowTitle.Text = readOnly ? "CONSULTAR ANOMALIA" : duplicate ? "DUPLICAR ANOMALIA" :
+            source is null ? "NOVA ANOMALIA" : "EDITAR ANOMALIA";
+        var location = project.Locations.FirstOrDefault(x => x.Sections.Any(y => y.Id == section.Id));
+        var route = string.Join(" → ", new[] { section.StartPoint, section.EndPoint }.Where(x => !string.IsNullOrWhiteSpace(x)));
+        var routeText = route.Length == 0 ? string.Empty : $" — {route}";
+        var diameter = section.Diameter is null ? "Rede: não informada" : $"Rede: {section.Diameter:N0} mm";
+        SectionText.Text = $"{location?.Name ?? "LOCAL NÃO INFORMADO"}  •  {section.Name}{routeText}  •  {diameter}";
 
         var definitions = catalog.Concat(_draft.Anomalies.Select(x => x.AnomalyType))
             .GroupBy(x => x.Id).Select(x => x.First()).OrderBy(x => x.Order).ToList();
@@ -40,10 +52,13 @@ public partial class OccurrenceWindow : Window
         }));
         AnomaliesList.ItemsSource = _anomalyItems;
 
-        foreach (var evidence in _draft.Evidence.OrderBy(x => x.Order))
-            EvidenceItems.Add(new EvidenceSelectionItem(evidence));
+        foreach (var evidence in _draft.Evidence.OrderBy(x => x.Order)) AddEvidenceItem(evidence);
         if (initialCapture is not null && EvidenceItems.All(x => x.Evidence.CaptureId != initialCapture.Id))
-            EvidenceItems.Add(new EvidenceSelectionItem(OccurrenceService.FromCapture(initialCapture)));
+        {
+            AddEvidenceItem(OccurrenceService.FromCapture(initialCapture));
+            _draft.VideoReferenceId = initialCapture.VideoReferenceId;
+            _draft.VideoTimestamp = initialCapture.VideoTimestamp;
+        }
 
         var usedCaptureIds = project.Locations.SelectMany(x => x.Sections).SelectMany(x => x.Occurrences)
             .Where(x => x.Id != _draft.Id).SelectMany(x => x.Evidence).Where(x => x.CaptureId is not null)
@@ -56,7 +71,10 @@ public partial class OccurrenceWindow : Window
         LoadFields();
         FormPanel.IsEnabled = !readOnly;
         SaveButton.Visibility = readOnly ? Visibility.Collapsed : Visibility.Visible;
+        SaveAndNextButton.Visibility = readOnly || source is not null && !duplicate ? Visibility.Collapsed : Visibility.Visible;
         CancelButton.Content = readOnly ? "Fechar" : "Cancelar";
+        FooterHintText.Text = initialCapture is null ? "Dados técnicos opcionais podem ser complementados depois." :
+            "Vídeo, timestamp e captura foram preenchidos automaticamente.";
     }
 
     private void LoadFields()
@@ -73,9 +91,14 @@ public partial class OccurrenceWindow : Window
         ManualDescriptionBox.Text = _draft.ManualDescriptionOverride ?? "";
         UpdateLocationPanels();
         UpdateSelectedAnomalies();
+        RefreshEvidencePresentation();
+        UpdateDraftStatus();
     }
 
-    private void Save_Click(object sender, RoutedEventArgs e)
+    private void Save_Click(object sender, RoutedEventArgs e) => CompleteSave(false);
+    private void SaveAndNext_Click(object sender, RoutedEventArgs e) => CompleteSave(true);
+
+    private void CompleteSave(bool createNext)
     {
         try
         {
@@ -83,11 +106,12 @@ public partial class OccurrenceWindow : Window
             OccurrenceRules.Validate(_draft);
             _draft.GeneratedDescription = OccurrenceRules.GenerateDescription(_draft);
             SavedDraft = _draft;
+            SaveAndCreateNext = createNext;
             DialogResult = true;
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Ocorrência", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(ex.Message, "Anomalia", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -98,10 +122,12 @@ public partial class OccurrenceWindow : Window
             ApplyFormToDraft();
             OccurrenceRules.Validate(_draft);
             GeneratedDescriptionBox.Text = OccurrenceRules.GenerateDescription(_draft);
+            _draft.GeneratedDescription = GeneratedDescriptionBox.Text;
+            UpdateDraftStatus();
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Descrição padronizada", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(ex.Message, "Descrição no relatório", MessageBoxButton.OK, MessageBoxImage.Information);
         }
     }
 
@@ -125,7 +151,12 @@ public partial class OccurrenceWindow : Window
         _draft.Anomalies = _anomalyItems.Where(x => x.IsSelected).Select((x, index) => new OccurrenceAnomaly
         {
             OccurrenceId = _draft.Id, AnomalyTypeId = x.Definition.Id, AnomalyType = x.Definition,
-            Position = x.Position, CustomText = x.CustomText, Order = index
+            Position = x.Position, Orientation = x.Orientation,
+            ApproximateExtension = ParseOptional(x.ExtensionText, $"extensão de {x.Definition.Name}"),
+            Dimension = x.Dimension, Condition = x.Condition,
+            InfiltrationCondition = x.InfiltrationCondition,
+            EstimatedPercentage = ParseOptional(x.PercentageText, $"percentual de {x.Definition.Name}"),
+            Notes = x.Notes, CustomText = x.CustomText, Order = index
         }).ToList();
         _draft.Evidence = EvidenceItems.Select((x, index) =>
         {
@@ -133,6 +164,12 @@ public partial class OccurrenceWindow : Window
             x.Evidence.Order = index;
             return x.Evidence;
         }).ToList();
+        var firstVideoEvidence = _draft.Evidence.FirstOrDefault(x => x.VideoReferenceId is not null && x.VideoTimestamp is not null);
+        if (firstVideoEvidence is not null)
+        {
+            _draft.VideoReferenceId = firstVideoEvidence.VideoReferenceId;
+            _draft.VideoTimestamp = firstVideoEvidence.VideoTimestamp;
+        }
     }
 
     private void LocationMode_Changed(object sender, RoutedEventArgs e)
@@ -145,7 +182,10 @@ public partial class OccurrenceWindow : Window
     {
         PointPanel.Visibility = PointRadio.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         RangePanel.Visibility = RangeRadio.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        UpdateDraftStatus();
     }
+
+    private void DraftFieldChanged(object sender, TextChangedEventArgs e) => UpdateDraftStatus();
 
     private void AnomalySelection_Changed(object sender, RoutedEventArgs e) => UpdateSelectedAnomalies();
 
@@ -153,7 +193,17 @@ public partial class OccurrenceWindow : Window
     {
         if (_anomalyItems is null) return;
         var selected = _anomalyItems.Where(x => x.IsSelected).Select(x => x.Definition.Name).ToList();
-        SelectedAnomaliesText.Text = selected.Count == 0 ? "Nenhuma selecionada" : "Selecionadas: " + string.Join("  •  ", selected);
+        SelectedAnomaliesText.Text = selected.Count == 0 ? "Nenhuma selecionada" :
+            $"{selected.Count} selecionada(s): " + string.Join("  •  ", selected);
+        UpdateDraftStatus();
+    }
+
+    private void AnomalySearchBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_anomalyItems is null) return;
+        var query = AnomalySearchBox.Text.Trim();
+        foreach (var item in _anomalyItems)
+            item.IsVisible = query.Length == 0 || item.Definition.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase);
     }
 
     private void AddPendingCapture_Click(object sender, RoutedEventArgs e)
@@ -161,28 +211,39 @@ public partial class OccurrenceWindow : Window
         if (PendingCaptureCombo.SelectedItem is not CaptureChoice choice) return;
         if (EvidenceItems.Any(x => x.Evidence.CaptureId == choice.Capture.Id))
         {
-            MessageBox.Show("Esta captura já foi adicionada.", "Evidências", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("Esta captura já foi adicionada.", "Imagens da anomalia", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        EvidenceItems.Add(new EvidenceSelectionItem(OccurrenceService.FromCapture(choice.Capture)));
+        AddEvidenceItem(OccurrenceService.FromCapture(choice.Capture));
+        RefreshEvidencePresentation();
     }
 
     private void AddExternalImage_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog
         {
-            Title = "Adicionar evidência externa", Filter = "Imagens (*.png;*.jpg;*.jpeg)|*.png;*.jpg;*.jpeg",
+            Title = "Adicionar imagem da anomalia", Filter = "Imagens (*.png;*.jpg;*.jpeg)|*.png;*.jpg;*.jpeg",
             CheckFileExists = true, Multiselect = true
         };
         if (dialog.ShowDialog(this) != true) return;
-        foreach (var file in dialog.FileNames)
-            EvidenceItems.Add(new EvidenceSelectionItem(OccurrenceService.FromExternalImage(file)));
+        foreach (var file in dialog.FileNames) AddEvidenceItem(OccurrenceService.FromExternalImage(file));
+        RefreshEvidencePresentation();
     }
+
+    private void AddEvidenceItem(Evidence evidence) =>
+        EvidenceItems.Add(new EvidenceSelectionItem(evidence, ResolveVideoName));
+
+    private string? ResolveVideoName(Guid id) => _project.Locations.SelectMany(x => x.Sections)
+        .SelectMany(x => x.VideoReferences).FirstOrDefault(x => x.Id == id) is { } video
+        ? (string.IsNullOrWhiteSpace(video.DisplayName) ? Path.GetFileName(video.FilePath) : video.DisplayName) : null;
 
     private void RemoveEvidence_Click(object sender, RoutedEventArgs e)
     {
         if (((Button)sender).Tag is Guid id && EvidenceItems.FirstOrDefault(x => x.Id == id) is { } item)
+        {
             EvidenceItems.Remove(item);
+            RefreshEvidencePresentation();
+        }
     }
 
     private void MoveEvidenceUp_Click(object sender, RoutedEventArgs e) => MoveEvidence(sender, -1);
@@ -193,25 +254,80 @@ public partial class OccurrenceWindow : Window
         if (((Button)sender).Tag is not Guid id) return;
         var index = EvidenceItems.ToList().FindIndex(x => x.Id == id);
         var target = index + direction;
-        if (index >= 0 && target >= 0 && target < EvidenceItems.Count) EvidenceItems.Move(index, target);
+        if (index >= 0 && target >= 0 && target < EvidenceItems.Count)
+        {
+            EvidenceItems.Move(index, target);
+            RefreshEvidencePresentation();
+        }
+    }
+
+    private void PrimaryEvidence_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not CheckBox { Tag: Guid id, IsChecked: true }) return;
+        foreach (var item in EvidenceItems) item.Evidence.IsPrimary = item.Id == id;
+        EvidenceList.Items.Refresh();
+    }
+
+    private void GoToEvidenceVideo_Click(object sender, RoutedEventArgs e)
+    {
+        if (((Button)sender).Tag is not Guid id || EvidenceItems.FirstOrDefault(x => x.Id == id) is not { } item ||
+            item.Evidence.VideoReferenceId is not Guid videoId || item.Evidence.VideoTimestamp is null) return;
+        RequestedVideoReferenceId = videoId;
+        RequestedVideoTimestamp = item.Evidence.VideoTimestamp;
+        Close();
+    }
+
+    private void RefreshEvidencePresentation()
+    {
+        for (var index = 0; index < EvidenceItems.Count; index++) EvidenceItems[index].RefreshOrder(index);
+        EvidenceList?.Items.Refresh();
+        UpdateDraftStatus();
+    }
+
+    private void UpdateDraftStatus()
+    {
+        if (DraftStatusText is null) return;
+        var pending = new List<string>();
+        if (_anomalyItems is null || _anomalyItems.All(x => !x.IsSelected)) pending.Add("sem anomalia");
+        if (PointRadio?.IsChecked == true && ParseOptionalSilently(PointMeasurementBox?.Text) is null)
+            pending.Add("sem metragem");
+        if (RangeRadio?.IsChecked == true &&
+            (ParseOptionalSilently(RangeStartBox?.Text) is null || ParseOptionalSilently(RangeEndBox?.Text) is null))
+            pending.Add("intervalo incompleto");
+        if (EvidenceItems.Count == 0) pending.Add("sem evidência");
+        DraftStatusText.Text = pending.Count == 0 ? "Completa" : "Incompleta • " + string.Join(" • ", pending);
+        DraftStatusText.Foreground = (System.Windows.Media.Brush)FindResource(pending.Count == 0 ? "SuccessBrush" : "WarningBrush");
+    }
+
+    private static decimal? ParseOptionalSilently(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        return decimal.TryParse(text, NumberStyles.Number, CultureInfo.CurrentCulture, out var value) ||
+               decimal.TryParse(text, NumberStyles.Number, CultureInfo.GetCultureInfo("pt-BR"), out value) ||
+               decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out value) ? value : null;
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => Close();
 
-    private static decimal ParseRequired(string text, string field)
+    private static decimal ParseRequired(string text, string field) => ParseOptional(text, field) ??
+        throw new InvalidOperationException($"Informe um valor válido para {field}.");
+
+    private static decimal? ParseOptional(string? text, string field)
     {
+        if (string.IsNullOrWhiteSpace(text)) return null;
         if (decimal.TryParse(text, NumberStyles.Number, CultureInfo.CurrentCulture, out var value) ||
             decimal.TryParse(text, NumberStyles.Number, CultureInfo.GetCultureInfo("pt-BR"), out value) ||
             decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out value)) return value;
         throw new InvalidOperationException($"Informe um valor válido para {field}.");
     }
 
-    private static string FormatDecimal(decimal? value) => value?.ToString("N2", CultureInfo.GetCultureInfo("pt-BR")) ?? "";
+    internal static string FormatDecimal(decimal? value) =>
+        value?.ToString("N2", CultureInfo.GetCultureInfo("pt-BR")) ?? "";
 
     internal sealed class CaptureChoice
     {
         public Capture Capture { get; }
-        public string Label => $"{Capture.VideoTimestamp.ToString(@"hh\:mm\:ss\.fff")} — {Path.GetFileName(Capture.VideoFilePath)}";
+        public string Label => $"{Capture.VideoTimestamp:hh\\:mm\\:ss\\.fff} — {Path.GetFileName(Capture.VideoFilePath)}";
         public CaptureChoice(Capture capture) => Capture = capture;
     }
 }
@@ -219,16 +335,35 @@ public partial class OccurrenceWindow : Window
 public sealed class AnomalySelectionItem : INotifyPropertyChanged
 {
     private bool _isSelected;
+    private bool _isVisible = true;
     public AnomalyDefinition Definition { get; }
     public IReadOnlyList<PositionChoice> Positions { get; } = PositionChoice.All;
+    public IReadOnlyList<OrientationChoice> Orientations { get; } = OrientationChoice.All;
+    public IReadOnlyList<ConditionChoice> Conditions { get; } = ConditionChoice.All;
+    public IReadOnlyList<InfiltrationChoice> InfiltrationConditions { get; } = InfiltrationChoice.All;
     public bool IsSelected { get => _isSelected; set { _isSelected = value; OnPropertyChanged(); } }
+    public bool IsVisible { get => _isVisible; set { _isVisible = value; OnPropertyChanged(); } }
     public AnomalyPosition Position { get; set; }
+    public AnomalyOrientation Orientation { get; set; }
+    public string ExtensionText { get; set; } = "";
+    public string? Dimension { get; set; }
+    public AnomalyCondition Condition { get; set; }
+    public InfiltrationCondition InfiltrationCondition { get; set; }
+    public string PercentageText { get; set; } = "";
+    public string? Notes { get; set; }
     public string? CustomText { get; set; }
 
     public AnomalySelectionItem(AnomalyDefinition definition, OccurrenceAnomaly? selected)
     {
         Definition = definition; IsSelected = selected is not null;
-        Position = selected?.Position ?? AnomalyPosition.NotReported; CustomText = selected?.CustomText;
+        Position = selected?.Position ?? AnomalyPosition.NotReported;
+        Orientation = selected?.Orientation ?? AnomalyOrientation.NotReported;
+        ExtensionText = OccurrenceWindow.FormatDecimal(selected?.ApproximateExtension);
+        Dimension = selected?.Dimension;
+        Condition = selected?.Condition ?? AnomalyCondition.NotClassified;
+        InfiltrationCondition = selected?.InfiltrationCondition ?? InfiltrationCondition.NotReported;
+        PercentageText = OccurrenceWindow.FormatDecimal(selected?.EstimatedPercentage);
+        Notes = selected?.Notes; CustomText = selected?.CustomText;
     }
     public event PropertyChangedEventHandler? PropertyChanged;
     private void OnPropertyChanged([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
@@ -236,34 +371,61 @@ public sealed class AnomalySelectionItem : INotifyPropertyChanged
 
 public sealed record PositionChoice(AnomalyPosition Value, string Label)
 {
-    public static IReadOnlyList<PositionChoice> All { get; } =
-    [
-        new(AnomalyPosition.NotReported, "Não informado"), new(AnomalyPosition.UpperGenerator, "Geratriz superior"),
-        new(AnomalyPosition.LowerGenerator, "Geratriz inferior"), new(AnomalyPosition.LeftSide, "Lateral esquerda"),
-        new(AnomalyPosition.RightSide, "Lateral direita"), new(AnomalyPosition.Circumferential, "Circunferencial"),
-        new(AnomalyPosition.NotApplicable, "Não aplicável")
-    ];
+    public static IReadOnlyList<PositionChoice> All { get; } = Enum.GetValues<AnomalyPosition>()
+        .OrderBy(x => x == AnomalyPosition.NotReported ? 0 : x == AnomalyPosition.NotApplicable ? 99 : (int)x)
+        .Select(x => new PositionChoice(x, OccurrenceRules.FormatPosition(x))).ToList();
 }
 
-public sealed class EvidenceSelectionItem
+public sealed record OrientationChoice(AnomalyOrientation Value, string Label)
+{
+    public static IReadOnlyList<OrientationChoice> All { get; } = Enum.GetValues<AnomalyOrientation>()
+        .Select(x => new OrientationChoice(x, OccurrenceRules.FormatOrientation(x))).ToList();
+}
+
+public sealed record ConditionChoice(AnomalyCondition Value, string Label)
+{
+    public static IReadOnlyList<ConditionChoice> All { get; } = Enum.GetValues<AnomalyCondition>()
+        .Select(x => new ConditionChoice(x, OccurrenceRules.FormatCondition(x))).ToList();
+}
+
+public sealed record InfiltrationChoice(InfiltrationCondition Value, string Label)
+{
+    public static IReadOnlyList<InfiltrationChoice> All { get; } = Enum.GetValues<InfiltrationCondition>()
+        .Select(x => new InfiltrationChoice(x, OccurrenceRules.FormatInfiltration(x))).ToList();
+}
+
+public sealed class EvidenceSelectionItem : INotifyPropertyChanged
 {
     public Evidence Evidence { get; }
     public Guid Id => Evidence.Id;
     public BitmapImage? Thumbnail { get; }
-    public string Label => Evidence.SourceType == EvidenceSourceType.VideoCapture
-        ? $"Vídeo — {Evidence.VideoTimestamp?.ToString(@"hh\:mm\:ss\.fff")}" : Path.GetFileName(Evidence.FilePath);
+    public string Label => Evidence.SourceType == EvidenceSourceType.VideoCapture ? "Captura do vídeo" : Path.GetFileName(Evidence.FilePath);
+    public string VideoName { get; }
+    public string TimestampText => Evidence.VideoTimestamp is null ? "Sem timestamp" : $"Timestamp: {Evidence.VideoTimestamp:hh\\:mm\\:ss\\.fff}";
+    public string OrderText { get; private set; } = "";
+    public bool HasVideo => Evidence.VideoReferenceId is not null && Evidence.VideoTimestamp is not null;
 
-    public EvidenceSelectionItem(Evidence evidence)
+    public EvidenceSelectionItem(Evidence evidence, Func<Guid, string?> videoNameResolver)
     {
         Evidence = evidence;
+        VideoName = evidence.VideoReferenceId is Guid id ? $"Vídeo: {videoNameResolver(id) ?? "não localizado"}" : "Origem: imagem externa";
         Thumbnail = LoadThumbnail(evidence.FilePath);
     }
+
+    public void RefreshOrder(int index)
+    {
+        Evidence.Order = index;
+        OrderText = $"Ordem no relatório: {index + 1}";
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(OrderText)));
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
 
     private static BitmapImage? LoadThumbnail(string path)
     {
         if (!File.Exists(path)) return null;
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad;
-        image.DecodePixelWidth = 220; image.StreamSource = stream; image.EndInit(); image.Freeze(); return image;
+        image.DecodePixelWidth = 320; image.StreamSource = stream; image.EndInit(); image.Freeze(); return image;
     }
 }

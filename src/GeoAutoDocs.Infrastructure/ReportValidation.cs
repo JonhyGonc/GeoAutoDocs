@@ -54,7 +54,7 @@ public static class ReportValidation
         }
 
         foreach (var occurrence in occurrences.Where(x => x.Evidence.Count == 0))
-            warnings.Add($"{SectionName(selected, occurrence.InspectionSectionId)} possui ocorrência sem evidência.");
+            warnings.Add($"{SectionName(selected, occurrence.InspectionSectionId)} possui anomalia sem evidência.");
 
         foreach (var section in selected)
         {

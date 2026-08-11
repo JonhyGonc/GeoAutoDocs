@@ -240,6 +240,131 @@ public sealed class OccurrenceTests : IAsyncLifetime
         Assert.Equal(originalBytes, await File.ReadAllBytesAsync(external));
     }
 
+    [Fact]
+    public async Task TechnicalAttributesPersistIndependentlyPerAnomaly()
+    {
+        var (project, section) = await CreateProjectAsync();
+        var occurrence = NewOccurrence(OccurrenceLocationMode.Point, 18.35m, "Trinca", "Infiltração");
+        occurrence.Anomalies[0].Position = AnomalyPosition.UpperGenerator;
+        occurrence.Anomalies[0].Orientation = AnomalyOrientation.Longitudinal;
+        occurrence.Anomalies[0].ApproximateExtension = 1.20m;
+        occurrence.Anomalies[0].Dimension = "aprox. 5 mm";
+        occurrence.Anomalies[0].Condition = AnomalyCondition.Moderate;
+        occurrence.Anomalies[0].Notes = "Trinca longitudinal.";
+        occurrence.Anomalies[1].Position = AnomalyPosition.UpperGenerator;
+        occurrence.Anomalies[1].InfiltrationCondition = InfiltrationCondition.ContinuousFlow;
+        occurrence.ReferencePoint = "Próximo à contribuição lateral";
+        await _service.SaveAsync(project, section, occurrence, false);
+        await _store.SaveAsync(project);
+
+        var saved = (await _store.GetAsync(project.Id))!.Locations[0].Sections[0].Occurrences.Single();
+        var crack = saved.Anomalies.Single(x => x.AnomalyType.Name == "Trinca");
+        var infiltration = saved.Anomalies.Single(x => x.AnomalyType.Name == "Infiltração");
+        Assert.Equal(AnomalyOrientation.Longitudinal, crack.Orientation);
+        Assert.Equal(1.20m, crack.ApproximateExtension);
+        Assert.Equal("aprox. 5 mm", crack.Dimension);
+        Assert.Equal(AnomalyCondition.Moderate, crack.Condition);
+        Assert.Equal("Trinca longitudinal.", crack.Notes);
+        Assert.Equal(InfiltrationCondition.ContinuousFlow, infiltration.InfiltrationCondition);
+        Assert.Contains("contribuição lateral", saved.GeneratedDescription);
+        Assert.Contains("extensão aproximada de 1,20 m", saved.GeneratedDescription);
+    }
+
+    [Fact]
+    public void EstimatedPercentageAcceptsBoundsAndRejectsValuesAboveOneHundred()
+    {
+        foreach (var valid in new[] { 0m, 25.5m, 100m })
+        {
+            var occurrence = NewOccurrence(OccurrenceLocationMode.Point, 10m, "Obstrução");
+            occurrence.Anomalies[0].EstimatedPercentage = valid;
+            OccurrenceRules.Validate(occurrence);
+        }
+        var invalid = NewOccurrence(OccurrenceLocationMode.Point, 10m, "Obstrução");
+        invalid.Anomalies[0].EstimatedPercentage = 100.01m;
+        Assert.Throws<InvalidOperationException>(() => OccurrenceRules.Validate(invalid));
+    }
+
+    [Fact]
+    public async Task PrimaryEvidenceAndEvidenceOrderPersist()
+    {
+        var (project, section) = await CreateProjectAsync();
+        var first = AddCapture(project, section, 1000);
+        var second = AddCapture(project, section, 2000);
+        var occurrence = NewOccurrence(OccurrenceLocationMode.Point, 18m, "Fissura");
+        occurrence.Evidence.Add(OccurrenceService.FromCapture(first));
+        var main = OccurrenceService.FromCapture(second); main.IsPrimary = true;
+        occurrence.Evidence.Add(main);
+        await _service.SaveAsync(project, section, occurrence, false);
+        await _store.SaveAsync(project);
+        var saved = (await _store.GetAsync(project.Id))!.Locations[0].Sections[0].Occurrences.Single();
+        Assert.Equal(second.Id, saved.Evidence.Single(x => x.IsPrimary).CaptureId);
+        Assert.Equal([first.Id, second.Id], saved.Evidence.OrderBy(x => x.Order).Select(x => x.CaptureId!.Value).ToArray());
+    }
+
+    [Fact]
+    public void DuplicateCopiesTechnicalConfigurationButClearsLocationVideoAndEvidence()
+    {
+        var section = new InspectionSection { Id = _sectionId };
+        var source = NewOccurrence(OccurrenceLocationMode.Point, 18m, "Trinca");
+        source.VideoReferenceId = Guid.NewGuid(); source.VideoTimestamp = TimeSpan.FromSeconds(12);
+        source.Anomalies[0].Orientation = AnomalyOrientation.Diagonal;
+        source.Anomalies[0].Dimension = "30 cm";
+        source.Evidence.Add(new Evidence { OccurrenceId = source.Id, FilePath = "original.png" });
+        var duplicate = _service.CreateDraft(section, source, true);
+        Assert.NotEqual(source.Id, duplicate.Id);
+        Assert.Null(duplicate.Meterage);
+        Assert.Null(duplicate.VideoReferenceId);
+        Assert.Null(duplicate.VideoTimestamp);
+        Assert.Empty(duplicate.Evidence);
+        Assert.Equal(AnomalyOrientation.Diagonal, duplicate.Anomalies.Single().Orientation);
+        Assert.Equal("30 cm", duplicate.Anomalies.Single().Dimension);
+    }
+
+    [Fact]
+    public void ExpandedCatalogIsExtensibleAndFieldOriented()
+    {
+        var names = _catalog.Select(x => x.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("Fissura", names);
+        Assert.Contains("Trinca", names);
+        Assert.Contains("Raiz", names);
+        Assert.Contains("Material depositado", names);
+        Assert.Contains("Deslocamento de junta", names);
+        Assert.Contains("Junta aberta", names);
+        Assert.Contains("Rompimento", names);
+        Assert.True(Definition("Trinca").SupportsOrientation);
+        Assert.True(Definition("Infiltração").SupportsInfiltrationCondition);
+        Assert.True(Definition("Obstrução").SupportsPercentage);
+    }
+
+    [Fact]
+    public async Task MainTechnicalSmokePersistsOnePointTwoTypesAndThreeEvidence()
+    {
+        var (project, section) = await CreateProjectAsync();
+        section.Name = "TRECHO 03"; section.StartPoint = "PV-04"; section.EndPoint = "PV-05";
+        var capture = AddCapture(project, section, 278420);
+        var occurrence = NewOccurrence(OccurrenceLocationMode.Point, 18.35m, "Trinca", "Infiltração");
+        occurrence.ReferencePoint = "Próximo à contribuição lateral";
+        occurrence.Anomalies[0].Position = AnomalyPosition.UpperGenerator;
+        occurrence.Anomalies[0].Orientation = AnomalyOrientation.Longitudinal;
+        occurrence.Anomalies[0].ApproximateExtension = 1.20m;
+        occurrence.Anomalies[1].Position = AnomalyPosition.UpperGenerator;
+        occurrence.Anomalies[1].InfiltrationCondition = InfiltrationCondition.ContinuousFlow;
+        occurrence.Evidence.Add(OccurrenceService.FromCapture(capture));
+        foreach (var name in new[] { "evidencia-2.png", "evidencia-3.png" })
+        {
+            var path = Path.Combine(_root, name); await File.WriteAllBytesAsync(path, TestPng);
+            occurrence.Evidence.Add(OccurrenceService.FromExternalImage(path));
+        }
+        await _service.SaveAsync(project, section, occurrence, false);
+        await _store.SaveAsync(project);
+        var saved = (await _store.GetAsync(project.Id))!.Locations[0].Sections[0].Occurrences.Single();
+        Assert.Equal(2, saved.Anomalies.Count);
+        Assert.Equal(3, saved.Evidence.Count);
+        Assert.Equal(TimeSpan.FromMilliseconds(278420), saved.Evidence.Single(x => x.CaptureId is not null).VideoTimestamp);
+        Assert.Contains("Trinca e Infiltração", saved.GeneratedDescription);
+        Assert.True(saved.Evidence.Single(x => x.CaptureId is not null).VideoReferenceId is not null);
+    }
+
     private async Task<(Project Project, InspectionSection Section)> CreateProjectAsync()
     {
         var project = await _store.CreateAsync("Inspeção");

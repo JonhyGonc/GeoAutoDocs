@@ -85,7 +85,7 @@ public sealed class WordReportService
 
         var temporaryPath = Path.Combine(Path.GetDirectoryName(outputPath)!,
             $".{Path.GetFileNameWithoutExtension(outputPath)}.{Guid.NewGuid():N}.tmp.docx");
-        _logger.Info($"Início da geração do relatório {report.Id}: {validation.SelectedSections} trecho(s), {validation.Occurrences} ocorrência(s), {validation.Evidences} evidência(s).");
+        _logger.Info($"Início da geração do relatório {report.Id}: {validation.SelectedSections} trecho(s), {validation.Occurrences} anomalia(s), {validation.Evidences} evidência(s).");
         try
         {
             File.Copy(templatePath, temporaryPath, false);
@@ -466,7 +466,7 @@ public sealed class WordReportService
             return occurrence.GeneratedDescription.Trim();
 
         var description = occurrence.Anomalies.Count == 0
-            ? "Ocorrência registrada"
+            ? "Anomalia registrada"
             : string.Join(", ", occurrence.Anomalies.OrderBy(x => x.Order).Select(x => x.AnomalyType.Name));
         description += occurrence.LocationMode switch
         {

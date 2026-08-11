@@ -28,6 +28,7 @@ public sealed class ProjectStore : IProjectStore
         await BackupStage4DatabaseAsync(db, cancellationToken);
         await EnsureStage4SchemaAsync(db, cancellationToken);
         await EnsureStage5SchemaAsync(db, cancellationToken);
+        await EnsureTechnicalAnomalySchemaAsync(db, cancellationToken);
         await EnsureAnomalyCatalogAsync(db, cancellationToken);
     }
 
@@ -355,6 +356,36 @@ public sealed class ProjectStore : IProjectStore
             """, cancellationToken);
     }
 
+    private static async Task EnsureTechnicalAnomalySchemaAsync(GeoAutoDocsDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var definitionColumns = new (string, string)[]
+        {
+            ("SupportsPosition", "INTEGER NOT NULL DEFAULT 1"),
+            ("SupportsOrientation", "INTEGER NOT NULL DEFAULT 0"),
+            ("SupportsExtension", "INTEGER NOT NULL DEFAULT 0"),
+            ("SupportsDimension", "INTEGER NOT NULL DEFAULT 0"),
+            ("SupportsCondition", "INTEGER NOT NULL DEFAULT 0"),
+            ("SupportsInfiltrationCondition", "INTEGER NOT NULL DEFAULT 0"),
+            ("SupportsPercentage", "INTEGER NOT NULL DEFAULT 0")
+        };
+        var anomalyColumns = new (string, string)[]
+        {
+            ("Orientation", "INTEGER NOT NULL DEFAULT 0"),
+            ("ApproximateExtension", "TEXT NULL"),
+            ("Dimension", "TEXT NULL"),
+            ("Condition", "INTEGER NOT NULL DEFAULT 0"),
+            ("InfiltrationCondition", "INTEGER NOT NULL DEFAULT 0"),
+            ("EstimatedPercentage", "TEXT NULL"),
+            ("Notes", "TEXT NULL")
+        };
+        foreach (var column in definitionColumns)
+            await AddColumnIfMissingAsync(db, "AnomalyDefinitions", column.Item1, column.Item2, cancellationToken);
+        foreach (var column in anomalyColumns)
+            await AddColumnIfMissingAsync(db, "OccurrenceAnomaly", column.Item1, column.Item2, cancellationToken);
+        await AddColumnIfMissingAsync(db, "Evidence", "IsPrimary", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+    }
+
     private static async Task EnsureAnomalyCatalogAsync(GeoAutoDocsDbContext db, CancellationToken cancellationToken)
     {
         var existing = await db.AnomalyDefinitions.ToListAsync(cancellationToken);
@@ -367,12 +398,25 @@ public sealed class ProjectStore : IProjectStore
                 db.AnomalyDefinitions.Add(new AnomalyDefinition
                 {
                     Id = item.Id, Name = item.Name, IsActive = item.IsActive, Order = item.Order,
-                    RequiresPosition = item.RequiresPosition, AllowsCustomText = item.AllowsCustomText
+                    RequiresPosition = item.RequiresPosition, AllowsCustomText = item.AllowsCustomText,
+                    SupportsPosition = item.SupportsPosition, SupportsOrientation = item.SupportsOrientation,
+                    SupportsExtension = item.SupportsExtension, SupportsDimension = item.SupportsDimension,
+                    SupportsCondition = item.SupportsCondition,
+                    SupportsInfiltrationCondition = item.SupportsInfiltrationCondition,
+                    SupportsPercentage = item.SupportsPercentage
                 });
                 continue;
             }
             stored.RequiresPosition = item.RequiresPosition;
             stored.AllowsCustomText = item.AllowsCustomText;
+            stored.Order = item.Order;
+            stored.SupportsPosition = item.SupportsPosition;
+            stored.SupportsOrientation = item.SupportsOrientation;
+            stored.SupportsExtension = item.SupportsExtension;
+            stored.SupportsDimension = item.SupportsDimension;
+            stored.SupportsCondition = item.SupportsCondition;
+            stored.SupportsInfiltrationCondition = item.SupportsInfiltrationCondition;
+            stored.SupportsPercentage = item.SupportsPercentage;
         }
         await db.SaveChangesAsync(cancellationToken);
     }

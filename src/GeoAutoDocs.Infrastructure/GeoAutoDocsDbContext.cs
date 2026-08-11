@@ -74,5 +74,7 @@ public sealed class GeoAutoDocsDbContext(DbContextOptions<GeoAutoDocsDbContext> 
         modelBuilder.Entity<InspectionSection>().Property(x => x.InvestigatedMeters).HasPrecision(12, 3);
         modelBuilder.Entity<Occurrence>().Property(x => x.Meterage).HasPrecision(12, 3);
         modelBuilder.Entity<Occurrence>().Property(x => x.EndMeterage).HasPrecision(12, 3);
+        modelBuilder.Entity<OccurrenceAnomaly>().Property(x => x.ApproximateExtension).HasPrecision(12, 3);
+        modelBuilder.Entity<OccurrenceAnomaly>().Property(x => x.EstimatedPercentage).HasPrecision(5, 2);
     }
 }

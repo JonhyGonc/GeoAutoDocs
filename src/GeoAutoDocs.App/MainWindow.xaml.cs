@@ -658,12 +658,29 @@ public partial class MainWindow : Window
         if (_currentSection is null)
         {
             OccurrencesList.ItemsSource = null;
+            if (AnomalySummaryText is not null) AnomalySummaryText.Text = "Selecione um trecho";
             return;
         }
-        OccurrencesList.ItemsSource = _currentSection.Occurrences
+        var all = _currentSection.Occurrences
             .OrderBy(x => x.LocationMode == OccurrenceLocationMode.EntireSection ? 1 : 0)
             .ThenBy(x => x.Meterage ?? decimal.MaxValue).ThenBy(x => x.Order)
-            .Select(x => new OccurrenceListItem(x)).ToList();
+            .Select(x => new OccurrenceListItem(x, !IsReadOnly)).ToList();
+        var incomplete = all.Count(x => !x.IsComplete);
+        AnomalySummaryText.Text = $"{all.Count} apontamento(s) • {all.Sum(x => x.EvidenceCount)} imagem(ns) • {incomplete} pendência(s)";
+        var query = AnomalyListSearchBox?.Text.Trim() ?? "";
+        if (query.Length > 0)
+            all = all.Where(x => x.Location.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
+                                 x.Anomalies.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
+                                 x.PositionSummary.Contains(query, StringComparison.CurrentCultureIgnoreCase)).ToList();
+        var status = (AnomalyStatusFilter?.SelectedItem as ComboBoxItem)?.Tag as string;
+        if (status == "Complete") all = all.Where(x => x.IsComplete).ToList();
+        if (status == "Incomplete") all = all.Where(x => !x.IsComplete).ToList();
+        OccurrencesList.ItemsSource = all;
+    }
+
+    private void AnomalyListFilterChanged(object sender, RoutedEventArgs e)
+    {
+        if (IsInitialized) RefreshOccurrences();
     }
 
     private void UpdateInspectionWriteState()
@@ -908,24 +925,43 @@ public partial class MainWindow : Window
         await OpenOccurrenceEditorAsync(_currentSection.Occurrences.SingleOrDefault(x => x.Id == id), null);
     }
 
-    private async Task OpenOccurrenceEditorAsync(Occurrence? occurrence, Capture? initialCapture)
+    private async void DuplicateOccurrence_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentSection is null || IsReadOnly || ((Button)sender).Tag is not Guid id) return;
+        await OpenOccurrenceEditorAsync(_currentSection.Occurrences.SingleOrDefault(x => x.Id == id), null, true);
+    }
+
+    private async Task OpenOccurrenceEditorAsync(Occurrence? occurrence, Capture? initialCapture, bool duplicate = false)
     {
         if (_currentProject is null || _currentSection is null || (occurrence is null && IsReadOnly)) return;
         try
         {
             var catalog = await _store.ListAnomalyDefinitionsAsync();
-            var window = new OccurrenceWindow(_currentProject, _currentSection, catalog, _occurrenceService,
-                occurrence, initialCapture, IsReadOnly) { Owner = this };
-            if (window.ShowDialog() != true || window.SavedDraft is null) return;
-            await _occurrenceService.SaveAsync(_currentProject, _currentSection, window.SavedDraft, IsReadOnly);
-            RefreshCaptures();
-            RefreshOccurrences();
-            await SaveInspectionChangesAsync();
+            do
+            {
+                var window = new OccurrenceWindow(_currentProject, _currentSection, catalog, _occurrenceService,
+                    occurrence, initialCapture, IsReadOnly, duplicate) { Owner = this };
+                var result = window.ShowDialog();
+                if (window.RequestedVideoReferenceId is Guid videoId && window.RequestedVideoTimestamp is not null)
+                {
+                    await NavigateToVideoAsync(videoId, window.RequestedVideoTimestamp.Value);
+                    return;
+                }
+                if (result != true || window.SavedDraft is null) return;
+                await _occurrenceService.SaveAsync(_currentProject, _currentSection, window.SavedDraft, IsReadOnly);
+                RefreshCaptures();
+                RefreshOccurrences();
+                await SaveInspectionChangesAsync();
+                if (!window.SaveAndCreateNext) return;
+                occurrence = null;
+                initialCapture = null;
+                duplicate = false;
+            } while (true);
         }
         catch (Exception ex)
         {
-            _logger.Error("Falha ao salvar ocorrência técnica.", ex);
-            ShowError("Não foi possível salvar a ocorrência.", ex);
+            _logger.Error("Falha ao salvar anomalia técnica.", ex);
+            ShowError("Não foi possível salvar a anomalia.", ex);
         }
     }
 
@@ -933,7 +969,7 @@ public partial class MainWindow : Window
     {
         if (_currentProject is null || _currentSection is null || ((Button)sender).Tag is not Guid id || IsReadOnly) return;
         var occurrence = _currentSection.Occurrences.SingleOrDefault(x => x.Id == id);
-        if (occurrence is null || MessageBox.Show("Excluir esta ocorrência? As capturas vinculadas voltarão para Pendentes.",
+        if (occurrence is null || MessageBox.Show("Excluir esta anomalia? As capturas vinculadas voltarão para Pendentes.",
                 "Confirmar exclusão", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         _occurrenceService.Delete(_currentProject, _currentSection, occurrence, IsReadOnly);
         RefreshCaptures();
@@ -945,9 +981,15 @@ public partial class MainWindow : Window
     {
         if (_currentProject is null || _currentSection is null || ((Button)sender).Tag is not Guid id) return;
         var occurrence = _currentSection.Occurrences.SingleOrDefault(x => x.Id == id);
-        var evidence = occurrence?.Evidence.OrderBy(x => x.Order)
+        var evidence = occurrence?.Evidence.OrderByDescending(x => x.IsPrimary).ThenBy(x => x.Order)
             .FirstOrDefault(x => x.VideoReferenceId is not null && x.VideoTimestamp is not null);
         if (evidence?.VideoReferenceId is not Guid videoId || evidence.VideoTimestamp is null) return;
+        await NavigateToVideoAsync(videoId, evidence.VideoTimestamp.Value);
+    }
+
+    private async Task NavigateToVideoAsync(Guid videoId, TimeSpan timestamp)
+    {
+        if (_currentProject is null || _currentSection is null) return;
         var video = FindVideo(videoId);
         var location = _currentProject.Locations.FirstOrDefault(x => x.Sections.Any(y => y.Id == _currentSection.Id));
         if (video is null || location is null) return;
@@ -959,7 +1001,7 @@ public partial class MainWindow : Window
         RefreshVideos();
         VideosList.SelectedItem = ((IEnumerable<VideoListItem>)VideosList.ItemsSource).FirstOrDefault(x => x.Id == video.Id);
         _loadingInspections = false;
-        await LoadVideoAsync(video, evidence.VideoTimestamp);
+        await LoadVideoAsync(video, timestamp);
     }
 
     private async void DeleteCapture_Click(object sender, RoutedEventArgs e)
@@ -1159,24 +1201,45 @@ public partial class MainWindow : Window
         public string Location { get; }
         public string Anomalies { get; }
         public string EvidenceSummary { get; }
+        public int EvidenceCount { get; }
+        public string PositionSummary { get; }
+        public string TechnicalSummary { get; }
         public string Completeness { get; }
         public string CompletenessColor { get; }
         public bool CanGoToVideo { get; }
+        public bool CanModify { get; }
+        public bool IsComplete { get; }
 
-        public OccurrenceListItem(Occurrence occurrence)
+        public OccurrenceListItem(Occurrence occurrence, bool canModify)
         {
             Id = occurrence.Id;
+            CanModify = canModify;
             Location = OccurrenceRules.FormatLocation(occurrence);
             Anomalies = string.Join(" + ", occurrence.Anomalies.OrderBy(x => x.Order).Select(x =>
                 x.AnomalyType.AllowsCustomText && !string.IsNullOrWhiteSpace(x.CustomText)
                     ? $"Outro: {x.CustomText}" : x.AnomalyType.Name));
-            EvidenceSummary = $"{occurrence.Evidence.Count} imagem(ns)";
-            var first = occurrence.Evidence.OrderBy(x => x.Order).FirstOrDefault(x => File.Exists(x.FilePath));
+            EvidenceCount = occurrence.Evidence.Count;
+            EvidenceSummary = $"{EvidenceCount} imagem(ns)";
+            PositionSummary = string.Join(" • ", occurrence.Anomalies.Select(x => OccurrenceRules.FormatPosition(x.Position))
+                .Where(x => x != "Não informado").Distinct());
+            if (PositionSummary.Length == 0) PositionSummary = "Posição não informada";
+            TechnicalSummary = string.Join(" • ", occurrence.Anomalies.OrderBy(x => x.Order).Select(x =>
+            {
+                var values = new List<string>();
+                if (x.Orientation != AnomalyOrientation.NotReported) values.Add(OccurrenceRules.FormatOrientation(x.Orientation));
+                if (x.ApproximateExtension is not null) values.Add($"ext. {x.ApproximateExtension:N2} m");
+                if (!string.IsNullOrWhiteSpace(x.Dimension)) values.Add(x.Dimension);
+                if (x.EstimatedPercentage is not null) values.Add($"{x.EstimatedPercentage:N2}%");
+                return values.Count == 0 ? "" : $"{x.AnomalyType.Name}: {string.Join(", ", values)}";
+            }).Where(x => x.Length > 0));
+            var first = occurrence.Evidence.OrderByDescending(x => x.IsPrimary).ThenBy(x => x.Order)
+                .FirstOrDefault(x => File.Exists(x.FilePath));
             Thumbnail = LoadThumbnail(first?.FilePath);
             CanGoToVideo = occurrence.Evidence.Any(x => x.VideoReferenceId is not null && x.VideoTimestamp is not null);
-            var complete = OccurrenceRules.IsComplete(occurrence);
-            Completeness = complete ? "✓ Completa" : "⚠ Sem imagem ou descrição";
-            CompletenessColor = complete ? "#39D17E" : "#F2B84B";
+            IsComplete = OccurrenceRules.IsComplete(occurrence);
+            var pending = OccurrenceRules.GetPendingReasons(occurrence);
+            Completeness = IsComplete ? "✓ Completa" : "⚠ " + string.Join(" • ", pending);
+            CompletenessColor = IsComplete ? "#39D17E" : "#F2B84B";
         }
     }
 

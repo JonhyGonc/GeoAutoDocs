@@ -15,12 +15,41 @@ public sealed class FrameCaptureService(AppDataPaths paths, LocalLogger logger)
 {
     public async Task<FrameCaptureDraft> CaptureCurrentFrameAsync(
         Project project, InspectionSection section, VideoReference video,
+        MediaPlayer mediaPlayer, bool isReadOnly, CancellationToken cancellationToken = default)
+    {
+        EnsureCaptureAllowed(section, video, isReadOnly);
+        if (mediaPlayer.Media is null)
+            throw new InvalidOperationException("Nenhum vídeo está carregado no player.");
+
+        var id = Guid.NewGuid();
+        var directory = GetManagedCaptureDirectory(project);
+        Directory.CreateDirectory(directory);
+        var outputPath = Path.Combine(directory, $"capture_{id:N}.png");
+        var timestamp = TimeSpan.FromMilliseconds(Math.Max(0, mediaPlayer.Time));
+        try
+        {
+            if (!mediaPlayer.TakeSnapshot(0, outputPath, 0, 0))
+                throw new InvalidOperationException("O player não conseguiu capturar o quadro atualmente exibido.");
+
+            await WaitForValidPngAsync(outputPath, cancellationToken);
+            timestamp = TimeSpan.FromMilliseconds(Math.Max(0, mediaPlayer.Time));
+            logger.Info($"Quadro exibido capturado de '{video.FilePath}' em {timestamp:c}: {outputPath}");
+            return new FrameCaptureDraft(id, section.Id, video.Id, outputPath, video.FilePath,
+                timestamp, DateTime.UtcNow);
+        }
+        catch (Exception ex)
+        {
+            TryDelete(outputPath);
+            logger.Error($"Falha ao capturar o quadro exibido de '{video.FilePath}' em {timestamp:c}.", ex);
+            throw;
+        }
+    }
+
+    public async Task<FrameCaptureDraft> CaptureCurrentFrameAsync(
+        Project project, InspectionSection section, VideoReference video,
         TimeSpan timestamp, bool isReadOnly, CancellationToken cancellationToken = default)
     {
-        EnsureWritable(isReadOnly);
-        if (section.VideoReferences.All(x => x.Id != video.Id))
-            throw new InvalidOperationException("O vídeo não pertence ao trecho selecionado.");
-        if (!File.Exists(video.FilePath)) throw new FileNotFoundException("Vídeo não encontrado.", video.FilePath);
+        EnsureCaptureAllowed(section, video, isReadOnly);
 
         var id = Guid.NewGuid();
         var directory = GetManagedCaptureDirectory(project);
@@ -239,6 +268,15 @@ public sealed class FrameCaptureService(AppDataPaths paths, LocalLogger logger)
     private static void EnsureWritable(bool isReadOnly)
     {
         if (isReadOnly) throw new InvalidOperationException("O projeto está em modo somente leitura.");
+    }
+
+    private static void EnsureCaptureAllowed(InspectionSection section, VideoReference video, bool isReadOnly)
+    {
+        EnsureWritable(isReadOnly);
+        if (section.VideoReferences.All(x => x.Id != video.Id))
+            throw new InvalidOperationException("O vídeo não pertence ao trecho selecionado.");
+        if (!File.Exists(video.FilePath))
+            throw new FileNotFoundException("Vídeo não encontrado.", video.FilePath);
     }
 
     private static void TryDelete(string path)

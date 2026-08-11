@@ -678,11 +678,10 @@ public partial class MainWindow : Window
         {
             _mediaPlayer.SetPause(true);
             await Task.Delay(120);
-            var timestamp = TimeSpan.FromMilliseconds(Math.Max(0, _mediaPlayer.Time));
             _captureDraft = await _frameCaptureService.CaptureCurrentFrameAsync(
-                _currentProject, _currentSection, _currentVideo, timestamp, IsReadOnly);
+                _currentProject, _currentSection, _currentVideo, _mediaPlayer, IsReadOnly);
             CapturePreviewImage.Source = LoadBitmap(_captureDraft.FilePath);
-            CapturePreviewTimestamp.Text = FormatTime(timestamp);
+            CapturePreviewTimestamp.Text = FormatTime(_captureDraft.VideoTimestamp);
             CapturePreviewPanel.Visibility = Visibility.Visible;
         }
         catch (Exception ex) { ShowError("Não foi possível capturar o frame diretamente do vídeo.", ex); }

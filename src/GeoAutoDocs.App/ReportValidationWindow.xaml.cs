@@ -8,7 +8,7 @@ public partial class ReportValidationWindow : Window
     public ReportValidationWindow(ReportValidationResult result)
     {
         InitializeComponent();
-        WindowLayout.KeepInsideWorkArea(this, 680, 580);
+        WindowLayout.KeepInsideWorkArea(this, 800, 680);
         SummaryText.Text = $"✓ {result.SelectedSections} trecho(s) selecionado(s)\n" +
                            $"✓ {result.Occurrences} anomalia(s)\n" +
                            $"✓ {result.Evidences} evidência(s)";

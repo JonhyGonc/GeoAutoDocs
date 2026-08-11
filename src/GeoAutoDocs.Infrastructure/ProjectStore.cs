@@ -27,6 +27,7 @@ public sealed class ProjectStore : IProjectStore
         await EnsureStage25SchemaAsync(db, cancellationToken);
         await BackupStage4DatabaseAsync(db, cancellationToken);
         await EnsureStage4SchemaAsync(db, cancellationToken);
+        await EnsureStage5SchemaAsync(db, cancellationToken);
         await EnsureAnomalyCatalogAsync(db, cancellationToken);
     }
 
@@ -43,6 +44,7 @@ public sealed class ProjectStore : IProjectStore
         return await db.Projects.AsNoTrackingWithIdentityResolution()
             .AsSplitQuery()
             .Include(x => x.Reports).ThenInclude(x => x.CustomSections).ThenInclude(x => x.Images)
+            .Include(x => x.Reports).ThenInclude(x => x.DevelopmentImages)
             .Include(x => x.Reports).ThenInclude(x => x.SectionLinks).ThenInclude(x => x.Section)
             .Include(x => x.Locations).ThenInclude(x => x.Sections).ThenInclude(x => x.VideoReferences)
             .Include(x => x.Locations).ThenInclude(x => x.Sections).ThenInclude(x => x.Occurrences)
@@ -127,6 +129,7 @@ public sealed class ProjectStore : IProjectStore
                 custom.ReportId = report.Id;
                 foreach (var image in custom.Images) image.CustomSectionId = custom.Id;
             }
+            foreach (var image in report.DevelopmentImages) image.ReportId = report.Id;
             foreach (var link in report.SectionLinks) link.ReportId = report.Id;
         }
 
@@ -153,6 +156,7 @@ public sealed class ProjectStore : IProjectStore
     {
         await using var db = CreateContext();
         var existingReports = await db.Reports.Include(x => x.CustomSections).ThenInclude(x => x.Images)
+            .Include(x => x.DevelopmentImages)
             .Include(x => x.SectionLinks).Where(x => x.ProjectId == project.Id).ToListAsync(cancellationToken);
         var currentReportIds = project.Reports.Select(x => x.Id).ToHashSet();
         db.Reports.RemoveRange(existingReports.Where(x => !currentReportIds.Contains(x.Id)));
@@ -170,6 +174,8 @@ public sealed class ProjectStore : IProjectStore
             }
             var linkIds = current.SectionLinks.Select(x => x.SectionId).ToHashSet();
             db.ReportSections.RemoveRange(storedReport.SectionLinks.Where(x => !linkIds.Contains(x.SectionId)));
+            var developmentImageIds = current.DevelopmentImages.Select(x => x.Id).ToHashSet();
+            db.RemoveRange(storedReport.DevelopmentImages.Where(x => !developmentImageIds.Contains(x.Id)));
         }
 
         var sectionIds = project.Locations.SelectMany(x => x.Sections).Select(x => x.Id).ToList();
@@ -331,6 +337,22 @@ public sealed class ProjectStore : IProjectStore
 
         await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS \"IX_Evidence_CaptureId\" ON \"Evidence\" (\"CaptureId\") WHERE \"CaptureId\" IS NOT NULL", cancellationToken);
         await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS \"IX_Evidence_VideoReferenceId\" ON \"Evidence\" (\"VideoReferenceId\")", cancellationToken);
+    }
+
+    private static async Task EnsureStage5SchemaAsync(GeoAutoDocsDbContext db, CancellationToken cancellationToken)
+    {
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS "DevelopmentImage" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_DevelopmentImage" PRIMARY KEY,
+                "ReportId" TEXT NOT NULL,
+                "Group" INTEGER NOT NULL,
+                "FilePath" TEXT NOT NULL,
+                "Order" INTEGER NOT NULL,
+                CONSTRAINT "FK_DevelopmentImage_ReportConfiguration_ReportId"
+                    FOREIGN KEY ("ReportId") REFERENCES "ReportConfiguration" ("Id") ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS "IX_DevelopmentImage_ReportId" ON "DevelopmentImage" ("ReportId");
+            """, cancellationToken);
     }
 
     private static async Task EnsureAnomalyCatalogAsync(GeoAutoDocsDbContext db, CancellationToken cancellationToken)

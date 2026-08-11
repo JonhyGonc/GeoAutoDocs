@@ -15,14 +15,22 @@ public sealed class WordReportService
 {
     private const long EmusPerInch = 914400;
     private readonly AppDataPaths _paths;
+    private readonly LocalLogger _logger;
 
     public WordReportService(AppDataPaths paths)
     {
         _paths = paths;
+        _logger = new LocalLogger(paths.LogPath);
         DefaultTemplatePath = Path.Combine(AppContext.BaseDirectory, "Templates", "MODELO DE RELATORIO.docx");
     }
 
     public string DefaultTemplatePath { get; }
+
+    public ReportValidationResult Validate(Project project, Report report)
+    {
+        var templatePath = ResolveTemplatePathForValidation(report.TemplatePath);
+        return ReportValidation.Validate(project, report, templatePath);
+    }
 
     public bool ApplyStandardTemplate(Project project)
     {
@@ -40,47 +48,104 @@ public sealed class WordReportService
 
     public Task<string> GenerateAsync(Project project, Report report, bool includeSection4TechnicalProof = true,
         CancellationToken cancellationToken = default)
+        => GenerateInternalAsync(project, report, null, cancellationToken);
+
+    public Task<string> GenerateToAsync(Project project, Report report, string destinationPath,
+        CancellationToken cancellationToken = default)
+        => GenerateInternalAsync(project, report, destinationPath, cancellationToken);
+
+    private Task<string> GenerateInternalAsync(Project project, Report report, string? destinationPath,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (report.ProjectId != project.Id) throw new InvalidOperationException("O relatório não pertence ao projeto selecionado.");
         var templatePath = ResolveTemplatePath(report.TemplatePath);
         report.TemplatePath = templatePath;
 
+        var validation = ReportValidation.Validate(project, report, templatePath);
+        if (!validation.CanGenerate)
+            throw new InvalidOperationException("Corrija os erros antes de gerar o relatório:\n- " +
+                                                string.Join("\n- ", validation.Errors));
+
         var diameters = FormatDiameters(report);
         var outputDirectory = Path.Combine(project.ProjectPath ?? Path.Combine(_paths.ProjectsDirectory, project.Id.ToString("N")), "reports");
         Directory.CreateDirectory(outputDirectory);
-        var baseName = $"Relatorio_{SanitizeFileName(project.Name)}_{SanitizeFileName(report.Name)}";
-        var outputPath = Path.Combine(outputDirectory, baseName + ".docx");
-        if (File.Exists(outputPath))
-            outputPath = Path.Combine(outputDirectory, $"{baseName}_{DateTime.Now:yyyyMMdd_HHmmss}.docx");
+        var identity = string.IsNullOrWhiteSpace(report.ReportCode) ? report.Name : $"{report.ReportCode}_{report.Name}";
+        var baseName = $"Relatorio_{SanitizeFileName(identity)}";
+        var requestedPath = string.IsNullOrWhiteSpace(destinationPath)
+            ? Path.Combine(outputDirectory, baseName + ".docx")
+            : Path.GetFullPath(destinationPath);
+        if (!Path.GetExtension(requestedPath).Equals(".docx", StringComparison.OrdinalIgnoreCase))
+            requestedPath += ".docx";
+        Directory.CreateDirectory(Path.GetDirectoryName(requestedPath)!);
+        var outputPath = GetUniqueOutputPath(requestedPath);
 
         if (Path.GetFullPath(templatePath).Equals(Path.GetFullPath(outputPath), StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("O relatório de saída não pode sobrescrever o template.");
 
-        File.Copy(templatePath, outputPath, false);
-        using (var document = WordprocessingDocument.Open(outputPath, true))
+        var temporaryPath = Path.Combine(Path.GetDirectoryName(outputPath)!,
+            $".{Path.GetFileNameWithoutExtension(outputPath)}.{Guid.NewGuid():N}.tmp.docx");
+        _logger.Info($"Início da geração do relatório {report.Id}: {validation.SelectedSections} trecho(s), {validation.Occurrences} ocorrência(s), {validation.Evidences} evidência(s).");
+        try
         {
-            var mainPart = document.MainDocumentPart ?? throw new InvalidDataException("Template DOCX sem documento principal.");
-            var body = mainPart.Document.Body ?? throw new InvalidDataException("Template DOCX sem corpo.");
+            File.Copy(templatePath, temporaryPath, false);
+            using (var document = WordprocessingDocument.Open(temporaryPath, true))
+            {
+                var mainPart = document.MainDocumentPart ?? throw new InvalidDataException("Template DOCX sem documento principal.");
+                var body = mainPart.Document.Body ?? throw new InvalidDataException("Template DOCX sem corpo.");
 
-            FillControlledText(body, report, diameters);
-            ReplaceLocationImage(mainPart, report.LocationImagePath);
-            InsertClientLogo(mainPart, body, report.LogoPath);
-            ApplyEquipmentSelection(mainPart, body, report.Equipments);
-            ApplyOptionalModules(body, report);
-            InsertDynamicResults(mainPart, body, project, report);
-            MarkFieldsForUpdate(mainPart);
-            mainPart.Document.Save();
+                FillControlledText(body, report, diameters);
+                ReplaceLocationImage(mainPart, report.LocationImagePath);
+                InsertClientLogo(mainPart, body, report.LogoPath);
+                ApplyEquipmentSelection(mainPart, body, report.Equipments);
+                RenumberEquipmentFigures(body);
+                ApplyOptionalModules(body, report);
+                ApplyDynamicDevelopmentImages(mainPart, body, report);
+                InsertDynamicResults(mainPart, body, project, report);
+                MarkFieldsForUpdate(mainPart);
+                mainPart.Document.Save();
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            using (var generated = WordprocessingDocument.Open(temporaryPath, false))
+            {
+                if (generated.MainDocumentPart?.Document.Body is null)
+                    throw new InvalidDataException("O DOCX gerado não pôde ser reaberto corretamente.");
+            }
+
+            File.Move(temporaryPath, outputPath, false);
+            report.GeneratedReportPath = outputPath;
+            _logger.Info($"Geração do relatório {report.Id} concluída: {outputPath}");
+            return Task.FromResult(outputPath);
         }
-
-        using (var validation = WordprocessingDocument.Open(outputPath, false))
+        catch (Exception ex)
         {
-            if (validation.MainDocumentPart?.Document.Body is null)
-                throw new InvalidDataException("O DOCX gerado não pôde ser reaberto corretamente.");
+            _logger.Error($"Falha na geração do relatório {report.Id}.", ex);
+            throw;
         }
+        finally
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
+    }
 
-        report.GeneratedReportPath = outputPath;
-        return Task.FromResult(outputPath);
+    private string? ResolveTemplatePathForValidation(string? configuredPath)
+    {
+        if (ShouldUseStandardTemplate(configuredPath) && File.Exists(DefaultTemplatePath)) return DefaultTemplatePath;
+        if (!string.IsNullOrWhiteSpace(configuredPath)) return configuredPath;
+        return File.Exists(DefaultTemplatePath) ? DefaultTemplatePath : configuredPath;
+    }
+
+    private static string GetUniqueOutputPath(string requestedPath)
+    {
+        if (!File.Exists(requestedPath)) return requestedPath;
+        var directory = Path.GetDirectoryName(requestedPath)!;
+        var name = Path.GetFileNameWithoutExtension(requestedPath);
+        for (var version = 2; ; version++)
+        {
+            var candidate = Path.Combine(directory, $"{name}_v{version:00}.docx");
+            if (!File.Exists(candidate)) return candidate;
+        }
     }
 
     private string ResolveTemplatePath(string? configuredPath)
@@ -170,6 +235,123 @@ public sealed class WordReportService
             RemoveBlock(body, "Em complemento à investigação", "Figuras 3.9 a 3.14");
     }
 
+    private static void RenumberEquipmentFigures(Body body)
+    {
+        var start = FindParagraph(body, "EQUIPAMENTOS UTILIZADOS");
+        var end = FindParagraph(body, "DESENVOLVIMENTO DOS SERVIÇOS");
+        if (start is null || end is null) return;
+        var paragraphs = new List<Paragraph>();
+        for (var current = start.NextSibling(); current is not null && !ReferenceEquals(current, end); current = current.NextSibling())
+            if (current is Paragraph paragraph) paragraphs.Add(paragraph);
+
+        var originalNumbers = paragraphs.Where(x => ParagraphText(x).TrimStart().StartsWith("Figura 2.", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(x => Regex.Matches(ParagraphText(x), @"2\.(\d+)").Select(match => int.Parse(match.Groups[1].Value)))
+            .Distinct().Order().ToList();
+        var mapping = originalNumbers.Select((original, index) => (original, replacement: index + 1)).ToList();
+        foreach (var paragraph in paragraphs)
+        {
+            foreach (var (original, _) in mapping)
+                while (ReplaceTextPreservingRuns(paragraph, $"2.{original}", $"EQFIG{original}X")) { }
+            foreach (var (original, replacement) in mapping)
+                while (ReplaceTextPreservingRuns(paragraph, $"EQFIG{original}X", $"2.{replacement}")) { }
+        }
+    }
+
+    private static void ApplyDynamicDevelopmentImages(MainDocumentPart mainPart, Body body, Report report)
+    {
+        var groups = new[]
+        {
+            (DevelopmentImageGroup.VideoInspection, "Para a visualização interna das redes", "Figuras 3.1", true),
+            (DevelopmentImageGroup.InspectionOpening, "Além disso, foram realizadas intervenções", "Figuras 3.5", report.IncludeInspectionOpening),
+            (DevelopmentImageGroup.Gpr, "Em complemento à investigação", "Figuras 3.9", report.IncludeGpr)
+        };
+        var nextFigure = 1;
+        foreach (var (group, anchorPrefix, captionPrefix, enabled) in groups)
+        {
+            if (!enabled) continue;
+            var anchor = FindParagraph(body, anchorPrefix);
+            var caption = FindParagraph(body, captionPrefix);
+            if (anchor is null || caption is null) continue;
+            var imageParagraph = caption.PreviousSibling<Paragraph>();
+            while (imageParagraph is not null && !imageParagraph.Descendants<Drawing>().Any())
+                imageParagraph = imageParagraph.PreviousSibling<Paragraph>();
+            if (imageParagraph is null) continue;
+
+            var configured = report.DevelopmentImages.Where(x => x.Group == group)
+                .OrderBy(x => x.Order).Select(x => x.FilePath).ToList();
+            var count = configured.Count == 0
+                ? imageParagraph.Descendants<Drawing>().Count()
+                : ReplaceDevelopmentImages(mainPart, imageParagraph, configured);
+            if (count == 0) continue;
+
+            var reference = FigureReference(3, nextFigure, count);
+            var anchorText = ParagraphText(anchor);
+            var existingReference = Regex.Match(anchorText, @"\(Figuras? 3\.\d+(?: a 3\.\d+)?\)");
+            if (existingReference.Success)
+                ReplaceTextPreservingRuns(anchor, existingReference.Value, $"({reference})");
+
+            var captionText = ParagraphText(caption);
+            var separator = captionText.IndexOf('–');
+            var description = separator >= 0 ? captionText[(separator + 1)..].Trim() : captionText;
+            SetParagraphText(caption, $"{reference} – {description}");
+            nextFigure += count;
+        }
+        if (report.DevelopmentImages.Count > 0)
+        {
+            var resultsHeading = FindParagraph(body, "Resultados e Conclusões");
+            if (resultsHeading is not null)
+            {
+                resultsHeading.ParagraphProperties ??= new ParagraphProperties();
+                resultsHeading.ParagraphProperties.PageBreakBefore = new PageBreakBefore { Val = true };
+            }
+        }
+    }
+
+    private static int ReplaceDevelopmentImages(MainDocumentPart mainPart, Paragraph paragraph,
+        IReadOnlyList<string> filePaths)
+    {
+        var drawings = paragraph.Descendants<Drawing>().ToList();
+        if (drawings.Count == 0) return 0;
+        while (drawings.Count < filePaths.Count)
+        {
+            var sourceRun = drawings[^1].Ancestors<Run>().First();
+            var cloneRun = (Run)sourceRun.CloneNode(true);
+            paragraph.AppendChild(cloneRun);
+            drawings.Add(cloneRun.Descendants<Drawing>().First());
+        }
+
+        for (var index = 0; index < filePaths.Count; index++)
+        {
+            var filePath = filePaths[index];
+            var part = mainPart.AddImagePart(GetImagePartType(filePath));
+            using (var stream = File.OpenRead(filePath)) part.FeedData(stream);
+            var drawing = drawings[index];
+            drawing.Descendants<A.Blip>().First().Embed = mainPart.GetIdOfPart(part);
+            ResizeDrawingToFit(drawing, filePath);
+            var properties = drawing.Descendants<DW.DocProperties>().FirstOrDefault();
+            if (properties is not null) properties.Id = NextDrawingId(mainPart);
+        }
+        foreach (var drawing in drawings.Skip(filePaths.Count)) drawing.Remove();
+        return filePaths.Count;
+    }
+
+    private static void ResizeDrawingToFit(Drawing drawing, string filePath)
+    {
+        var extent = drawing.Descendants<DW.Extent>().FirstOrDefault();
+        if (extent?.Cx?.Value is not long maxWidth || extent.Cy?.Value is not long maxHeight) return;
+        var (width, height) = FitImage(filePath, maxWidth, maxHeight);
+        extent.Cx = width; extent.Cy = height;
+        foreach (var drawingExtent in drawing.Descendants<A.Extents>())
+        {
+            drawingExtent.Cx = width;
+            drawingExtent.Cy = height;
+        }
+    }
+
+    private static string FigureReference(int section, int first, int count) => count == 1
+        ? $"Figura {section}.{first}"
+        : $"Figuras {section}.{first} a {section}.{first + count - 1}";
+
     private static void InsertDynamicResults(MainDocumentPart mainPart, Body body, Project project, Report report)
     {
         var first = FindParagraph(body, "RUA RENATO CAETANO DA SILVA FILHO");
@@ -185,50 +367,53 @@ public sealed class WordReportService
 
         var newElements = new List<OpenXmlElement>();
         var figureNumber = 1;
-        foreach (var inspection in report.Sections)
+        var selected = ReportValidation.OrderedSections(project, report).ToList();
+        foreach (var locationGroup in selected.GroupBy(x => x.Location.Id))
         {
-            var locationName = project.Locations
-                .FirstOrDefault(x => x.Sections.Any(y => y.Id == inspection.Id))?.Name;
-            if (string.IsNullOrWhiteSpace(locationName)) locationName = report.LocationDescription;
-
             var location = (Paragraph)first.CloneNode(true);
-            SetParagraphText(location, string.IsNullOrWhiteSpace(locationName) ? inspection.Name.ToUpperInvariant() : locationName.Trim().ToUpperInvariant());
+            var locationName = locationGroup.First().Location.Name;
+            SetParagraphText(location, string.IsNullOrWhiteSpace(locationName)
+                ? report.LocationDescription.Trim().ToUpperInvariant()
+                : locationName.Trim().ToUpperInvariant());
             newElements.Add(location);
 
-            var section = (Paragraph)sectionTemplate.CloneNode(true);
-            SetParagraphText(section, FormatSectionTitle(inspection));
-            newElements.Add(section);
-
-            var imageElements = new List<OpenXmlElement>();
-            foreach (var occurrenceData in inspection.Occurrences.OrderBy(x => x.Order))
+            foreach (var (_, inspection) in locationGroup)
             {
-                var description = FormatOccurrenceForReport(occurrenceData);
-                var evidences = occurrenceData.Evidence.OrderBy(x => x.Order)
-                    .Where(x => IsSupportedImageFile(x.FilePath)).ToList();
-                var firstFigure = figureNumber;
-                var lastFigure = figureNumber + evidences.Count - 1;
-                var reference = evidences.Count switch
-                {
-                    0 => "",
-                    1 => $" (Figura 4.{firstFigure})",
-                    _ => $" (Figuras 4.{firstFigure} a 4.{lastFigure})"
-                };
+                var section = (Paragraph)sectionTemplate.CloneNode(true);
+                SetParagraphText(section, FormatSectionTitle(inspection));
+                newElements.Add(section);
 
-                var occurrence = (Paragraph)occurrenceTemplate.CloneNode(true);
-                SetParagraphText(occurrence, $"- {description.TrimEnd('.', ';')}{reference}.");
-                newElements.Add(occurrence);
-
-                foreach (var evidence in evidences)
+                var imageElements = new List<OpenXmlElement>();
+                foreach (var occurrenceData in inspection.Occurrences.OrderBy(x => x.Order).ThenBy(x => x.CreatedAt))
                 {
-                    imageElements.Add(CloneImageParagraph(mainPart, imageTemplate, evidence.FilePath));
-                    var caption = (Paragraph)captionTemplate.CloneNode(true);
-                    var captionText = string.IsNullOrWhiteSpace(evidence.Caption) ? description : evidence.Caption.Trim();
-                    SetParagraphText(caption, $"Figura 4.{figureNumber} – {captionText.TrimEnd('.', ';')}.");
-                    imageElements.Add(caption);
-                    figureNumber++;
+                    var description = FormatOccurrenceForReport(occurrenceData);
+                    var evidences = occurrenceData.Evidence.OrderBy(x => x.Order)
+                        .Where(x => IsSupportedImageFile(x.FilePath)).ToList();
+                    var firstFigure = figureNumber;
+                    var lastFigure = figureNumber + evidences.Count - 1;
+                    var reference = evidences.Count switch
+                    {
+                        0 => "",
+                        1 => $" (Figura 4.{firstFigure})",
+                        _ => $" (Figuras 4.{firstFigure} a 4.{lastFigure})"
+                    };
+
+                    var occurrence = (Paragraph)occurrenceTemplate.CloneNode(true);
+                    SetParagraphText(occurrence, $"- {description.TrimEnd('.', ';')}{reference}.");
+                    newElements.Add(occurrence);
+
+                    foreach (var evidence in evidences)
+                    {
+                        imageElements.Add(CloneImageParagraph(mainPart, imageTemplate, evidence.FilePath));
+                        var caption = (Paragraph)captionTemplate.CloneNode(true);
+                        var captionText = string.IsNullOrWhiteSpace(evidence.Caption) ? description : evidence.Caption.Trim();
+                        SetParagraphText(caption, $"Figura 4.{figureNumber} – {captionText.TrimEnd('.', ';')}.");
+                        imageElements.Add(caption);
+                        figureNumber++;
+                    }
                 }
+                newElements.AddRange(imageElements);
             }
-            newElements.AddRange(imageElements);
         }
 
         foreach (var custom in report.CustomSections.OrderBy(x => x.Order))
@@ -261,7 +446,9 @@ public sealed class WordReportService
 
     private static string FormatSectionTitle(InspectionSection section)
     {
-        var title = section.Name.Trim();
+        var title = !string.IsNullOrWhiteSpace(section.StartPoint) && !string.IsNullOrWhiteSpace(section.EndPoint)
+            ? $"{section.StartPoint.Trim()} → {section.EndPoint.Trim()}"
+            : section.Name.Trim();
         if (section.Diameter is not null && !title.Contains("mm", StringComparison.OrdinalIgnoreCase))
             title += $" – REDE {FormatMeters(section.Diameter)} mm";
         if (!string.IsNullOrWhiteSpace(section.Reference))
@@ -337,6 +524,8 @@ public sealed class WordReportService
     private static Paragraph CloneImageParagraph(MainDocumentPart mainPart, Paragraph template, string filePath)
     {
         var clone = (Paragraph)template.CloneNode(true);
+        clone.ParagraphProperties ??= new ParagraphProperties();
+        clone.ParagraphProperties.KeepNext = new KeepNext { Val = true };
         var imagePart = mainPart.AddImagePart(GetImagePartType(filePath));
         using (var stream = File.OpenRead(filePath)) imagePart.FeedData(stream);
         clone.Descendants<A.Blip>().First().Embed = mainPart.GetIdOfPart(imagePart);

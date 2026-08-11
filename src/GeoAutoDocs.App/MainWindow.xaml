@@ -100,9 +100,32 @@
                             </WrapPanel>
                             <TextBlock Text="Outros valores (separe por vírgula)" Margin="0,6,0,0"/><TextBox x:Name="CustomDiametersBox" Width="300" HorizontalAlignment="Left" TextChanged="FieldChanged"/>
                             <TextBlock Text="Módulos opcionais" FontSize="18" FontWeight="SemiBold" Margin="0,8,0,8"/><CheckBox x:Name="OpeningCheck" Content="Abertura de inspeção" Margin="0,5" Checked="FieldChanged" Unchecked="FieldChanged"/><CheckBox x:Name="GprCheck" Content="Complemento GPR / Georadar" Margin="0,5" Checked="FieldChanged" Unchecked="FieldChanged"/>
+                            <TextBlock Text="Imagens dinâmicas da Seção 3" FontSize="18" FontWeight="SemiBold" Margin="0,14,0,6"/>
+                            <DockPanel Margin="0,3"><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button Content="Selecionar" Tag="VideoInspection" Click="SelectDevelopmentImages_Click"/><Button Content="Usar imagens do modelo" Tag="VideoInspection" Click="ClearDevelopmentImages_Click"/></StackPanel><TextBlock x:Name="VideoInspectionImagesText" VerticalAlignment="Center"/></DockPanel>
+                            <DockPanel Margin="0,3"><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button Content="Selecionar" Tag="InspectionOpening" Click="SelectDevelopmentImages_Click"/><Button Content="Usar imagens do modelo" Tag="InspectionOpening" Click="ClearDevelopmentImages_Click"/></StackPanel><TextBlock x:Name="OpeningImagesText" VerticalAlignment="Center"/></DockPanel>
+                            <DockPanel Margin="0,3"><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button Content="Selecionar" Tag="Gpr" Click="SelectDevelopmentImages_Click"/><Button Content="Usar imagens do modelo" Tag="Gpr" Click="ClearDevelopmentImages_Click"/></StackPanel><TextBlock x:Name="GprImagesText" VerticalAlignment="Center"/></DockPanel>
+                            <DockPanel Margin="0,16,0,6">
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                    <Button Content="Selecionar todos" Click="SelectAllReportSections_Click"/>
+                                    <Button Content="Limpar seleção" Click="ClearReportSections_Click"/>
+                                </StackPanel>
+                                <TextBlock Text="TRECHOS DO RELATÓRIO" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            </DockPanel>
+                            <Border BorderBrush="#D4DDDF" BorderThickness="1" CornerRadius="4" Padding="8" MaxHeight="190">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl x:Name="ReportSectionsList">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <CheckBox Content="{Binding DisplayName}" Tag="{Binding SectionId}" IsChecked="{Binding IsSelected}"
+                                                          Margin="4" Checked="ReportSectionSelectionChanged" Unchecked="ReportSectionSelectionChanged"/>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Border>
                             <DockPanel Margin="0,16,0,6"><Button Content="+ Adicionar etapa personalizada" DockPanel.Dock="Right" Click="AddCustomSection_Click"/><TextBlock Text="Etapas personalizadas" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/></DockPanel>
                             <ItemsControl x:Name="CustomSectionsList"><ItemsControl.ItemTemplate><DataTemplate><Border BorderBrush="#D4DDDF" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,4"><DockPanel><Button Content="Remover" DockPanel.Dock="Right" Tag="{Binding Id}" Click="RemoveCustomSection_Click"/><StackPanel><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Text}" TextTrimming="CharacterEllipsis" MaxWidth="570"/><TextBlock Text="{Binding Images.Count, StringFormat='Imagens: {0}'}" Foreground="#66777A"/></StackPanel></DockPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
-                            <StackPanel Orientation="Horizontal" Margin="0,20,0,8"><Button Content="GERAR RELATÓRIO DE TESTE" Background="{StaticResource PrimaryBrush}" Foreground="White" Click="GenerateReport_Click"/><Button x:Name="OpenReportButton" Content="ABRIR NO WORD" IsEnabled="False" Click="OpenReport_Click"/></StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,20,0,8"><Button Content="VALIDAR E GERAR RELATÓRIO" Background="{StaticResource PrimaryBrush}" Foreground="White" Click="GenerateReport_Click"/><Button x:Name="OpenReportButton" Content="ABRIR ARQUIVO" IsEnabled="False" Click="OpenReport_Click"/><Button x:Name="OpenReportFolderButton" Content="ABRIR PASTA" IsEnabled="False" Click="OpenReportFolder_Click"/></StackPanel>
                             <TextBlock x:Name="GeneratedReportText" TextWrapping="Wrap" Foreground="#4C7161"/>
                         </StackPanel>
                     </Border></ScrollViewer>

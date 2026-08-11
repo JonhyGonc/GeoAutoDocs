@@ -39,6 +39,11 @@ public sealed class WordReportTests : IAsyncLifetime
     public async Task PersistsMultipleReportConfigurationsAndReportOwnedCustomContent()
     {
         var (project, report) = await CreateConfiguredProjectAsync();
+        report.DevelopmentImages.Add(new DevelopmentImage
+        {
+            ReportId = report.Id, Group = DevelopmentImageGroup.VideoInspection,
+            FilePath = _locationImage, Order = 0
+        });
         var second = project.CreateReport(); second.Client = "Segundo cliente";
         await _store.SaveAsync(project);
         var recovered = await new ProjectStore(new AppDataPaths(_root)).GetAsync(project.Id);
@@ -50,6 +55,7 @@ public sealed class WordReportTests : IAsyncLifetime
         var custom = Assert.Single(first.CustomSections);
         Assert.Equal("Etapa especial", custom.Title);
         Assert.Equal(_logo, Assert.Single(custom.Images).FilePath);
+        Assert.Equal(_locationImage, Assert.Single(first.DevelopmentImages).FilePath);
         Assert.Empty(recovered.Reports.Single(x => x.Id == second.Id).CustomSections);
     }
 
@@ -118,7 +124,17 @@ public sealed class WordReportTests : IAsyncLifetime
         var project = await _store.CreateAsync("Template padrão");
         var report = project.CreateReport();
         report.Client = "Cliente padrão";
+        report.Area = "Área de teste";
+        report.ReportCode = "GF-RL-PADRAO-001";
+        report.Contract = "CT-PADRAO";
+        report.PurchaseOrder = "PC-PADRAO";
+        report.LocationDescription = "Localização padrão";
+        report.ReportDate = new DateTime(2026, 8, 11);
+        report.TotalInvestigatedMeters = 10;
         report.Diameters = StandardDiameterSelection.Mm400;
+        var location = new Location { ProjectId = project.Id, Name = "Local padrão" };
+        var section = new InspectionSection { LocationId = location.Id, Name = "Trecho padrão" };
+        location.Sections.Add(section); project.Locations.Add(location); report.SelectSection(section);
 
         var service = new WordReportService(_paths);
         var output = await service.GenerateAsync(project, report);
@@ -153,8 +169,14 @@ public sealed class WordReportTests : IAsyncLifetime
         var second = project.CreateReport();
         second.TemplatePath = _template; second.ReportCode = "GF-RL-TESTE-002";
         second.ReportDate = new DateTime(2026, 8, 11);
+        second.LocationDescription = "Localização 002"; second.TotalInvestigatedMeters = 50;
         second.Equipments = EquipmentSelection.Endoscope;
         second.Diameters = StandardDiameterSelection.Mm400;
+        var location = new Location { ProjectId = project.Id, Name = "Local dos relatórios" };
+        var section001 = new InspectionSection { LocationId = location.Id, Name = "Trecho 001", Order = 0 };
+        var section002 = new InspectionSection { LocationId = location.Id, Name = "Trecho 002", Order = 1 };
+        location.Sections.AddRange([section001, section002]); project.Locations.Add(location);
+        first.SelectSection(section001); second.SelectSection(section002);
         var service = new WordReportService(_paths);
 
         var output001 = await service.GenerateAsync(project, first);

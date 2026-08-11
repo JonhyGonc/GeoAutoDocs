@@ -234,9 +234,12 @@ public partial class MainWindow : Window
         D1500Check.IsChecked = report?.Diameters.HasFlag(StandardDiameterSelection.Mm1500) == true;
         CustomDiametersBox.Text = report?.CustomDiameters ?? "";
         OpeningCheck.IsChecked = report?.IncludeInspectionOpening == true; GprCheck.IsChecked = report?.IncludeGpr == true;
+        RefreshDevelopmentImageSummary();
         CustomSectionsList.ItemsSource = report?.CustomSections;
+        RefreshReportSectionSelection();
         GeneratedReportText.Text = report?.GeneratedReportPath ?? "";
         OpenReportButton.IsEnabled = File.Exists(report?.GeneratedReportPath);
+        OpenReportFolderButton.IsEnabled = File.Exists(report?.GeneratedReportPath);
         _loadingFields = false;
     }
 
@@ -395,6 +398,46 @@ public partial class MainWindow : Window
     private void SelectLocationImage_Click(object sender, RoutedEventArgs e) => SelectFile(LocationImageBox, "Imagens (*.png;*.jpg;*.jpeg)|*.png;*.jpg;*.jpeg");
     private void SelectDefaultLogo_Click(object sender, RoutedEventArgs e) => SelectFile(DefaultLogoBox, "Imagens (*.png;*.jpg;*.jpeg)|*.png;*.jpg;*.jpeg");
 
+    private void SelectDevelopmentImages_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentReport is null || IsReadOnly || sender is not Button { Tag: string groupName } ||
+            !Enum.TryParse<DevelopmentImageGroup>(groupName, out var group)) return;
+        var dialog = new OpenFileDialog
+        {
+            Filter = "Imagens (*.png;*.jpg;*.jpeg)|*.png;*.jpg;*.jpeg", CheckFileExists = true, Multiselect = true,
+            Title = "Selecione as imagens na ordem desejada"
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        _currentReport.DevelopmentImages.RemoveAll(x => x.Group == group);
+        _currentReport.DevelopmentImages.AddRange(dialog.FileNames.Select((path, index) => new DevelopmentImage
+        {
+            ReportId = _currentReport.Id, Group = group, FilePath = path, Order = index
+        }));
+        RefreshDevelopmentImageSummary();
+        ScheduleSave();
+    }
+
+    private void ClearDevelopmentImages_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentReport is null || IsReadOnly || sender is not Button { Tag: string groupName } ||
+            !Enum.TryParse<DevelopmentImageGroup>(groupName, out var group)) return;
+        _currentReport.DevelopmentImages.RemoveAll(x => x.Group == group);
+        RefreshDevelopmentImageSummary();
+        ScheduleSave();
+    }
+
+    private void RefreshDevelopmentImageSummary()
+    {
+        string Summary(DevelopmentImageGroup group, string label)
+        {
+            var count = _currentReport?.DevelopmentImages.Count(x => x.Group == group) ?? 0;
+            return count == 0 ? $"{label}: imagens do modelo" : $"{label}: {count} imagem(ns) selecionada(s)";
+        }
+        VideoInspectionImagesText.Text = Summary(DevelopmentImageGroup.VideoInspection, "Vídeo inspeção");
+        OpeningImagesText.Text = Summary(DevelopmentImageGroup.InspectionOpening, "Abertura");
+        GprImagesText.Text = Summary(DevelopmentImageGroup.Gpr, "GPR / Georadar");
+    }
+
     private void SelectFile(TextBox target, string filter)
     {
         var dialog = new OpenFileDialog { Filter = filter, CheckFileExists = true };
@@ -423,14 +466,35 @@ public partial class MainWindow : Window
     private async void GenerateReport_Click(object sender, RoutedEventArgs e)
     {
         if (_currentProject is null || _currentReport is null) return;
+        ApplyFieldsToModel();
         await SavePendingAsync();
         try
         {
-            GeneratedReportText.Text = "Gerando relatório...";
-            var path = await _wordReportService.GenerateAsync(_currentProject, _currentReport, includeSection4TechnicalProof: true);
+            var validation = _wordReportService.Validate(_currentProject, _currentReport);
+            var validationWindow = new ReportValidationWindow(validation) { Owner = this };
+            if (validationWindow.ShowDialog() != true) return;
+
+            var reportsDirectory = Path.Combine(_currentProject.ProjectPath ?? "", "reports");
+            if (!string.IsNullOrWhiteSpace(_currentProject.ProjectPath)) Directory.CreateDirectory(reportsDirectory);
+            var fileName = SanitizeSuggestedFileName($"Relatorio_{_currentReport.ReportCode}_{_currentReport.Name}.docx");
+            var dialog = new SaveFileDialog
+            {
+                Title = "Salvar relatório final",
+                Filter = "Documento Word (*.docx)|*.docx",
+                AddExtension = true,
+                DefaultExt = ".docx",
+                FileName = fileName,
+                InitialDirectory = Directory.Exists(reportsDirectory) ? reportsDirectory : null,
+                OverwritePrompt = true
+            };
+            if (dialog.ShowDialog(this) != true) return;
+
+            GeneratedReportText.Text = "Preparando relatório... Processando trechos e inserindo imagens...";
+            var path = await _wordReportService.GenerateToAsync(_currentProject, _currentReport, dialog.FileName);
             if (_sharedSession?.IsReadOnly != true) { _hasPendingChanges = true; await SavePendingAsync(); }
-            GeneratedReportText.Text = path; OpenReportButton.IsEnabled = true;
-            MessageBox.Show("Relatório gerado com sucesso.", "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Information);
+            GeneratedReportText.Text = path; OpenReportButton.IsEnabled = true; OpenReportFolderButton.IsEnabled = true;
+            MessageBox.Show("RELATÓRIO GERADO COM SUCESSO\n\nUse os botões ‘Abrir arquivo’ ou ‘Abrir pasta’.",
+                "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex) { GeneratedReportText.Text = "Falha ao gerar relatório."; ShowError(ex.Message, ex); }
     }
@@ -440,6 +504,74 @@ public partial class MainWindow : Window
         var path = _currentReport?.GeneratedReportPath;
         if (!File.Exists(path)) { MessageBox.Show("O relatório gerado não foi encontrado.", "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
         Process.Start(new ProcessStartInfo(path!) { UseShellExecute = true });
+    }
+
+    private void OpenReportFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var path = _currentReport?.GeneratedReportPath;
+        if (!File.Exists(path)) return;
+        Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+    }
+
+    private void RefreshReportSectionSelection()
+    {
+        if (_currentProject is null)
+        {
+            ReportSectionsList.ItemsSource = null;
+            return;
+        }
+        var selectedIds = _currentReport?.SectionLinks.Select(x => x.SectionId).ToHashSet() ?? [];
+        ReportSectionsList.ItemsSource = _currentProject.Locations.OrderBy(x => x.Order).ThenBy(x => x.Name)
+            .SelectMany(location => location.Sections.OrderBy(x => x.Order).ThenBy(x => x.Name)
+                .Select(section => new ReportSectionSelectionItem(section.Id,
+                    $"{location.Name} — {section.Name}", selectedIds.Contains(section.Id))))
+            .ToList();
+    }
+
+    private void ReportSectionSelectionChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loadingFields || _loadingInspections || _currentProject is null || _currentReport is null || IsReadOnly ||
+            sender is not CheckBox { Tag: Guid sectionId } checkBox) return;
+        var section = _currentProject.Locations.SelectMany(x => x.Sections).SingleOrDefault(x => x.Id == sectionId);
+        if (section is null) return;
+        if (checkBox.IsChecked == true) _currentReport.SelectSection(section);
+        else _currentReport.SectionLinks.RemoveAll(x => x.SectionId == sectionId);
+        NormalizeReportSectionOrder();
+        ScheduleSave();
+    }
+
+    private void SelectAllReportSections_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null || _currentReport is null || IsReadOnly) return;
+        foreach (var section in _currentProject.Locations.OrderBy(x => x.Order).SelectMany(x => x.Sections.OrderBy(y => y.Order)))
+            _currentReport.SelectSection(section);
+        NormalizeReportSectionOrder();
+        RefreshReportSectionSelection();
+        ScheduleSave();
+    }
+
+    private void ClearReportSections_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentReport is null || IsReadOnly) return;
+        _currentReport.SectionLinks.Clear();
+        RefreshReportSectionSelection();
+        ScheduleSave();
+    }
+
+    private void NormalizeReportSectionOrder()
+    {
+        if (_currentProject is null || _currentReport is null) return;
+        var order = _currentProject.Locations.OrderBy(x => x.Order).ThenBy(x => x.Name)
+            .SelectMany(x => x.Sections.OrderBy(y => y.Order).ThenBy(y => y.Name))
+            .Select((section, index) => (section.Id, index)).ToDictionary(x => x.Id, x => x.index);
+        foreach (var link in _currentReport.SectionLinks)
+            link.Order = order.GetValueOrDefault(link.SectionId, int.MaxValue);
+    }
+
+    private static string SanitizeSuggestedFileName(string value)
+    {
+        foreach (var invalid in Path.GetInvalidFileNameChars()) value = value.Replace(invalid, '_');
+        return value;
     }
 
     private bool IsReadOnly => _sharedSession?.IsReadOnly == true;
@@ -454,6 +586,7 @@ public partial class MainWindow : Window
                            ?? _currentProject.Locations.OrderBy(x => x.Order).FirstOrDefault();
         LocationsList.SelectedItem = _currentLocation;
         RefreshSections();
+        RefreshReportSectionSelection();
         _loadingInspections = false;
     }
 
@@ -1022,6 +1155,8 @@ public partial class MainWindow : Window
             CompletenessColor = complete ? "#4C7161" : "#9C6B16";
         }
     }
+
+    private sealed record ReportSectionSelectionItem(Guid SectionId, string DisplayName, bool IsSelected);
 
     private void ScheduleSave()
     {

@@ -83,6 +83,7 @@ public sealed class Report
     public string CustomDiameters { get; set; } = string.Empty;
     public bool IncludeInspectionOpening { get; set; }
     public bool IncludeGpr { get; set; }
+    public List<DevelopmentImage> DevelopmentImages { get; set; } = [];
     public List<CustomSection> CustomSections { get; set; } = [];
     public List<ReportSection> SectionLinks { get; set; } = [];
 
@@ -101,6 +102,17 @@ public sealed class Report
             Order = SectionLinks.Count
         });
     }
+}
+
+public enum DevelopmentImageGroup { VideoInspection, InspectionOpening, Gpr }
+
+public sealed class DevelopmentImage
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ReportId { get; set; }
+    public DevelopmentImageGroup Group { get; set; }
+    public string FilePath { get; set; } = string.Empty;
+    public int Order { get; set; }
 }
 
 public sealed class ReportSection

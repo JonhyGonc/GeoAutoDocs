@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
         Title="GeoAutoDocs" Height="900" Width="1480" MinHeight="560" MinWidth="900"
-        WindowStartupLocation="CenterScreen" Background="{StaticResource WindowBackgroundBrush}"
+        WindowStartupLocation="CenterScreen" WindowState="Maximized" Background="{StaticResource WindowBackgroundBrush}"
         PreviewKeyDown="Window_PreviewKeyDown">
     <Window.Resources>
         <Style x:Key="SelectionChipStyle" TargetType="ToggleButton">
@@ -12,7 +12,7 @@
         </Style>
     </Window.Resources>
     <Grid>
-        <Grid x:Name="ProjectsView" Margin="34,28" MaxWidth="1600" HorizontalAlignment="Center">
+        <Grid x:Name="ProjectsView" Margin="34,28" HorizontalAlignment="Stretch">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="1"/><RowDefinition Height="*"/></Grid.RowDefinitions>
             <StackPanel>
                 <TextBlock Text="Projetos" Style="{StaticResource PageTitleTextStyle}"/>
@@ -66,7 +66,7 @@
             <Grid Grid.Row="2"><TextBlock Text="Somente o nome é obrigatório." Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button Content="Cancelar" Click="CancelNewProject_Click" MinWidth="110"/><Button Content="Criar projeto" Style="{StaticResource PrimaryButtonStyle}" MinWidth="160" Click="CreateProject_Click"/></StackPanel></Grid>
         </Grid>
 
-        <Grid x:Name="EditorView" Visibility="Collapsed" Margin="24,18,28,14" MaxWidth="1600" HorizontalAlignment="Center">
+        <Grid x:Name="EditorView" Visibility="Collapsed" Margin="24,18,28,14" HorizontalAlignment="Stretch">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <Grid Margin="0,0,0,12">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>

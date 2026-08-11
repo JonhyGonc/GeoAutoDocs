@@ -1,13 +1,13 @@
 <Window x:Class="GeoAutoDocs.App.CustomSectionWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Etapa personalizada" Height="540" Width="680" WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Title="Etapa personalizada" Height="560" Width="700" MinWidth="620" MinHeight="500" WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Background="{StaticResource WindowBackgroundBrush}">
     <Grid Margin="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-        <StackPanel><TextBlock Text="ETAPA PERSONALIZADA" Style="{StaticResource PageTitleTextStyle}" FontSize="22"/><TextBlock Text="Título (opcional)" Style="{StaticResource FieldLabelTextStyle}" Margin="0,18,0,6"/><TextBox x:Name="TitleBox"/></StackPanel>
+        <StackPanel><TextBlock Text="Etapa personalizada" Style="{StaticResource PageTitleTextStyle}" FontSize="22"/><TextBlock Text="Título (opcional)" Style="{StaticResource FieldLabelTextStyle}" Margin="0,18,0,6"/><TextBox x:Name="TitleBox"/></StackPanel>
         <StackPanel Grid.Row="1"><TextBlock Text="Texto" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="TextBox" Height="130" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/></StackPanel>
         <Border Grid.Row="2" Style="{StaticResource SubtleCardStyle}" Margin="0,4,0,12"><DockPanel>
             <Button Content="Adicionar imagens" DockPanel.Dock="Top" HorizontalAlignment="Left" Click="AddImages_Click"/>

@@ -1,4 +1,6 @@
 using System.Windows;
+using System.Windows.Media.Imaging;
+using System.IO;
 using Microsoft.Win32;
 
 namespace GeoAutoDocs.App;
@@ -28,7 +30,12 @@ public partial class NewProjectWindow : Window
             Multiselect = false,
             Title = "Selecione o logo do cliente"
         };
-        if (dialog.ShowDialog(this) == true) LogoBox.Text = dialog.FileName;
+        if (dialog.ShowDialog(this) == true)
+        {
+            LogoBox.Text = dialog.FileName;
+            LogoPreview.Source = LoadPreview(dialog.FileName);
+            LogoStatus.Text = "Imagem selecionada";
+        }
     }
 
     private void Create_Click(object sender, RoutedEventArgs e)
@@ -44,6 +51,16 @@ public partial class NewProjectWindow : Window
             ContractBox.Text.Trim(), PurchaseOrderBox.Text.Trim(),
             string.IsNullOrWhiteSpace(LogoBox.Text) ? null : LogoBox.Text);
         DialogResult = true;
+    }
+
+    private static BitmapImage? LoadPreview(string path)
+    {
+        if (!File.Exists(path)) return null;
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        var image = new BitmapImage();
+        image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad; image.DecodePixelWidth = 180;
+        image.StreamSource = stream; image.EndInit(); image.Freeze();
+        return image;
     }
 }
 

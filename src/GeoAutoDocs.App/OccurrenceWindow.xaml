@@ -11,7 +11,7 @@
         <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <StackPanel>
-                <TextBlock x:Name="WindowTitle" Text="NOVA ANOMALIA" Style="{StaticResource PageTitleTextStyle}" FontSize="24"/>
+                <TextBlock x:Name="WindowTitle" Text="Nova anomalia" Style="{StaticResource PageTitleTextStyle}" FontSize="24"/>
                 <TextBlock x:Name="SectionText" Margin="0,4,0,14" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap"/>
             </StackPanel>
             <Border Grid.Column="1" Style="{StaticResource StatusBadgeStyle}" VerticalAlignment="Top">
@@ -23,7 +23,7 @@
             <StackPanel x:Name="FormPanel">
                 <Border Style="{StaticResource CardStyle}" Padding="18" Margin="0,0,0,12">
                     <StackPanel>
-                        <TextBlock Text="LOCALIZAÇÃO DA ANOMALIA" Style="{StaticResource SectionTitleTextStyle}"/>
+                        <TextBlock Text="Localização da anomalia" Style="{StaticResource SectionTitleTextStyle}"/>
                         <StackPanel Orientation="Horizontal" Margin="0,10">
                             <RadioButton x:Name="PointRadio" Content="Metragem pontual" GroupName="Location" Checked="LocationMode_Changed" Margin="0,0,22,0"/>
                             <RadioButton x:Name="RangeRadio" Content="Intervalo" GroupName="Location" Checked="LocationMode_Changed" Margin="0,0,22,0"/>
@@ -48,7 +48,7 @@
                             <TextBox x:Name="AnomalySearchBox" DockPanel.Dock="Right" Width="270" Margin="12,0,0,8"
                                      ToolTip="Pesquisar no catálogo de anomalias" TextChanged="AnomalySearchBox_TextChanged"/>
                             <StackPanel>
-                                <TextBlock Text="ANOMALIAS IDENTIFICADAS" Style="{StaticResource SectionTitleTextStyle}"/>
+                                <TextBlock Text="Anomalias identificadas" Style="{StaticResource SectionTitleTextStyle}"/>
                                 <TextBlock x:Name="SelectedAnomaliesText" Text="Nenhuma selecionada" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,10" TextWrapping="Wrap"/>
                             </StackPanel>
                         </DockPanel>
@@ -108,27 +108,29 @@
                     </StackPanel>
                 </Border>
 
-                <Border Style="{StaticResource CardStyle}" Padding="18" Margin="0,0,0,12">
+                <Expander Header="Mais detalhes" Margin="0,0,0,12">
+                    <Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="7" Padding="18" Margin="0,8,0,0">
                     <StackPanel>
-                        <TextBlock Text="OBSERVAÇÃO TÉCNICA" Style="{StaticResource SectionTitleTextStyle}"/>
+                        <TextBlock Text="Observação técnica" Style="{StaticResource SectionTitleTextStyle}"/>
                         <TextBox x:Name="NotesBox" AcceptsReturn="True" Height="72" TextWrapping="Wrap" Margin="0,8,0,14"/>
                         <DockPanel>
                             <Button Content="Atualizar descrição" DockPanel.Dock="Right" Click="PreviewDescription_Click"/>
-                            <TextBlock Text="DESCRIÇÃO NO RELATÓRIO" Style="{StaticResource SectionTitleTextStyle}" VerticalAlignment="Center"/>
+                            <TextBlock Text="Descrição no relatório" Style="{StaticResource SectionTitleTextStyle}" VerticalAlignment="Center"/>
                         </DockPanel>
                         <TextBox x:Name="GeneratedDescriptionBox" IsReadOnly="True" Background="{StaticResource SurfaceMutedBrush}" TextWrapping="Wrap" MinHeight="58" Margin="0,8"/>
                         <TextBlock Text="Edição manual opcional — substitui somente o texto no relatório e preserva todos os dados estruturados." Foreground="{StaticResource TextMutedBrush}"/>
                         <TextBox x:Name="ManualDescriptionBox" AcceptsReturn="True" Height="72" TextWrapping="Wrap" Margin="0,7,0,0"/>
                     </StackPanel>
-                </Border>
+                    </Border>
+                </Expander>
 
                 <Border Style="{StaticResource CardStyle}" Padding="18">
                     <StackPanel>
-                        <TextBlock Text="IMAGENS DA ANOMALIA" Style="{StaticResource SectionTitleTextStyle}"/>
+                        <TextBlock Text="Imagens da anomalia" Style="{StaticResource SectionTitleTextStyle}"/>
                         <WrapPanel Margin="0,9">
                             <ComboBox x:Name="PendingCaptureCombo" Width="360" DisplayMemberPath="Label"/>
-                            <Button Content="USAR CAPTURA PENDENTE" Click="AddPendingCapture_Click"/>
-                            <Button Content="＋ ADICIONAR IMAGEM" Click="AddExternalImage_Click"/>
+                            <Button Content="Usar captura pendente" Click="AddPendingCapture_Click"/>
+                            <Button Content="＋  Adicionar imagem" Click="AddExternalImage_Click"/>
                         </WrapPanel>
                         <ListBox x:Name="EvidenceList" ItemsSource="{Binding EvidenceItems}" ScrollViewer.HorizontalScrollBarVisibility="Disabled" MinHeight="190">
                             <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
@@ -162,9 +164,9 @@
         <Grid Grid.Row="2" Margin="0,14,0,0">
             <TextBlock x:Name="FooterHintText" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button x:Name="CancelButton" Content="Cancelar" Click="Cancel_Click"/>
-                <Button x:Name="SaveAndNextButton" Content="SALVAR E CRIAR PRÓXIMA" Click="SaveAndNext_Click"/>
-                <Button x:Name="SaveButton" Content="SALVAR ANOMALIA" Style="{StaticResource PrimaryButtonStyle}" Click="Save_Click"/>
+                <Button x:Name="CancelButton" Content="Cancelar" IsCancel="True" Click="Cancel_Click"/>
+                <Button x:Name="SaveAndNextButton" Content="Salvar e criar próxima" Click="SaveAndNext_Click"/>
+                <Button x:Name="SaveButton" Content="Salvar anomalia" IsDefault="True" Style="{StaticResource PrimaryButtonStyle}" Click="Save_Click"/>
             </StackPanel>
         </Grid>
     </Grid>

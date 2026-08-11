@@ -35,11 +35,14 @@ public partial class OccurrenceWindow : Window
         _section = section;
         _readOnly = readOnly;
         _draft = service.CreateDraft(section, source, duplicate);
-        WindowTitle.Text = readOnly ? "CONSULTAR ANOMALIA" : duplicate ? "DUPLICAR ANOMALIA" :
-            source is null ? "NOVA ANOMALIA" : "EDITAR ANOMALIA";
+        WindowTitle.Text = readOnly ? "Consultar anomalia" : duplicate ? "Duplicar anomalia" :
+            source is null ? "Nova anomalia" : "Editar anomalia";
         var location = project.Locations.FirstOrDefault(x => x.Sections.Any(y => y.Id == section.Id));
         var route = string.Join(" → ", new[] { section.StartPoint, section.EndPoint }.Where(x => !string.IsNullOrWhiteSpace(x)));
-        var routeText = route.Length == 0 ? string.Empty : $" — {route}";
+        var routeAlreadyNamed = !string.IsNullOrWhiteSpace(section.StartPoint) && !string.IsNullOrWhiteSpace(section.EndPoint) &&
+                                section.Name.Contains(section.StartPoint, StringComparison.CurrentCultureIgnoreCase) &&
+                                section.Name.Contains(section.EndPoint, StringComparison.CurrentCultureIgnoreCase);
+        var routeText = route.Length == 0 || routeAlreadyNamed ? string.Empty : $" — {route}";
         var diameter = section.Diameter is null ? "Rede: não informada" : $"Rede: {section.Diameter:N0} mm";
         SectionText.Text = $"{location?.Name ?? "LOCAL NÃO INFORMADO"}  •  {section.Name}{routeText}  •  {diameter}";
 

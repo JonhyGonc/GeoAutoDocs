@@ -208,25 +208,31 @@ public partial class MainWindow : Window
     {
         _loadingFields = true;
         ProjectTitle.Text = project.Name;
+        ProjectClientSummary.Text = string.IsNullOrWhiteSpace(project.DefaultClient)
+            ? "Dados do cliente ainda não informados" : project.DefaultClient;
         DefaultClientBox.Text = project.DefaultClient; DefaultCnpjBox.Text = project.DefaultCnpj;
         DefaultAreaBox.Text = project.DefaultArea; DefaultContractBox.Text = project.DefaultContract;
         DefaultPurchaseOrderBox.Text = project.DefaultPurchaseOrder; DefaultLogoBox.Text = project.DefaultLogoPath ?? "";
-        ReportsCombo.ItemsSource = project.Reports.OrderBy(x => x.Order).ToList();
+        var reports = project.Reports.OrderBy(x => x.Order).ToList();
+        ReportsCombo.ItemsSource = reports;
+        ReportsList.ItemsSource = reports;
         _currentReport = project.Reports.OrderBy(x => x.Order).FirstOrDefault();
         ReportsCombo.SelectedItem = _currentReport;
+        ReportsList.SelectedItem = _currentReport;
         StorageStatus.Text = project.StorageKind == ProjectStorageKind.Shared
             ? (_sharedSession?.IsReadOnly == true ? "Compartilhado • somente leitura" : "Compartilhado • editor com lock")
             : "Local";
         ShareProjectButton.IsEnabled = project.StorageKind == ProjectStorageKind.Local;
         NewReportButton.IsEnabled = _sharedSession?.IsReadOnly != true;
-        ProjectDefaultsTab.IsEnabled = !IsReadOnly;
+        ProjectDefaultsTab.IsEnabled = true;
         ReportHeaderTab.IsEnabled = !IsReadOnly && _currentReport is not null;
-        WordConfigTab.IsEnabled = !IsReadOnly && _currentReport is not null;
+        WordConfigTab.IsEnabled = true;
         ReadOnlyInspectionText.Visibility = IsReadOnly ? Visibility.Visible : Visibility.Collapsed;
         RefreshInspectionTree();
         UpdateInspectionWriteState();
         LoadReport(_currentReport);
-        SaveStatus.Text = $"Salvo automaticamente • {project.UpdatedAt.ToLocalTime():dd/MM/yyyy HH:mm}";
+        RefreshFilePreviews();
+        SaveStatus.Text = "✓ Salvo";
         _hasPendingChanges = false;
         _loadingFields = false;
     }
@@ -236,7 +242,7 @@ public partial class MainWindow : Window
         _loadingFields = true;
         var enabled = report is not null;
         ReportHeaderTab.IsEnabled = enabled && !IsReadOnly;
-        WordConfigTab.IsEnabled = enabled && !IsReadOnly;
+        WordConfigTab.IsEnabled = true;
         ClientBox.Text = report?.Client ?? ""; CnpjBox.Text = report?.Cnpj ?? "";
         AreaBox.Text = report?.Area ?? ""; ContractBox.Text = report?.Contract ?? "";
         PurchaseOrderBox.Text = report?.PurchaseOrder ?? ""; ReportCodeBox.Text = report?.ReportCode ?? "";
@@ -244,6 +250,7 @@ public partial class MainWindow : Window
         MetersBox.Text = report?.TotalInvestigatedMeters?.ToString("0.###", CultureInfo.CurrentCulture) ?? "";
         TemplateBox.Text = report?.TemplatePath ?? ""; LogoBox.Text = report?.LogoPath ?? "";
         LocationImageBox.Text = report?.LocationImagePath ?? "";
+        ActiveReportTitle.Text = report?.Name ?? "Selecione um relatório";
         EndoscopeCheck.IsChecked = report?.Equipments.HasFlag(EquipmentSelection.Endoscope) == true;
         BugCheck.IsChecked = report?.Equipments.HasFlag(EquipmentSelection.Bug) == true;
         HunterCheck.IsChecked = report?.Equipments.HasFlag(EquipmentSelection.Hunter) == true;
@@ -261,9 +268,10 @@ public partial class MainWindow : Window
         RefreshDevelopmentImageSummary();
         CustomSectionsList.ItemsSource = report?.CustomSections;
         RefreshReportSectionSelection();
-        GeneratedReportText.Text = report?.GeneratedReportPath ?? "";
+        GeneratedReportText.Text = File.Exists(report?.GeneratedReportPath) ? "✓ Relatório gerado" : "";
         OpenReportButton.IsEnabled = File.Exists(report?.GeneratedReportPath);
         OpenReportFolderButton.IsEnabled = File.Exists(report?.GeneratedReportPath);
+        RefreshFilePreviews();
         _loadingFields = false;
     }
 
@@ -272,6 +280,18 @@ public partial class MainWindow : Window
         if (_loadingFields || _currentProject is null) return;
         ApplyFieldsToModel();
         _currentReport = ReportsCombo.SelectedItem as Report;
+        ReportsList.SelectedItem = _currentReport;
+        LoadReport(_currentReport);
+    }
+
+    private void ReportsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loadingFields || _currentProject is null) return;
+        ApplyFieldsToModel();
+        _currentReport = ReportsList.SelectedItem as Report;
+        _loadingFields = true;
+        ReportsCombo.SelectedItem = _currentReport;
+        _loadingFields = false;
         LoadReport(_currentReport);
     }
 
@@ -282,9 +302,12 @@ public partial class MainWindow : Window
         var created = _currentProject.CreateReport();
         created.TemplatePath = _wordReportService.DefaultTemplatePath;
         _loadingFields = true;
-        ReportsCombo.ItemsSource = _currentProject.Reports.OrderBy(x => x.Order).ToList();
+        var reports = _currentProject.Reports.OrderBy(x => x.Order).ToList();
+        ReportsCombo.ItemsSource = reports;
+        ReportsList.ItemsSource = reports;
         _currentReport = created;
         ReportsCombo.SelectedItem = created;
+        ReportsList.SelectedItem = created;
         _loadingFields = false;
         LoadReport(_currentReport);
         _hasPendingChanges = true;
@@ -295,7 +318,7 @@ public partial class MainWindow : Window
     {
         if (_loadingFields || _currentProject is null || _sharedSession?.IsReadOnly == true) return;
         _hasPendingChanges = true;
-        SaveStatus.Text = "Alterações pendentes...";
+        SaveStatus.Text = "Salvando...";
         _saveTimer.Stop(); _saveTimer.Start();
     }
 
@@ -329,7 +352,9 @@ public partial class MainWindow : Window
             if (_sharedSession is not null) { await _sharedSession.SaveLocalAsync(); _sharedDirty = true; }
             _hasPendingChanges = false;
             _saveErrorNotified = false;
-            SaveStatus.Text = $"Salvo localmente • {_currentProject.UpdatedAt.ToLocalTime():dd/MM/yyyy HH:mm:ss}";
+            ProjectClientSummary.Text = string.IsNullOrWhiteSpace(_currentProject.DefaultClient)
+                ? "Dados do cliente ainda não informados" : _currentProject.DefaultClient;
+            SaveStatus.Text = "✓ Salvo";
         }
         catch (Exception ex)
         {
@@ -466,7 +491,17 @@ public partial class MainWindow : Window
     {
         var dialog = new OpenFileDialog { Filter = filter, CheckFileExists = true };
         if (dialog.ShowDialog(this) != true) return;
-        target.Text = dialog.FileName; ScheduleSave();
+        target.Text = dialog.FileName;
+        RefreshFilePreviews();
+        ScheduleSave();
+    }
+
+    private void RefreshFilePreviews()
+    {
+        DefaultLogoPreview.Source = LoadBitmap(DefaultLogoBox.Text);
+        DefaultLogoStatus.Text = File.Exists(DefaultLogoBox.Text) ? "Imagem selecionada" : "Nenhuma imagem selecionada";
+        LocationImagePreview.Source = LoadBitmap(LocationImageBox.Text);
+        LocationImageStatus.Text = File.Exists(LocationImageBox.Text) ? "Imagem selecionada" : "Nenhuma imagem selecionada";
     }
 
     private void AddCustomSection_Click(object sender, RoutedEventArgs e)
@@ -516,8 +551,8 @@ public partial class MainWindow : Window
             GeneratedReportText.Text = "Preparando relatório... Processando trechos e inserindo imagens...";
             var path = await _wordReportService.GenerateToAsync(_currentProject, _currentReport, dialog.FileName);
             if (_sharedSession?.IsReadOnly != true) { _hasPendingChanges = true; await SavePendingAsync(); }
-            GeneratedReportText.Text = path; OpenReportButton.IsEnabled = true; OpenReportFolderButton.IsEnabled = true;
-            MessageBox.Show("RELATÓRIO GERADO COM SUCESSO\n\nUse os botões ‘Abrir arquivo’ ou ‘Abrir pasta’.",
+            GeneratedReportText.Text = "✓ Relatório gerado com sucesso"; OpenReportButton.IsEnabled = true; OpenReportFolderButton.IsEnabled = true;
+            MessageBox.Show("Relatório gerado com sucesso.\n\nUse os botões ‘Abrir arquivo’ ou ‘Abrir pasta’.",
                 "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex) { GeneratedReportText.Text = "Falha ao gerar relatório."; ShowError(ex.Message, ex); }
@@ -644,6 +679,7 @@ public partial class MainWindow : Window
         if (_currentProject is null || _currentSection is null)
         {
             CapturesList.ItemsSource = null;
+            PendingCapturesSummary.Text = "(0)";
             return;
         }
         CapturesList.ItemsSource = _currentProject.Captures
@@ -651,6 +687,7 @@ public partial class MainWindow : Window
             .OrderBy(x => x.Order)
             .Select(x => new CaptureListItem(x, FindVideo(x.VideoReferenceId)?.DisplayName ?? Path.GetFileName(x.VideoFilePath)))
             .ToList();
+        PendingCapturesSummary.Text = $"({_currentProject.Captures.Count(x => x.SectionId == _currentSection.Id && x.Status == CaptureStatus.Pending)})";
     }
 
     private void RefreshOccurrences()
@@ -709,22 +746,17 @@ public partial class MainWindow : Window
     private async void AddSection_Click(object sender, RoutedEventArgs e)
     {
         if (_currentProject is null || _currentLocation is null || IsReadOnly) return;
-        var name = TextPromptWindow.Ask(this, "Novo trecho", "Nome ou número do trecho:");
-        if (string.IsNullOrWhiteSpace(name)) return;
-        var diameterText = TextPromptWindow.Ask(this, "Novo trecho", "Diâmetro em mm (opcional):");
-        var description = TextPromptWindow.Ask(this, "Novo trecho", "Descrição (opcional):");
-        var startPoint = TextPromptWindow.Ask(this, "Novo trecho", "Ponto inicial (opcional):");
-        var endPoint = TextPromptWindow.Ask(this, "Novo trecho", "Ponto final (opcional):");
-        var reference = TextPromptWindow.Ask(this, "Novo trecho", "Referência (opcional):");
+        var draft = NewSectionWindow.Show(this);
+        if (draft is null) return;
         var section = new InspectionSection
         {
             LocationId = _currentLocation.Id,
-            Name = name.Trim(),
-            Description = EmptyToNull(description ?? ""),
-            Diameter = decimal.TryParse(diameterText, NumberStyles.Number, CultureInfo.CurrentCulture, out var diameter) ? diameter : null,
-            StartPoint = EmptyToNull(startPoint ?? ""),
-            EndPoint = EmptyToNull(endPoint ?? ""),
-            Reference = EmptyToNull(reference ?? ""),
+            Name = draft.Name,
+            Description = draft.Description,
+            Diameter = draft.Diameter,
+            StartPoint = draft.StartPoint,
+            EndPoint = draft.EndPoint,
+            Reference = draft.Reference,
             Order = _currentLocation.Sections.Count
         };
         _currentLocation.Sections.Add(section);
@@ -1248,7 +1280,7 @@ public partial class MainWindow : Window
     private void ScheduleSave()
     {
         if (_loadingFields || _currentProject is null || _sharedSession?.IsReadOnly == true) return;
-        _hasPendingChanges = true; SaveStatus.Text = "Alterações pendentes..."; _saveTimer.Stop(); _saveTimer.Start();
+        _hasPendingChanges = true; SaveStatus.Text = "Salvando..."; _saveTimer.Stop(); _saveTimer.Start();
     }
 
     private void ShowError(string message, Exception ex)

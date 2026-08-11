@@ -139,24 +139,23 @@
                                             <TextBlock x:Name="VideoMessage" Text="Selecione um trecho e um vídeo." Foreground="White" FontSize="16"
                                                        HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap"/>
                                             <Border x:Name="CapturePreviewPanel" Background="#F8FFFFFF" BorderBrush="#173C44" BorderThickness="2" CornerRadius="6" Padding="12" Margin="12" Visibility="Collapsed"
-                                                    HorizontalAlignment="Stretch" VerticalAlignment="Center" MaxWidth="560" MaxHeight="{Binding ActualHeight, ElementName=VideoView}">
+                                                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch" MaxWidth="900">
                                                 <Grid>
-                                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto"/><RowDefinition Height="*"/>
+                                                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                                    </Grid.RowDefinitions>
                                                     <DockPanel>
                                                         <Button Content="Fechar" DockPanel.Dock="Right" Click="RetakeCapture_Click" Padding="12,4"/>
                                                         <TextBlock Text="PREVIEW DA CAPTURA" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                                     </DockPanel>
-                                                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                                                        <StackPanel>
-                                                            <Image x:Name="CapturePreviewImage" Height="190" Stretch="Uniform" Margin="0,8"/>
-                                                            <TextBlock x:Name="CapturePreviewTimestamp" FontFamily="Consolas" HorizontalAlignment="Center"/>
-                                                            <WrapPanel HorizontalAlignment="Center" Margin="0,8,0,0">
-                                                                <Button Content="Refazer captura" Click="RetakeCapture_Click"/>
-                                                                <Button Content="Usar imagem / deixar pendente" Background="{StaticResource PrimaryBrush}" Foreground="White" Click="AcceptCapture_Click"/>
-                                                                <Button Content="Criar ocorrência agora" ToolTip="O formulário técnico completo será implementado na Etapa 4." Click="CreateOccurrenceFromCapture_Click"/>
-                                                            </WrapPanel>
-                                                        </StackPanel>
-                                                    </ScrollViewer>
+                                                    <Image x:Name="CapturePreviewImage" Grid.Row="1" Stretch="Uniform" Margin="0,8"/>
+                                                    <TextBlock x:Name="CapturePreviewTimestamp" Grid.Row="2" FontFamily="Consolas" HorizontalAlignment="Center"/>
+                                                    <WrapPanel Grid.Row="3" HorizontalAlignment="Center" Margin="0,8,0,0">
+                                                        <Button Content="Refazer captura" Click="RetakeCapture_Click"/>
+                                                        <Button Content="Usar imagem / deixar pendente" Background="{StaticResource PrimaryBrush}" Foreground="White" Click="AcceptCapture_Click"/>
+                                                        <Button Content="Criar ocorrência agora" ToolTip="O formulário técnico completo será implementado na Etapa 4." Click="CreateOccurrenceFromCapture_Click"/>
+                                                    </WrapPanel>
                                                 </Grid>
                                             </Border>
                                         </Grid>

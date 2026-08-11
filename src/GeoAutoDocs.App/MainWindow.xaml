@@ -154,7 +154,7 @@
                                                     <WrapPanel Grid.Row="3" HorizontalAlignment="Center" Margin="0,8,0,0">
                                                         <Button Content="Refazer captura" Click="RetakeCapture_Click"/>
                                                         <Button Content="Usar imagem / deixar pendente" Background="{StaticResource PrimaryBrush}" Foreground="White" Click="AcceptCapture_Click"/>
-                                                        <Button Content="Criar ocorrência agora" ToolTip="O formulário técnico completo será implementado na Etapa 4." Click="CreateOccurrenceFromCapture_Click"/>
+                                                        <Button Content="Criar ocorrência agora" ToolTip="Abre o formulário técnico com esta captura já associada." Click="CreateOccurrenceFromCapture_Click"/>
                                                     </WrapPanel>
                                                 </Grid>
                                             </Border>
@@ -203,6 +203,7 @@
 
                             <Grid Grid.Row="2">
                                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                 <TextBlock Text="CAPTURAS PENDENTES" FontWeight="SemiBold"/>
                                 <ListBox x:Name="CapturesList" Grid.Row="1" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                                     <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
@@ -212,9 +213,30 @@
                                             <TextBlock Text="{Binding Timestamp}" FontFamily="Consolas" FontWeight="SemiBold"/>
                                             <TextBlock Text="{Binding VideoName}" TextTrimming="CharacterEllipsis"/>
                                             <TextBlock Text="Pendente" Foreground="#9C6B16"/>
-                                            <StackPanel Orientation="Horizontal"><Button Content="Ir para momento" Tag="{Binding Id}" Click="GoToCapture_Click"/><Button Content="Excluir" Tag="{Binding Id}" Click="DeleteCapture_Click" Foreground="#9C2731"/></StackPanel>
+                                            <WrapPanel><Button Content="Ir para momento" Tag="{Binding Id}" Click="GoToCapture_Click"/><Button Content="Criar ocorrência" Tag="{Binding Id}" Click="CreateOccurrenceFromPending_Click"/><Button Content="Excluir" Tag="{Binding Id}" Click="DeleteCapture_Click" Foreground="#9C2731"/></WrapPanel>
                                         </StackPanel>
                                     </Border></DataTemplate></ListBox.ItemTemplate>
+                                </ListBox>
+                                <DockPanel Grid.Column="1" Margin="12,0,0,0">
+                                    <Button x:Name="NewOccurrenceButton" Content="+ Nova ocorrência" DockPanel.Dock="Right" Click="NewOccurrence_Click"/>
+                                    <TextBlock Text="OCORRÊNCIAS DO TRECHO" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                </DockPanel>
+                                <ListBox x:Name="OccurrencesList" Grid.Row="1" Grid.Column="1" Margin="12,0,0,0" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                    <ListBox.ItemTemplate><DataTemplate>
+                                        <Border BorderBrush="#D4DDDF" BorderThickness="1" CornerRadius="4" Padding="6" Margin="3">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="92"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                                <Image Source="{Binding Thumbnail}" Height="72" Width="86" Stretch="Uniform"/>
+                                                <StackPanel Grid.Column="1">
+                                                    <TextBlock Text="{Binding Location}" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="{Binding Anomalies}" TextWrapping="Wrap"/>
+                                                    <TextBlock Text="{Binding EvidenceSummary}" Foreground="#52676B"/>
+                                                    <TextBlock Text="{Binding Completeness}" Foreground="{Binding CompletenessColor}"/>
+                                                    <WrapPanel><Button Content="Abrir" Tag="{Binding Id}" Click="EditOccurrence_Click"/><Button Content="Ir para o vídeo" Tag="{Binding Id}" Click="GoToOccurrenceVideo_Click" IsEnabled="{Binding CanGoToVideo}"/><Button Content="Excluir" Tag="{Binding Id}" Click="DeleteOccurrence_Click" Foreground="#9C2731"/></WrapPanel>
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border></DataTemplate>
+                                    </ListBox.ItemTemplate>
                                 </ListBox>
                             </Grid>
                         </Grid>

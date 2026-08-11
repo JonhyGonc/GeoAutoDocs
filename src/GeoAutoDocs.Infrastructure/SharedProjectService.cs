@@ -173,6 +173,18 @@ public sealed class SharedProjectService(AppDataPaths paths)
             if (!PathsEqual(capture.FilePath, target)) await CopyAtomicallyAsync(capture.FilePath, target, cancellationToken);
             capture.SharedFilePath = target;
         }
+
+        var evidenceDirectory = Path.Combine(sharedDirectory, "evidence");
+        foreach (var evidence in project.Locations.SelectMany(x => x.Sections).SelectMany(x => x.Occurrences)
+                     .SelectMany(x => x.Evidence).Where(x => x.SourceType == EvidenceSourceType.ExternalImage &&
+                         x.ManagedByGeoAutoDocs && File.Exists(x.FilePath)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Directory.CreateDirectory(evidenceDirectory);
+            var target = Path.Combine(evidenceDirectory, $"evidence_{evidence.Id:N}{Path.GetExtension(evidence.FilePath).ToLowerInvariant()}");
+            if (!PathsEqual(evidence.FilePath, target)) await CopyAtomicallyAsync(evidence.FilePath, target, cancellationToken);
+            evidence.SharedFilePath = target;
+        }
     }
 
     private static async Task RestoreCapturesToCacheAsync(Project project, string cacheDirectory,
@@ -192,6 +204,28 @@ public sealed class SharedProjectService(AppDataPaths paths)
             Directory.CreateDirectory(captureDirectory);
             await CopyAtomicallyAsync(capture.SharedFilePath, local, cancellationToken);
             capture.FilePath = local;
+        }
+
+        var captures = project.Captures.ToDictionary(x => x.Id);
+        var evidenceDirectory = Path.Combine(cacheDirectory, "evidence");
+        foreach (var evidence in project.Locations.SelectMany(x => x.Sections).SelectMany(x => x.Occurrences).SelectMany(x => x.Evidence))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (evidence.CaptureId is Guid captureId && captures.TryGetValue(captureId, out var capture))
+            {
+                evidence.FilePath = capture.FilePath;
+                evidence.VideoReferenceId = capture.VideoReferenceId;
+                evidence.VideoTimestamp = capture.VideoTimestamp;
+                continue;
+            }
+            if (evidence.SourceType != EvidenceSourceType.ExternalImage || !evidence.ManagedByGeoAutoDocs) continue;
+            var local = Path.Combine(evidenceDirectory, $"evidence_{evidence.Id:N}{Path.GetExtension(evidence.FilePath).ToLowerInvariant()}");
+            if (!File.Exists(local) && !string.IsNullOrWhiteSpace(evidence.SharedFilePath) && File.Exists(evidence.SharedFilePath))
+            {
+                Directory.CreateDirectory(evidenceDirectory);
+                await CopyAtomicallyAsync(evidence.SharedFilePath, local, cancellationToken);
+            }
+            if (File.Exists(local)) evidence.FilePath = local;
         }
     }
 

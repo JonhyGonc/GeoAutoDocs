@@ -9,6 +9,7 @@ public sealed class GeoAutoDocsDbContext(DbContextOptions<GeoAutoDocsDbContext> 
     public DbSet<Report> Reports => Set<Report>();
     public DbSet<ReportSection> ReportSections => Set<ReportSection>();
     public DbSet<AnomalyDefinition> AnomalyDefinitions => Set<AnomalyDefinition>();
+    public DbSet<OccurrenceAnomaly> OccurrenceAnomalies => Set<OccurrenceAnomaly>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -50,8 +51,20 @@ public sealed class GeoAutoDocsDbContext(DbContextOptions<GeoAutoDocsDbContext> 
             .HasForeignKey(x => x.OccurrenceId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<Occurrence>().HasOne<VideoReference>().WithMany()
             .HasForeignKey(x => x.VideoReferenceId).OnDelete(DeleteBehavior.SetNull);
-        modelBuilder.Entity<Occurrence>().HasMany(x => x.Anomalies).WithMany(x => x.Occurrences)
-            .UsingEntity("OccurrenceAnomaly");
+        modelBuilder.Entity<Occurrence>().HasMany(x => x.Anomalies).WithOne()
+            .HasForeignKey(x => x.OccurrenceId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<OccurrenceAnomaly>(entity =>
+        {
+            entity.ToTable("OccurrenceAnomaly");
+            entity.HasKey(x => new { x.AnomalyTypeId, x.OccurrenceId });
+            entity.Property(x => x.AnomalyTypeId).HasColumnName("AnomaliesId");
+            entity.Property(x => x.OccurrenceId).HasColumnName("OccurrencesId");
+            entity.HasOne(x => x.AnomalyType).WithMany()
+                .HasForeignKey(x => x.AnomalyTypeId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<Evidence>().HasOne<Capture>().WithMany()
+            .HasForeignKey(x => x.CaptureId).OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Evidence>().HasIndex(x => x.CaptureId).IsUnique();
 
         modelBuilder.Entity<Report>().Property(x => x.TotalInvestigatedMeters).HasPrecision(12, 3);
         modelBuilder.Entity<InspectionSection>().Property(x => x.Diameter).HasPrecision(12, 3);

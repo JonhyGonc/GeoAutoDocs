@@ -271,12 +271,16 @@ public sealed class WordReportService
 
     private static string FormatOccurrenceForReport(Occurrence occurrence)
     {
+        if (!string.IsNullOrWhiteSpace(occurrence.ManualDescriptionOverride))
+            return occurrence.ManualDescriptionOverride.Trim();
         if (!string.IsNullOrWhiteSpace(occurrence.CustomGeneratedText))
             return occurrence.CustomGeneratedText.Trim();
+        if (!string.IsNullOrWhiteSpace(occurrence.GeneratedDescription))
+            return occurrence.GeneratedDescription.Trim();
 
         var description = occurrence.Anomalies.Count == 0
             ? "Ocorrência registrada"
-            : string.Join(", ", occurrence.Anomalies.OrderBy(x => x.Order).Select(x => x.Name));
+            : string.Join(", ", occurrence.Anomalies.OrderBy(x => x.Order).Select(x => x.AnomalyType.Name));
         description += occurrence.LocationMode switch
         {
             OccurrenceLocationMode.SpecificMeterage when occurrence.Meterage is not null =>

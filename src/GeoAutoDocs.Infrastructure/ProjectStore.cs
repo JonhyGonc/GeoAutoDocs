@@ -25,6 +25,9 @@ public sealed class ProjectStore : IProjectStore
         await db.Database.EnsureCreatedAsync(cancellationToken);
         await BackupLegacyDatabaseAsync(db, cancellationToken);
         await EnsureStage25SchemaAsync(db, cancellationToken);
+        await BackupStage4DatabaseAsync(db, cancellationToken);
+        await EnsureStage4SchemaAsync(db, cancellationToken);
+        await EnsureAnomalyCatalogAsync(db, cancellationToken);
     }
 
     public async Task<IReadOnlyList<Project>> ListAsync(CancellationToken cancellationToken = default)
@@ -42,7 +45,8 @@ public sealed class ProjectStore : IProjectStore
             .Include(x => x.Reports).ThenInclude(x => x.CustomSections).ThenInclude(x => x.Images)
             .Include(x => x.Reports).ThenInclude(x => x.SectionLinks).ThenInclude(x => x.Section)
             .Include(x => x.Locations).ThenInclude(x => x.Sections).ThenInclude(x => x.VideoReferences)
-            .Include(x => x.Locations).ThenInclude(x => x.Sections).ThenInclude(x => x.Occurrences).ThenInclude(x => x.Anomalies)
+            .Include(x => x.Locations).ThenInclude(x => x.Sections).ThenInclude(x => x.Occurrences)
+                .ThenInclude(x => x.Anomalies).ThenInclude(x => x.AnomalyType)
             .Include(x => x.Locations).ThenInclude(x => x.Sections).ThenInclude(x => x.Occurrences).ThenInclude(x => x.Evidence)
             .Include(x => x.Captures)
             .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
@@ -64,6 +68,14 @@ public sealed class ProjectStore : IProjectStore
         db.Projects.Add(project);
         await db.SaveChangesAsync(cancellationToken);
         return project;
+    }
+
+    public async Task<IReadOnlyList<AnomalyDefinition>> ListAnomalyDefinitionsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = CreateContext();
+        return await db.AnomalyDefinitions.AsNoTracking().Where(x => x.IsActive)
+            .OrderBy(x => x.Order).ThenBy(x => x.Name).ToListAsync(cancellationToken);
     }
 
     public async Task SaveAsync(Project project, CancellationToken cancellationToken = default)
@@ -125,7 +137,12 @@ public sealed class ProjectStore : IProjectStore
             {
                 section.LocationId = location.Id;
                 foreach (var video in section.VideoReferences) video.InspectionSectionId = section.Id;
-                foreach (var occurrence in section.Occurrences) occurrence.InspectionSectionId = section.Id;
+                foreach (var occurrence in section.Occurrences)
+                {
+                    occurrence.InspectionSectionId = section.Id;
+                    foreach (var anomaly in occurrence.Anomalies) anomaly.OccurrenceId = occurrence.Id;
+                    foreach (var evidence in occurrence.Evidence) evidence.OccurrenceId = occurrence.Id;
+                }
             }
         }
 
@@ -163,6 +180,20 @@ public sealed class ProjectStore : IProjectStore
             var storedVideos = await db.Set<VideoReference>()
                 .Where(x => sectionIds.Contains(x.InspectionSectionId)).ToListAsync(cancellationToken);
             db.RemoveRange(storedVideos.Where(x => !currentVideoIds.Contains(x.Id)));
+
+            var currentOccurrences = project.Locations.SelectMany(x => x.Sections)
+                .SelectMany(x => x.Occurrences).ToDictionary(x => x.Id);
+            var storedOccurrences = await db.Set<Occurrence>().Include(x => x.Anomalies).Include(x => x.Evidence)
+                .Where(x => sectionIds.Contains(x.InspectionSectionId)).ToListAsync(cancellationToken);
+            db.RemoveRange(storedOccurrences.Where(x => !currentOccurrences.ContainsKey(x.Id)));
+            foreach (var stored in storedOccurrences.Where(x => currentOccurrences.ContainsKey(x.Id)))
+            {
+                var current = currentOccurrences[stored.Id];
+                var evidenceIds = current.Evidence.Select(x => x.Id).ToHashSet();
+                db.RemoveRange(stored.Evidence.Where(x => !evidenceIds.Contains(x.Id)));
+                var anomalyIds = current.Anomalies.Select(x => x.AnomalyTypeId).ToHashSet();
+                db.OccurrenceAnomalies.RemoveRange(stored.Anomalies.Where(x => !anomalyIds.Contains(x.AnomalyTypeId)));
+            }
         }
 
         var currentCaptureIds = project.Captures.Select(x => x.Id).ToHashSet();
@@ -176,6 +207,13 @@ public sealed class ProjectStore : IProjectStore
     {
         if (!File.Exists(_databasePath) || await ColumnExistsAsync(db, "ReportConfiguration", "Name", cancellationToken)) return;
         var backup = _databasePath + ".pre-stage25.bak";
+        if (!File.Exists(backup)) File.Copy(_databasePath, backup);
+    }
+
+    private async Task BackupStage4DatabaseAsync(GeoAutoDocsDbContext db, CancellationToken cancellationToken)
+    {
+        if (!File.Exists(_databasePath) || await ColumnExistsAsync(db, "Occurrence", "GeneratedDescription", cancellationToken)) return;
+        var backup = _databasePath + ".pre-stage4.bak";
         if (!File.Exists(backup)) File.Copy(_databasePath, backup);
     }
 
@@ -253,6 +291,68 @@ public sealed class ProjectStore : IProjectStore
                 "ReportId")
             WHERE "ReportId" = '00000000-0000-0000-0000-000000000000';
             """, cancellationToken);
+    }
+
+    private static async Task EnsureStage4SchemaAsync(GeoAutoDocsDbContext db, CancellationToken cancellationToken)
+    {
+        var sectionColumns = new (string, string)[]
+        {
+            ("Description", "TEXT NULL"), ("StartPoint", "TEXT NULL"), ("EndPoint", "TEXT NULL")
+        };
+        var occurrenceColumns = new (string, string)[]
+        {
+            ("ReferencePoint", "TEXT NULL"), ("GeneratedDescription", "TEXT NOT NULL DEFAULT ''"),
+            ("ManualDescriptionOverride", "TEXT NULL"),
+            ("CreatedAt", "TEXT NOT NULL DEFAULT '0001-01-01 00:00:00'"),
+            ("UpdatedAt", "TEXT NOT NULL DEFAULT '0001-01-01 00:00:00'")
+        };
+        var anomalyColumns = new (string, string)[]
+        {
+            ("RequiresPosition", "INTEGER NOT NULL DEFAULT 0"),
+            ("AllowsCustomText", "INTEGER NOT NULL DEFAULT 0")
+        };
+        var occurrenceAnomalyColumns = new (string, string)[]
+        {
+            ("Position", "INTEGER NOT NULL DEFAULT 0"), ("CustomText", "TEXT NULL"),
+            ("Order", "INTEGER NOT NULL DEFAULT 0")
+        };
+        var evidenceColumns = new (string, string)[]
+        {
+            ("CaptureId", "TEXT NULL"), ("SourceType", "INTEGER NOT NULL DEFAULT 1"),
+            ("VideoReferenceId", "TEXT NULL"), ("ManagedByGeoAutoDocs", "INTEGER NOT NULL DEFAULT 0"),
+            ("SharedFilePath", "TEXT NULL")
+        };
+
+        foreach (var column in sectionColumns) await AddColumnIfMissingAsync(db, "InspectionSection", column.Item1, column.Item2, cancellationToken);
+        foreach (var column in occurrenceColumns) await AddColumnIfMissingAsync(db, "Occurrence", column.Item1, column.Item2, cancellationToken);
+        foreach (var column in anomalyColumns) await AddColumnIfMissingAsync(db, "AnomalyDefinitions", column.Item1, column.Item2, cancellationToken);
+        foreach (var column in occurrenceAnomalyColumns) await AddColumnIfMissingAsync(db, "OccurrenceAnomaly", column.Item1, column.Item2, cancellationToken);
+        foreach (var column in evidenceColumns) await AddColumnIfMissingAsync(db, "Evidence", column.Item1, column.Item2, cancellationToken);
+
+        await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS \"IX_Evidence_CaptureId\" ON \"Evidence\" (\"CaptureId\") WHERE \"CaptureId\" IS NOT NULL", cancellationToken);
+        await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS \"IX_Evidence_VideoReferenceId\" ON \"Evidence\" (\"VideoReferenceId\")", cancellationToken);
+    }
+
+    private static async Task EnsureAnomalyCatalogAsync(GeoAutoDocsDbContext db, CancellationToken cancellationToken)
+    {
+        var existing = await db.AnomalyDefinitions.ToListAsync(cancellationToken);
+        foreach (var item in AnomalyCatalog.Defaults)
+        {
+            var stored = existing.FirstOrDefault(x => x.Id == item.Id) ??
+                         existing.FirstOrDefault(x => x.Name.Equals(item.Name, StringComparison.OrdinalIgnoreCase));
+            if (stored is null)
+            {
+                db.AnomalyDefinitions.Add(new AnomalyDefinition
+                {
+                    Id = item.Id, Name = item.Name, IsActive = item.IsActive, Order = item.Order,
+                    RequiresPosition = item.RequiresPosition, AllowsCustomText = item.AllowsCustomText
+                });
+                continue;
+            }
+            stored.RequiresPosition = item.RequiresPosition;
+            stored.AllowsCustomText = item.AllowsCustomText;
+        }
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private static async Task AddColumnIfMissingAsync(GeoAutoDocsDbContext db, string table, string name,

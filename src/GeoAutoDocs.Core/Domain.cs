@@ -137,7 +137,10 @@ public sealed class InspectionSection
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid LocationId { get; set; }
     public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
     public decimal? Diameter { get; set; }
+    public string? StartPoint { get; set; }
+    public string? EndPoint { get; set; }
     public string? Reference { get; set; }
     public decimal? InvestigatedMeters { get; set; }
     public int Order { get; set; }
@@ -168,7 +171,16 @@ public sealed class VideoReference
     [NotMapped] public bool IsAvailable => File.Exists(FilePath);
 }
 
-public enum OccurrenceLocationMode { SpecificMeterage, Interval, EntireSection, NotApplicable }
+public enum OccurrenceLocationMode
+{
+    Point = 0, Range = 1, EntireSection = 2, NotApplicable = 3,
+    SpecificMeterage = Point, Interval = Range
+}
+
+public enum AnomalyPosition
+{
+    NotReported, UpperGenerator, LowerGenerator, LeftSide, RightSide, Circumferential, NotApplicable
+}
 
 public sealed class Occurrence
 {
@@ -179,12 +191,21 @@ public sealed class Occurrence
     public decimal? Meterage { get; set; }
     public decimal? EndMeterage { get; set; }
     public TimeSpan? VideoTimestamp { get; set; }
+    public string? ReferencePoint { get; set; }
     public string? Position { get; set; }
     public string? Notes { get; set; }
     public string? CustomGeneratedText { get; set; }
+    public string GeneratedDescription { get; set; } = string.Empty;
+    public string? ManualDescriptionOverride { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
     public int Order { get; set; }
-    public List<AnomalyDefinition> Anomalies { get; set; } = [];
+    public List<OccurrenceAnomaly> Anomalies { get; set; } = [];
     public List<Evidence> Evidence { get; set; } = [];
+
+    [NotMapped]
+    public string EffectiveDescription => string.IsNullOrWhiteSpace(ManualDescriptionOverride)
+        ? GeneratedDescription : ManualDescriptionOverride.Trim();
 }
 
 public sealed class AnomalyDefinition
@@ -193,17 +214,35 @@ public sealed class AnomalyDefinition
     public string Name { get; set; } = string.Empty;
     public bool IsActive { get; set; } = true;
     public int Order { get; set; }
-    public List<Occurrence> Occurrences { get; set; } = [];
+    public bool RequiresPosition { get; set; }
+    public bool AllowsCustomText { get; set; }
 }
+
+public sealed class OccurrenceAnomaly
+{
+    public Guid OccurrenceId { get; set; }
+    public Guid AnomalyTypeId { get; set; }
+    public AnomalyPosition Position { get; set; } = AnomalyPosition.NotReported;
+    public string? CustomText { get; set; }
+    public int Order { get; set; }
+    public AnomalyDefinition AnomalyType { get; set; } = null!;
+}
+
+public enum EvidenceSourceType { VideoCapture, ExternalImage }
 
 public sealed class Evidence
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid OccurrenceId { get; set; }
+    public Guid? CaptureId { get; set; }
+    public EvidenceSourceType SourceType { get; set; }
+    public Guid? VideoReferenceId { get; set; }
     public string FilePath { get; set; } = string.Empty;
     public TimeSpan? VideoTimestamp { get; set; }
     public int Order { get; set; }
     public string? Caption { get; set; }
+    public bool ManagedByGeoAutoDocs { get; set; }
+    public string? SharedFilePath { get; set; }
 }
 
 public enum CaptureStatus { Pending, Assigned }

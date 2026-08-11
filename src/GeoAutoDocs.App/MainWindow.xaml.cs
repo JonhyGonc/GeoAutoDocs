@@ -22,6 +22,7 @@ public partial class MainWindow : Window
     private readonly SharedProjectService _sharedProjects;
     private readonly LocalLogger _logger;
     private readonly FrameCaptureService _frameCaptureService;
+    private readonly OccurrenceService _occurrenceService;
     private readonly LibVLC _libVlc;
     private readonly MediaPlayer _mediaPlayer;
     private readonly DispatcherTimer _saveTimer;
@@ -48,7 +49,8 @@ public partial class MainWindow : Window
     private bool _loadingInspections;
 
     public MainWindow(IProjectStore store, WordReportService wordReportService,
-        SharedProjectService sharedProjects, LocalLogger logger, FrameCaptureService frameCaptureService)
+        SharedProjectService sharedProjects, LocalLogger logger, FrameCaptureService frameCaptureService,
+        OccurrenceService occurrenceService)
     {
         InitializeComponent();
         _store = store;
@@ -56,6 +58,7 @@ public partial class MainWindow : Window
         _sharedProjects = sharedProjects;
         _logger = logger;
         _frameCaptureService = frameCaptureService;
+        _occurrenceService = occurrenceService;
         LibVLCSharp.Shared.Core.Initialize();
         _libVlc = new LibVLC("--no-video-title-show", "--quiet");
         _mediaPlayer = new MediaPlayer(_libVlc);
@@ -463,6 +466,7 @@ public partial class MainWindow : Window
         SectionsList.SelectedItem = _currentSection;
         RefreshVideos();
         RefreshCaptures();
+        RefreshOccurrences();
         UpdateInspectionWriteState();
     }
 
@@ -492,6 +496,19 @@ public partial class MainWindow : Window
             .ToList();
     }
 
+    private void RefreshOccurrences()
+    {
+        if (_currentSection is null)
+        {
+            OccurrencesList.ItemsSource = null;
+            return;
+        }
+        OccurrencesList.ItemsSource = _currentSection.Occurrences
+            .OrderBy(x => x.LocationMode == OccurrenceLocationMode.EntireSection ? 1 : 0)
+            .ThenBy(x => x.Meterage ?? decimal.MaxValue).ThenBy(x => x.Order)
+            .Select(x => new OccurrenceListItem(x)).ToList();
+    }
+
     private void UpdateInspectionWriteState()
     {
         AddLocationButton.IsEnabled = !IsReadOnly && _currentProject is not null;
@@ -500,6 +517,7 @@ public partial class MainWindow : Window
         CaptureFrameButton.IsEnabled = !IsReadOnly && _currentVideo is not null && File.Exists(_currentVideo.FilePath);
         RelocateVideoButton.IsEnabled = !IsReadOnly && _currentVideo is not null && !File.Exists(_currentVideo.FilePath);
         RemoveVideoButton.IsEnabled = !IsReadOnly && _currentVideo is not null;
+        NewOccurrenceButton.IsEnabled = !IsReadOnly && _currentSection is not null;
     }
 
     private async void AddLocation_Click(object sender, RoutedEventArgs e)
@@ -520,12 +538,18 @@ public partial class MainWindow : Window
         var name = TextPromptWindow.Ask(this, "Novo trecho", "Nome ou número do trecho:");
         if (string.IsNullOrWhiteSpace(name)) return;
         var diameterText = TextPromptWindow.Ask(this, "Novo trecho", "Diâmetro em mm (opcional):");
+        var description = TextPromptWindow.Ask(this, "Novo trecho", "Descrição (opcional):");
+        var startPoint = TextPromptWindow.Ask(this, "Novo trecho", "Ponto inicial (opcional):");
+        var endPoint = TextPromptWindow.Ask(this, "Novo trecho", "Ponto final (opcional):");
         var reference = TextPromptWindow.Ask(this, "Novo trecho", "Referência (opcional):");
         var section = new InspectionSection
         {
             LocationId = _currentLocation.Id,
             Name = name.Trim(),
+            Description = EmptyToNull(description ?? ""),
             Diameter = decimal.TryParse(diameterText, NumberStyles.Number, CultureInfo.CurrentCulture, out var diameter) ? diameter : null,
+            StartPoint = EmptyToNull(startPoint ?? ""),
+            EndPoint = EmptyToNull(endPoint ?? ""),
             Reference = EmptyToNull(reference ?? ""),
             Order = _currentLocation.Sections.Count
         };
@@ -556,6 +580,7 @@ public partial class MainWindow : Window
         _loadingInspections = true;
         RefreshVideos();
         RefreshCaptures();
+        RefreshOccurrences();
         _loadingInspections = false;
     }
 
@@ -702,15 +727,82 @@ public partial class MainWindow : Window
     private async Task AcceptCaptureDraftAsync(bool createOccurrence)
     {
         if (_currentProject is null || _captureDraft is null || IsReadOnly) return;
-        _frameCaptureService.Accept(_currentProject, _captureDraft, IsReadOnly);
+        var capture = _frameCaptureService.Accept(_currentProject, _captureDraft, IsReadOnly);
         _captureDraft = null;
         CapturePreviewPanel.Visibility = Visibility.Collapsed;
         CapturePreviewImage.Source = null;
         RefreshCaptures();
         await SaveInspectionChangesAsync();
-        if (createOccurrence)
-            MessageBox.Show("Captura preservada como pendente. O formulário técnico de ocorrência será conectado na Etapa 4.",
-                "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Information);
+        if (createOccurrence) await OpenOccurrenceEditorAsync(null, capture);
+    }
+
+    private async void NewOccurrence_Click(object sender, RoutedEventArgs e) =>
+        await OpenOccurrenceEditorAsync(null, null);
+
+    private async void CreateOccurrenceFromPending_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null || ((Button)sender).Tag is not Guid id || IsReadOnly) return;
+        await OpenOccurrenceEditorAsync(null, _currentProject.Captures.SingleOrDefault(x => x.Id == id));
+    }
+
+    private async void EditOccurrence_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentSection is null || ((Button)sender).Tag is not Guid id) return;
+        await OpenOccurrenceEditorAsync(_currentSection.Occurrences.SingleOrDefault(x => x.Id == id), null);
+    }
+
+    private async Task OpenOccurrenceEditorAsync(Occurrence? occurrence, Capture? initialCapture)
+    {
+        if (_currentProject is null || _currentSection is null || (occurrence is null && IsReadOnly)) return;
+        try
+        {
+            var catalog = await _store.ListAnomalyDefinitionsAsync();
+            var window = new OccurrenceWindow(_currentProject, _currentSection, catalog, _occurrenceService,
+                occurrence, initialCapture, IsReadOnly) { Owner = this };
+            if (window.ShowDialog() != true || window.SavedDraft is null) return;
+            await _occurrenceService.SaveAsync(_currentProject, _currentSection, window.SavedDraft, IsReadOnly);
+            RefreshCaptures();
+            RefreshOccurrences();
+            await SaveInspectionChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Falha ao salvar ocorrência técnica.", ex);
+            ShowError("Não foi possível salvar a ocorrência.", ex);
+        }
+    }
+
+    private async void DeleteOccurrence_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null || _currentSection is null || ((Button)sender).Tag is not Guid id || IsReadOnly) return;
+        var occurrence = _currentSection.Occurrences.SingleOrDefault(x => x.Id == id);
+        if (occurrence is null || MessageBox.Show("Excluir esta ocorrência? As capturas vinculadas voltarão para Pendentes.",
+                "Confirmar exclusão", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        _occurrenceService.Delete(_currentProject, _currentSection, occurrence, IsReadOnly);
+        RefreshCaptures();
+        RefreshOccurrences();
+        await SaveInspectionChangesAsync();
+    }
+
+    private async void GoToOccurrenceVideo_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null || _currentSection is null || ((Button)sender).Tag is not Guid id) return;
+        var occurrence = _currentSection.Occurrences.SingleOrDefault(x => x.Id == id);
+        var evidence = occurrence?.Evidence.OrderBy(x => x.Order)
+            .FirstOrDefault(x => x.VideoReferenceId is not null && x.VideoTimestamp is not null);
+        if (evidence?.VideoReferenceId is not Guid videoId || evidence.VideoTimestamp is null) return;
+        var video = FindVideo(videoId);
+        var location = _currentProject.Locations.FirstOrDefault(x => x.Sections.Any(y => y.Id == _currentSection.Id));
+        if (video is null || location is null) return;
+        _loadingInspections = true;
+        _currentLocation = location; _currentVideo = video;
+        LocationsList.SelectedItem = location;
+        SectionsList.ItemsSource = location.Sections.OrderBy(x => x.Order).ToList();
+        SectionsList.SelectedItem = _currentSection;
+        RefreshVideos();
+        VideosList.SelectedItem = ((IEnumerable<VideoListItem>)VideosList.ItemsSource).FirstOrDefault(x => x.Id == video.Id);
+        _loadingInspections = false;
+        await LoadVideoAsync(video, evidence.VideoTimestamp);
     }
 
     private async void DeleteCapture_Click(object sender, RoutedEventArgs e)
@@ -875,6 +967,14 @@ public partial class MainWindow : Window
         return image;
     }
 
+    private static BitmapImage? LoadThumbnail(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return null;
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad;
+        image.DecodePixelWidth = 220; image.StreamSource = stream; image.EndInit(); image.Freeze(); return image;
+    }
+
     private sealed class VideoListItem
     {
         private readonly VideoReference _video;
@@ -890,9 +990,37 @@ public partial class MainWindow : Window
     private sealed class CaptureListItem(Capture capture, string? videoName)
     {
         public Guid Id => capture.Id;
-        public BitmapImage? Thumbnail { get; } = LoadBitmap(capture.FilePath);
+        public BitmapImage? Thumbnail { get; } = LoadThumbnail(capture.FilePath);
         public string Timestamp => FormatTime(capture.VideoTimestamp);
         public string VideoName => string.IsNullOrWhiteSpace(videoName) ? "Vídeo de origem" : videoName;
+    }
+
+    private sealed class OccurrenceListItem
+    {
+        public Guid Id { get; }
+        public BitmapImage? Thumbnail { get; }
+        public string Location { get; }
+        public string Anomalies { get; }
+        public string EvidenceSummary { get; }
+        public string Completeness { get; }
+        public string CompletenessColor { get; }
+        public bool CanGoToVideo { get; }
+
+        public OccurrenceListItem(Occurrence occurrence)
+        {
+            Id = occurrence.Id;
+            Location = OccurrenceRules.FormatLocation(occurrence);
+            Anomalies = string.Join(" + ", occurrence.Anomalies.OrderBy(x => x.Order).Select(x =>
+                x.AnomalyType.AllowsCustomText && !string.IsNullOrWhiteSpace(x.CustomText)
+                    ? $"Outro: {x.CustomText}" : x.AnomalyType.Name));
+            EvidenceSummary = $"{occurrence.Evidence.Count} imagem(ns)";
+            var first = occurrence.Evidence.OrderBy(x => x.Order).FirstOrDefault(x => File.Exists(x.FilePath));
+            Thumbnail = LoadThumbnail(first?.FilePath);
+            CanGoToVideo = occurrence.Evidence.Any(x => x.VideoReferenceId is not null && x.VideoTimestamp is not null);
+            var complete = OccurrenceRules.IsComplete(occurrence);
+            Completeness = complete ? "✓ Completa" : "⚠ Sem imagem ou descrição";
+            CompletenessColor = complete ? "#4C7161" : "#9C6B16";
+        }
     }
 
     private void ScheduleSave()

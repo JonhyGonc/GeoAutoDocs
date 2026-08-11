@@ -23,7 +23,7 @@ public partial class App : Application
             var store = new ProjectStore(paths);
             await store.InitializeAsync();
             new MainWindow(store, new WordReportService(paths), new SharedProjectService(paths), _logger,
-                new FrameCaptureService(paths, _logger)).Show();
+                new FrameCaptureService(paths, _logger), new OccurrenceService(paths, _logger)).Show();
         }
         catch (Exception ex)
         {

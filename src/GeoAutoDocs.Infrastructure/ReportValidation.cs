@@ -25,7 +25,6 @@ public static class ReportValidation
         Required(report.ReportCode, "Código do relatório", errors);
         Required(report.Contract, "Contrato", errors);
         Required(report.PurchaseOrder, "Pedido de compra", errors);
-        Required(report.LocationDescription, "Descrição da localização", errors);
         if (report.ReportDate is null) errors.Add("Informe a data do relatório.");
         if (report.TotalInvestigatedMeters is null or <= 0) errors.Add("Informe a metragem total investigada.");
         if (report.Diameters == StandardDiameterSelection.None &&

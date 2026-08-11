@@ -243,6 +243,28 @@ public sealed class Stage5ReportTests : IDisposable
         Assert.Contains("Trinca na geratriz superior e assoreamento na parede da tubulação a 25 metros do início da filmagem, interrompendo a gravação.", text);
     }
 
+    [Fact]
+    public async Task WordFigureCaptionOmitsMeterageAndFilmingReference()
+    {
+        var project = NewProject();
+        var report = project.CreateReport("Relatório de legenda");
+        Configure(report, "GF-RL-CAPTION-001");
+        var (_, section) = AddSection(project, "Local", "Trecho", 0, 0);
+        report.SelectSection(section);
+        var occurrence = AddOccurrence(section, OccurrenceLocationMode.Point, 25m, null,
+            ["Deslocamento das juntas"]);
+        occurrence.Anomalies[0].Position = AnomalyPosition.UpperGenerator;
+        occurrence.GeneratedDescription = OccurrenceRules.GenerateDescription(occurrence);
+        AddEvidence(occurrence, 1, "Legenda antiga com metragem a 25 metros");
+
+        var output = await new WordReportService(_paths).GenerateAsync(project, report);
+        var text = ReadBody(output);
+
+        Assert.Contains("Deslocamento das juntas na geratriz superior a 25 metros do início da filmagem", text);
+        Assert.Contains("Figura 4.1 – Deslocamento das juntas na geratriz superior.", text);
+        Assert.DoesNotContain("Figura 4.1 – Deslocamento das juntas na geratriz superior a 25 metros", text);
+    }
+
     private Project NewProject() => new()
     {
         Id = Guid.NewGuid(), Name = "Projeto Etapa 5", CreatedAt = DateTime.UtcNow,

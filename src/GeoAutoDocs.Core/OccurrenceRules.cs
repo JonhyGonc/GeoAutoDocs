@@ -5,6 +5,17 @@ namespace GeoAutoDocs.Core;
 public static class AnomalyCatalog
 {
     public static readonly Guid OtherId = Guid.Parse("9f2f34e7-07c1-4c29-a25c-4d62cf43300c");
+    public static IReadOnlySet<Guid> PrimaryIds { get; } = new HashSet<Guid>
+    {
+        Guid.Parse("9f2f34e7-07c1-4c29-a25c-4d62cf433001"),
+        Guid.Parse("9f2f34e7-07c1-4c29-a25c-4d62cf433002"),
+        Guid.Parse("9f2f34e7-07c1-4c29-a25c-4d62cf433003"),
+        Guid.Parse("9f2f34e7-07c1-4c29-a25c-4d62cf433006"),
+        Guid.Parse("9f2f34e7-07c1-4c29-a25c-4d62cf43300a"),
+        Guid.Parse("9f2f34e7-07c1-4c29-a25c-4d62cf43300f"),
+        Guid.Parse("9f2f34e7-07c1-4c29-a25c-4d62cf433004"),
+        Guid.Parse("9f2f34e7-07c1-4c29-a25c-4d62cf43300b")
+    };
 
     public static IReadOnlyList<AnomalyDefinition> Defaults { get; } =
     [
@@ -21,7 +32,7 @@ public static class AnomalyCatalog
         New("9f2f34e7-07c1-4c29-a25c-4d62cf43300b", "Caixa de passagem", 10),
         New("9f2f34e7-07c1-4c29-a25c-4d62cf43300d", "Raiz", 11, extension: true, dimension: true, condition: true, percentage: true),
         New("9f2f34e7-07c1-4c29-a25c-4d62cf43300e", "Material depositado", 12, extension: true, dimension: true, condition: true),
-        New("9f2f34e7-07c1-4c29-a25c-4d62cf43300f", "Deslocamento de junta", 13, dimension: true, condition: true),
+        New("9f2f34e7-07c1-4c29-a25c-4d62cf43300f", "Deslocamento das juntas", 13, dimension: true, condition: true),
         New("9f2f34e7-07c1-4c29-a25c-4d62cf433010", "Junta aberta", 14, dimension: true, condition: true),
         New("9f2f34e7-07c1-4c29-a25c-4d62cf433011", "Rompimento", 15, orientation: true, extension: true, dimension: true, condition: true),
         New(OtherId.ToString(), "Outro", 16, allowsCustomText: true, orientation: true, extension: true, dimension: true, condition: true)
@@ -42,6 +53,16 @@ public static class AnomalyCatalog
 
 public static class OccurrenceRules
 {
+    public static IReadOnlyList<AnomalyPosition> SelectablePositions { get; } =
+    [
+        AnomalyPosition.NotApplicable,
+        AnomalyPosition.UpperGenerator,
+        AnomalyPosition.LowerGenerator,
+        AnomalyPosition.LeftSide,
+        AnomalyPosition.RightSide,
+        AnomalyPosition.Circumferential
+    ];
+
     public static void Validate(Occurrence occurrence)
     {
         if (occurrence.InspectionSectionId == Guid.Empty)
@@ -96,8 +117,7 @@ public static class OccurrenceRules
     public static string GenerateDescription(Occurrence occurrence)
     {
         var ordered = occurrence.Anomalies.OrderBy(x => x.Order).ToList();
-        var groups = ordered.GroupBy(x => x.Position).OrderBy(x => x.Min(y => y.Order)).ToList();
-        var anomalyText = groups.Select((group, index) => FormatPositionGroup(group.ToList(), index == 0)).ToList();
+        var anomalySummary = FormatAnomalySummary(ordered);
         var location = FormatFilmingReference(occurrence);
         var reference = string.IsNullOrWhiteSpace(occurrence.ReferencePoint)
             ? string.Empty : $", com referência em {occurrence.ReferencePoint.Trim()}";
@@ -105,8 +125,11 @@ public static class OccurrenceRules
         var details = ordered.Select(FormatTechnicalDetails)
             .Where(x => x.Length > 0).ToList();
         var detailText = details.Count == 0 ? string.Empty : " " + string.Join(" ", details);
-        return $"{Join(anomalyText)} {location}{reference}{ending}{detailText}".Trim();
+        return $"{anomalySummary} {location}{reference}{ending}{detailText}".Trim();
     }
+
+    public static string GenerateCaptionSummary(Occurrence occurrence) =>
+        $"{FormatAnomalySummary(occurrence.Anomalies.OrderBy(x => x.Order).ToList()).TrimEnd('.', ';')}.";
 
     public static bool IsComplete(Occurrence occurrence) => GetPendingReasons(occurrence).Count == 0;
 
@@ -187,6 +210,12 @@ public static class OccurrenceRules
             anomalies[0].AnomalyType.Name.Equals("Contribuição", StringComparison.CurrentCultureIgnoreCase))
             return $"{names[0]} lateral";
         return Join(names) + FormatPositionPhrase(position);
+    }
+
+    private static string FormatAnomalySummary(IReadOnlyList<OccurrenceAnomaly> ordered)
+    {
+        var groups = ordered.GroupBy(x => x.Position).OrderBy(x => x.Min(y => y.Order)).ToList();
+        return Join(groups.Select((group, index) => FormatPositionGroup(group.ToList(), index == 0)).ToList());
     }
 
     private static string FormatPositionPhrase(AnomalyPosition position) => position switch

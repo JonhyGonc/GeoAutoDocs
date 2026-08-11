@@ -88,6 +88,9 @@ public sealed class Report
     public List<ReportSection> SectionLinks { get; set; } = [];
 
     [NotMapped]
+    public string DisplayCode => string.IsNullOrWhiteSpace(ReportCode) ? Name : ReportCode;
+
+    [NotMapped]
     public IReadOnlyList<InspectionSection> Sections => SectionLinks
         .OrderBy(x => x.Order).Select(x => x.Section).ToList();
 

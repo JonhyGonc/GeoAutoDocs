@@ -70,8 +70,7 @@ public sealed class WordReportService
         var diameters = FormatDiameters(report);
         var outputDirectory = Path.Combine(project.ProjectPath ?? Path.Combine(_paths.ProjectsDirectory, project.Id.ToString("N")), "reports");
         Directory.CreateDirectory(outputDirectory);
-        var identity = string.IsNullOrWhiteSpace(report.ReportCode) ? report.Name : $"{report.ReportCode}_{report.Name}";
-        var baseName = $"Relatorio_{SanitizeFileName(identity)}";
+        var baseName = SanitizeFileName(report.DisplayCode);
         var requestedPath = string.IsNullOrWhiteSpace(destinationPath)
             ? Path.Combine(outputDirectory, baseName + ".docx")
             : Path.GetFullPath(destinationPath);
@@ -176,7 +175,7 @@ public sealed class WordReportService
         ReplaceExact(body, "XX/XX/XX", report.ReportDate?.ToString("dd/MM/yy") ?? "");
 
         ReplaceInAnchoredParagraph(body, "O presente trabalho constitui",
-            "XXX (Igual a localização do cabeçalho)", report.LocationDescription);
+            "XXX (Igual a localização do cabeçalho)", EffectiveLocation(report));
         ReplaceInAnchoredParagraph(body, "Sendo assim, os serviços realizados",
             "aproximadamente XXX metros", $"aproximadamente {FormatMeters(report.TotalInvestigatedMeters)} metros");
 
@@ -373,7 +372,7 @@ public sealed class WordReportService
             var location = (Paragraph)first.CloneNode(true);
             var locationName = locationGroup.First().Location.Name;
             SetParagraphText(location, string.IsNullOrWhiteSpace(locationName)
-                ? report.LocationDescription.Trim().ToUpperInvariant()
+                ? EffectiveLocation(report).Trim().ToUpperInvariant()
                 : locationName.Trim().ToUpperInvariant());
             newElements.Add(location);
 
@@ -406,7 +405,7 @@ public sealed class WordReportService
                     {
                         imageElements.Add(CloneImageParagraph(mainPart, imageTemplate, evidence.FilePath));
                         var caption = (Paragraph)captionTemplate.CloneNode(true);
-                        var captionText = string.IsNullOrWhiteSpace(evidence.Caption) ? description : evidence.Caption.Trim();
+                        var captionText = OccurrenceRules.GenerateCaptionSummary(occurrenceData);
                         SetParagraphText(caption, $"Figura 4.{figureNumber} – {captionText.TrimEnd('.', ';')}.");
                         imageElements.Add(caption);
                         figureNumber++;
@@ -455,6 +454,9 @@ public sealed class WordReportService
             title += $" ({section.Reference.Trim()})";
         return title;
     }
+
+    private static string EffectiveLocation(Report report) =>
+        string.IsNullOrWhiteSpace(report.LocationDescription) ? report.Area : report.LocationDescription;
 
     private static string FormatOccurrenceForReport(Occurrence occurrence)
     {

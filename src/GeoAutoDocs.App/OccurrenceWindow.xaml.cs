@@ -20,6 +20,8 @@ public partial class OccurrenceWindow : Window
     private readonly Occurrence _draft;
     private readonly bool _readOnly;
     private readonly ObservableCollection<AnomalySelectionItem> _anomalyItems;
+    private readonly AnomalyDefinition _customAnomalyDefinition;
+    private readonly IReadOnlyList<OccurrenceAnomaly> _preservedLegacyAnomalies;
     public ObservableCollection<EvidenceSelectionItem> EvidenceItems { get; } = [];
     public Occurrence? SavedDraft { get; private set; }
     public bool ResumeVideoAfterSave { get; private set; }
@@ -48,8 +50,14 @@ public partial class OccurrenceWindow : Window
         var diameter = section.Diameter is null ? "Rede: não informada" : $"Rede: {section.Diameter:N0} mm";
         SectionText.Text = $"{location?.Name ?? "LOCAL NÃO INFORMADO"}  •  {section.Name}{routeText}  •  {diameter}";
 
-        var definitions = catalog.Concat(_draft.Anomalies.Select(x => x.AnomalyType))
+        var allDefinitions = catalog.Concat(_draft.Anomalies.Select(x => x.AnomalyType))
             .GroupBy(x => x.Id).Select(x => x.First()).OrderBy(x => x.Order).ToList();
+        _customAnomalyDefinition = allDefinitions.FirstOrDefault(x => x.Id == AnomalyCatalog.OtherId)
+            ?? AnomalyCatalog.Defaults.Single(x => x.Id == AnomalyCatalog.OtherId);
+        var definitions = allDefinitions.Where(x => AnomalyCatalog.PrimaryIds.Contains(x.Id)).ToList();
+        _preservedLegacyAnomalies = _draft.Anomalies
+            .Where(x => !AnomalyCatalog.PrimaryIds.Contains(x.AnomalyTypeId) && x.AnomalyTypeId != AnomalyCatalog.OtherId)
+            .OrderBy(x => x.Order).ToList();
         _anomalyItems = new ObservableCollection<AnomalySelectionItem>(definitions.Select(definition =>
         {
             var selected = _draft.Anomalies.FirstOrDefault(x => x.AnomalyTypeId == definition.Id);
@@ -58,7 +66,6 @@ public partial class OccurrenceWindow : Window
         FrequentAnomaliesList.ItemsSource = _anomalyItems;
         AdditionalAnomaliesList.ItemsSource = _anomalyItems;
         QuickAnomalyPositionsList.ItemsSource = _anomalyItems;
-        CustomAnomalyFieldsList.ItemsSource = _anomalyItems;
         AdvancedAnomaliesList.ItemsSource = _anomalyItems;
         foreach (var item in _anomalyItems)
             item.PropertyChanged += (_, _) => RefreshLivePreview();
@@ -107,6 +114,7 @@ public partial class OccurrenceWindow : Window
         GeneratedDescriptionBox.Text = _draft.GeneratedDescription;
         ManualDescriptionBox.Text = _draft.ManualDescriptionOverride ?? "";
         InterruptedRecordingCheck.IsChecked = _draft.InterruptedRecording;
+        CustomAnomalyBox.Text = _draft.Anomalies.FirstOrDefault(x => x.AnomalyTypeId == AnomalyCatalog.OtherId)?.CustomText ?? "";
         UpdateLocationPanels();
         UpdateSelectedAnomalies();
         RefreshEvidencePresentation();
@@ -168,7 +176,7 @@ public partial class OccurrenceWindow : Window
         _draft.Notes = NotesBox.Text;
         _draft.ManualDescriptionOverride = ManualDescriptionBox.Text;
         _draft.InterruptedRecording = InterruptedRecordingCheck.IsChecked == true;
-        _draft.Anomalies = _anomalyItems.Where(x => x.IsSelected).Select((x, index) => new OccurrenceAnomaly
+        var anomalies = _anomalyItems.Where(x => x.IsSelected).Select((x, index) => new OccurrenceAnomaly
         {
             OccurrenceId = _draft.Id, AnomalyTypeId = x.Definition.Id, AnomalyType = x.Definition,
             Position = x.Position, Orientation = x.Orientation,
@@ -178,6 +186,25 @@ public partial class OccurrenceWindow : Window
             EstimatedPercentage = ParseOptional(x.PercentageText, $"percentual de {x.Definition.Name}"),
             Notes = x.Notes, CustomText = x.CustomText, Order = index
         }).ToList();
+        foreach (var legacy in _preservedLegacyAnomalies)
+        {
+            legacy.OccurrenceId = _draft.Id;
+            legacy.Order = anomalies.Count;
+            anomalies.Add(legacy);
+        }
+        if (!string.IsNullOrWhiteSpace(CustomAnomalyBox.Text))
+        {
+            anomalies.Add(new OccurrenceAnomaly
+            {
+                OccurrenceId = _draft.Id,
+                AnomalyTypeId = _customAnomalyDefinition.Id,
+                AnomalyType = _customAnomalyDefinition,
+                CustomText = CustomAnomalyBox.Text.Trim(),
+                Position = AnomalyPosition.NotApplicable,
+                Order = anomalies.Count
+            });
+        }
+        _draft.Anomalies = anomalies;
         _draft.Evidence = EvidenceItems.Select((x, index) =>
         {
             x.Evidence.OccurrenceId = _draft.Id;
@@ -207,6 +234,11 @@ public partial class OccurrenceWindow : Window
 
     private void DraftFieldChanged(object sender, TextChangedEventArgs e)
     {
+        if (sender == CustomAnomalyBox)
+        {
+            UpdateSelectedAnomalies();
+            return;
+        }
         UpdateDraftStatus();
         RefreshLivePreview();
     }
@@ -224,6 +256,7 @@ public partial class OccurrenceWindow : Window
     {
         if (_anomalyItems is null) return;
         var selected = _anomalyItems.Where(x => x.IsSelected).Select(x => x.Definition.Name).ToList();
+        if (!string.IsNullOrWhiteSpace(CustomAnomalyBox?.Text)) selected.Add(CustomAnomalyBox.Text.Trim());
         SelectedAnomaliesText.Text = selected.Count == 0 ? "Nenhuma selecionada" :
             $"{selected.Count} selecionada(s): " + string.Join("  •  ", selected);
         CustomAnomalyFieldsList?.Items.Refresh();
@@ -411,10 +444,6 @@ public sealed class AnomalySelectionItem : INotifyPropertyChanged
     private bool _showInAdditionalList;
     private AnomalyPosition _position;
     private string? _customText;
-    private static readonly HashSet<string> FrequentNames = new(StringComparer.CurrentCultureIgnoreCase)
-    {
-        "Fissura", "Trinca", "Infiltração", "Obstrução", "Assoreamento", "Contribuição"
-    };
     public AnomalyDefinition Definition { get; }
     public IReadOnlyList<PositionChoice> Positions { get; } = PositionChoice.All;
     public IReadOnlyList<OrientationChoice> Orientations { get; } = OrientationChoice.All;
@@ -422,7 +451,7 @@ public sealed class AnomalySelectionItem : INotifyPropertyChanged
     public IReadOnlyList<InfiltrationChoice> InfiltrationConditions { get; } = InfiltrationChoice.All;
     public bool IsSelected { get => _isSelected; set { _isSelected = value; OnPropertyChanged(); } }
     public bool IsVisible { get => _isVisible; set { _isVisible = value; OnPropertyChanged(); } }
-    public bool IsFrequent => FrequentNames.Contains(Definition.Name);
+    public bool IsFrequent => true;
     public bool ShowInAdditionalList { get => _showInAdditionalList; set { _showInAdditionalList = value; OnPropertyChanged(); } }
     public AnomalyPosition Position { get => _position; set { if (_position == value) return; _position = value; OnPropertyChanged(); } }
     public AnomalyOrientation Orientation { get; set; }
@@ -438,7 +467,7 @@ public sealed class AnomalySelectionItem : INotifyPropertyChanged
     {
         Definition = definition; IsSelected = selected is not null;
         ShowInAdditionalList = !IsFrequent;
-        Position = selected?.Position ?? AnomalyPosition.NotReported;
+        Position = selected?.Position ?? AnomalyPosition.NotApplicable;
         Orientation = selected?.Orientation ?? AnomalyOrientation.NotReported;
         ExtensionText = OccurrenceWindow.FormatDecimal(selected?.ApproximateExtension);
         Dimension = selected?.Dimension;
@@ -453,8 +482,7 @@ public sealed class AnomalySelectionItem : INotifyPropertyChanged
 
 public sealed record PositionChoice(AnomalyPosition Value, string Label)
 {
-    public static IReadOnlyList<PositionChoice> All { get; } = Enum.GetValues<AnomalyPosition>()
-        .OrderBy(x => x == AnomalyPosition.NotReported ? 0 : x == AnomalyPosition.NotApplicable ? 99 : (int)x)
+    public static IReadOnlyList<PositionChoice> All { get; } = OccurrenceRules.SelectablePositions
         .Select(x => new PositionChoice(x, OccurrenceRules.FormatPosition(x))).ToList();
 }
 

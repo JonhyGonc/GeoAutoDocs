@@ -409,6 +409,7 @@ public sealed class ProjectStore : IProjectStore
                 });
                 continue;
             }
+            stored.Name = item.Name;
             stored.RequiresPosition = item.RequiresPosition;
             stored.AllowsCustomText = item.AllowsCustomText;
             stored.Order = item.Order;

@@ -49,6 +49,7 @@ public partial class MainWindow : Window
     private bool _playerErrorNotified;
     private bool _playerDisposed;
     private bool _loadingInspections;
+    private Point _occurrenceDragStart;
 
     public MainWindow(IProjectStore store, WordReportService wordReportService,
         SharedProjectService sharedProjects, LocalLogger logger, FrameCaptureService frameCaptureService,
@@ -306,13 +307,12 @@ public partial class MainWindow : Window
         WordConfigTab.IsEnabled = true;
         ClientBox.Text = report?.Client ?? ""; CnpjBox.Text = report?.Cnpj ?? "";
         AreaBox.Text = report?.Area ?? ""; ContractBox.Text = report?.Contract ?? "";
-        PurchaseOrderBox.Text = report?.PurchaseOrder ?? ""; ReportCodeBox.Text = report?.ReportCode ?? "";
-        ReportNameBox.Text = report?.Name ?? "";
-        ReportDatePicker.SelectedDate = report?.ReportDate; LocationBox.Text = report?.LocationDescription ?? "";
+        PurchaseOrderBox.Text = report?.PurchaseOrder ?? ""; ReportCodeBox.Text = report?.DisplayCode ?? "";
+        ReportDatePicker.SelectedDate = report?.ReportDate;
         MetersBox.Text = report?.TotalInvestigatedMeters?.ToString("0.###", CultureInfo.CurrentCulture) ?? "";
         TemplateBox.Text = report?.TemplatePath ?? ""; LogoBox.Text = report?.LogoPath ?? "";
         LocationImageBox.Text = report?.LocationImagePath ?? "";
-        ActiveReportTitle.Text = report?.Name ?? "Selecione um relatório";
+        ActiveReportTitle.Text = report?.DisplayCode ?? "Selecione um relatório";
         EndoscopeCheck.IsChecked = report?.Equipments.HasFlag(EquipmentSelection.Endoscope) == true;
         BugCheck.IsChecked = report?.Equipments.HasFlag(EquipmentSelection.Bug) == true;
         HunterCheck.IsChecked = report?.Equipments.HasFlag(EquipmentSelection.Hunter) == true;
@@ -326,6 +326,8 @@ public partial class MainWindow : Window
         D1000Check.IsChecked = report?.Diameters.HasFlag(StandardDiameterSelection.Mm1000) == true;
         D1500Check.IsChecked = report?.Diameters.HasFlag(StandardDiameterSelection.Mm1500) == true;
         CustomDiametersBox.Text = report?.CustomDiameters ?? "";
+        OtherDiameterToggle.IsChecked = !string.IsNullOrWhiteSpace(report?.CustomDiameters);
+        CustomDiameterPanel.Visibility = OtherDiameterToggle.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         OpeningCheck.IsChecked = report?.IncludeInspectionOpening == true; GprCheck.IsChecked = report?.IncludeGpr == true;
         RefreshDevelopmentImageSummary();
         CustomSectionsList.ItemsSource = report?.CustomSections;
@@ -378,8 +380,8 @@ public partial class MainWindow : Window
         WordConfigTab.IsSelected = true;
         _hasPendingChanges = true;
         await SavePendingAsync();
-        ReportNameBox.Focus();
-        ReportNameBox.SelectAll();
+        ReportCodeBox.Focus();
+        ReportCodeBox.SelectAll();
     }
 
     private void ContinueInspection_Click(object sender, RoutedEventArgs e) => InspectionsTab.IsSelected = true;
@@ -399,6 +401,16 @@ public partial class MainWindow : Window
         _saveTimer.Stop(); _saveTimer.Start();
     }
 
+    private void OtherDiameterToggle_Changed(object sender, RoutedEventArgs e)
+    {
+        CustomDiameterPanel.Visibility = OtherDiameterToggle.IsChecked == true
+            ? Visibility.Visible : Visibility.Collapsed;
+        if (_loadingFields) return;
+        if (OtherDiameterToggle.IsChecked != true) CustomDiametersBox.Clear();
+        FieldChanged(sender, e);
+        if (OtherDiameterToggle.IsChecked == true) CustomDiametersBox.Focus();
+    }
+
     private void ApplyFieldsToModel()
     {
         if (_currentProject is null) return;
@@ -410,9 +422,10 @@ public partial class MainWindow : Window
         report.Client = _currentProject.DefaultClient; report.Cnpj = _currentProject.DefaultCnpj;
         report.Area = _currentProject.DefaultArea; report.Contract = _currentProject.DefaultContract;
         report.PurchaseOrder = _currentProject.DefaultPurchaseOrder; report.LogoPath = _currentProject.DefaultLogoPath;
-        report.Name = string.IsNullOrWhiteSpace(ReportNameBox.Text) ? report.Name : ReportNameBox.Text.Trim();
-        report.ReportCode = ReportCodeBox.Text.Trim(); report.ReportDate = ReportDatePicker.SelectedDate;
-        report.LocationDescription = LocationBox.Text.Trim();
+        report.ReportCode = ReportCodeBox.Text.Trim();
+        if (!string.IsNullOrWhiteSpace(report.ReportCode)) report.Name = report.ReportCode;
+        report.ReportDate = ReportDatePicker.SelectedDate;
+        report.LocationDescription = report.Area;
         report.TotalInvestigatedMeters = decimal.TryParse(MetersBox.Text, NumberStyles.Number, CultureInfo.CurrentCulture, out var meters) ? meters : null;
         report.TemplatePath = EmptyToNull(TemplateBox.Text); report.LocationImagePath = EmptyToNull(LocationImageBox.Text);
         report.Equipments = EquipmentSelection.None | (EndoscopeCheck.IsChecked == true ? EquipmentSelection.Endoscope : 0) | (BugCheck.IsChecked == true ? EquipmentSelection.Bug : 0) | (HunterCheck.IsChecked == true ? EquipmentSelection.Hunter : 0) | (SpiderCheck.IsChecked == true ? EquipmentSelection.Spider : 0) | (TrackerCheck.IsChecked == true ? EquipmentSelection.Tracker : 0);
@@ -433,7 +446,7 @@ public partial class MainWindow : Window
             _saveErrorNotified = false;
             ProjectClientSummary.Text = string.IsNullOrWhiteSpace(_currentProject.DefaultClient)
                 ? "Dados do cliente ainda não informados" : _currentProject.DefaultClient;
-            ActiveReportTitle.Text = _currentReport?.Name ?? "Selecione um relatório";
+            ActiveReportTitle.Text = _currentReport?.DisplayCode ?? "Selecione um relatório";
             ReportsList.Items.Refresh();
             RefreshOverview();
             RefreshReportReview();
@@ -632,7 +645,7 @@ public partial class MainWindow : Window
 
             var reportsDirectory = Path.Combine(_currentProject.ProjectPath ?? "", "reports");
             if (!string.IsNullOrWhiteSpace(_currentProject.ProjectPath)) Directory.CreateDirectory(reportsDirectory);
-            var fileName = SanitizeSuggestedFileName($"Relatorio_{_currentReport.ReportCode}_{_currentReport.Name}.docx");
+            var fileName = SanitizeSuggestedFileName($"{_currentReport.DisplayCode}.docx");
             var dialog = new SaveFileDialog
             {
                 Title = "Salvar relatório final",
@@ -856,8 +869,7 @@ public partial class MainWindow : Window
             return;
         }
         var all = _currentSection.Occurrences
-            .OrderBy(x => x.LocationMode == OccurrenceLocationMode.EntireSection ? 1 : 0)
-            .ThenBy(x => x.Meterage ?? decimal.MaxValue).ThenBy(x => x.Order)
+            .OrderBy(x => x.Order).ThenBy(x => x.CreatedAt)
             .Select(x => new OccurrenceListItem(x, !IsReadOnly)).ToList();
         var unfilteredCount = all.Count;
         var incomplete = all.Count(x => !x.IsComplete);
@@ -879,6 +891,48 @@ public partial class MainWindow : Window
             : "Ajuste a pesquisa ou o filtro para ver outros registros.";
         OccurrencesEmptyState.Visibility = all.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         RefreshOverview();
+    }
+
+    private void OccurrencesList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e) =>
+        _occurrenceDragStart = e.GetPosition(OccurrencesList);
+
+    private void OccurrencesList_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed || IsReadOnly) return;
+        var position = e.GetPosition(OccurrencesList);
+        if (Math.Abs(position.X - _occurrenceDragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(position.Y - _occurrenceDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        var container = FindVisualParent<ListBoxItem>(e.OriginalSource as DependencyObject);
+        if (container?.DataContext is OccurrenceListItem item)
+            DragDrop.DoDragDrop(container, item.Id, DragDropEffects.Move);
+    }
+
+    private async void OccurrencesList_Drop(object sender, DragEventArgs e)
+    {
+        if (_currentSection is null || IsReadOnly || !e.Data.GetDataPresent(typeof(Guid))) return;
+        var sourceId = (Guid)e.Data.GetData(typeof(Guid));
+        var targetContainer = FindVisualParent<ListBoxItem>(e.OriginalSource as DependencyObject);
+        if (targetContainer?.DataContext is not OccurrenceListItem target || target.Id == sourceId) return;
+        var ordered = _currentSection.Occurrences.OrderBy(x => x.Order).ThenBy(x => x.CreatedAt).ToList();
+        var source = ordered.FirstOrDefault(x => x.Id == sourceId);
+        if (source is null) return;
+        ordered.Remove(source);
+        var targetIndex = ordered.FindIndex(x => x.Id == target.Id);
+        if (targetIndex < 0) return;
+        ordered.Insert(targetIndex, source);
+        for (var index = 0; index < ordered.Count; index++) ordered[index].Order = index;
+        await SaveInspectionChangesAsync();
+        RefreshOccurrences();
+    }
+
+    private static T? FindVisualParent<T>(DependencyObject? child) where T : DependencyObject
+    {
+        while (child is not null)
+        {
+            if (child is T match) return match;
+            child = System.Windows.Media.VisualTreeHelper.GetParent(child);
+        }
+        return null;
     }
 
     private void AnomalyListFilterChanged(object sender, RoutedEventArgs e)
@@ -907,6 +961,7 @@ public partial class MainWindow : Window
         NewLocationNameBox.Clear();
         NewSectionPanel.Visibility = Visibility.Collapsed;
         NewLocationPanel.Visibility = Visibility.Visible;
+        VideoView.Visibility = Visibility.Hidden;
         InspectionFormOverlay.Visibility = Visibility.Visible;
         NewLocationNameBox.Focus();
     }
@@ -935,6 +990,7 @@ public partial class MainWindow : Window
         NewSectionValidationText.Foreground = (System.Windows.Media.Brush)FindResource("TextMutedBrush");
         NewLocationPanel.Visibility = Visibility.Collapsed;
         NewSectionPanel.Visibility = Visibility.Visible;
+        VideoView.Visibility = Visibility.Hidden;
         InspectionFormOverlay.Visibility = Visibility.Visible;
         NewSectionNameBox.Focus();
     }
@@ -983,6 +1039,7 @@ public partial class MainWindow : Window
         InspectionFormOverlay.Visibility = Visibility.Collapsed;
         NewLocationPanel.Visibility = Visibility.Collapsed;
         NewSectionPanel.Visibility = Visibility.Collapsed;
+        VideoView.Visibility = Visibility.Visible;
     }
 
     private void LocationsList_SelectionChanged(object sender, SelectionChangedEventArgs e)

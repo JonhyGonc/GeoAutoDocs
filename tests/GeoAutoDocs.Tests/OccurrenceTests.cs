@@ -410,12 +410,48 @@ public sealed class OccurrenceTests : IAsyncLifetime
         Assert.Contains("Trinca", names);
         Assert.Contains("Raiz", names);
         Assert.Contains("Material depositado", names);
-        Assert.Contains("Deslocamento de junta", names);
+        Assert.Contains("Deslocamento das juntas", names);
         Assert.Contains("Junta aberta", names);
         Assert.Contains("Rompimento", names);
         Assert.True(Definition("Trinca").SupportsOrientation);
         Assert.True(Definition("Infiltração").SupportsInfiltrationCondition);
         Assert.True(Definition("Obstrução").SupportsPercentage);
+    }
+
+    [Fact]
+    public void PrimaryCatalogAndPositionVocabularyMatchTheOperationalForm()
+    {
+        var primaryNames = AnomalyCatalog.Defaults.Where(x => AnomalyCatalog.PrimaryIds.Contains(x.Id))
+            .Select(x => x.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Assert.Equal(8, primaryNames.Count);
+        Assert.Equal(new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Fissura", "Trinca", "Infiltração", "Obstrução", "Contribuição",
+            "Deslocamento das juntas", "Abaulamento", "Caixa de passagem"
+        }, primaryNames);
+        Assert.Equal([
+            AnomalyPosition.NotApplicable, AnomalyPosition.UpperGenerator, AnomalyPosition.LowerGenerator,
+            AnomalyPosition.LeftSide, AnomalyPosition.RightSide, AnomalyPosition.Circumferential
+        ], OccurrenceRules.SelectablePositions);
+    }
+
+    [Fact]
+    public void FigureCaptionContainsOnlyAnomalyAndPosition()
+    {
+        var occurrence = NewOccurrence(OccurrenceLocationMode.Point, 18.35m, "Trinca");
+        occurrence.Anomalies[0].Position = AnomalyPosition.UpperGenerator;
+        Assert.Equal("Trinca na geratriz superior.", OccurrenceRules.GenerateCaptionSummary(occurrence));
+        Assert.DoesNotContain("18", OccurrenceRules.GenerateCaptionSummary(occurrence));
+        Assert.DoesNotContain("filmagem", OccurrenceRules.GenerateCaptionSummary(occurrence));
+    }
+
+    [Fact]
+    public void ReportCodeIsTheOnlyNewReportIdentity()
+    {
+        var report = new Report { Name = "Nome legado", ReportCode = "GF-RL-001" };
+        Assert.Equal("GF-RL-001", report.DisplayCode);
+        report.ReportCode = "";
+        Assert.Equal("Nome legado", report.DisplayCode);
     }
 
     [Fact]
@@ -483,6 +519,23 @@ public sealed class OccurrenceTests : IAsyncLifetime
         Assert.Single(savedSection.VideoReferences);
         Assert.All(savedSection.Occurrences, occurrence => Assert.Single(occurrence.Evidence));
         Assert.Equal(10, savedSection.Occurrences.SelectMany(x => x.Evidence).Select(x => x.VideoTimestamp).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task ManualOccurrenceOrderPersistsAfterReload()
+    {
+        var (project, section) = await CreateProjectAsync();
+        var first = NewOccurrence(OccurrenceLocationMode.Point, 10m, "Trinca");
+        var second = NewOccurrence(OccurrenceLocationMode.Point, 20m, "Infiltração");
+        await _service.SaveAsync(project, section, first, false);
+        await _service.SaveAsync(project, section, second, false);
+        first.Order = 1;
+        second.Order = 0;
+        await _store.SaveAsync(project);
+
+        var reopened = (await _store.GetAsync(project.Id))!;
+        var ordered = reopened.Locations.Single().Sections.Single().Occurrences.OrderBy(x => x.Order).ToList();
+        Assert.Equal([second.Id, first.Id], ordered.Select(x => x.Id).ToArray());
     }
 
     private async Task<(Project Project, InspectionSection Section)> CreateProjectAsync()

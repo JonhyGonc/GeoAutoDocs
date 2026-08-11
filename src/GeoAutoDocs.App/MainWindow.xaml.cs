@@ -911,9 +911,7 @@ public partial class MainWindow : Window
             await Task.Delay(120);
             _captureDraft = await _frameCaptureService.CaptureCurrentFrameAsync(
                 _currentProject, _currentSection, _currentVideo, _mediaPlayer, IsReadOnly);
-            CapturePreviewImage.Source = LoadBitmap(_captureDraft.FilePath);
-            CapturePreviewTimestamp.Text = FormatTime(_captureDraft.VideoTimestamp);
-            CapturePreviewPanel.Visibility = Visibility.Visible;
+            await AcceptCaptureDraftAsync(true);
         }
         catch (Exception ex) { ShowError("Não foi possível capturar o frame diretamente do vídeo.", ex); }
     }
@@ -969,26 +967,20 @@ public partial class MainWindow : Window
         try
         {
             var catalog = await _store.ListAnomalyDefinitionsAsync();
-            do
+            var window = new OccurrenceWindow(_currentProject, _currentSection, catalog, _occurrenceService,
+                occurrence, initialCapture, IsReadOnly, duplicate) { Owner = this };
+            var result = window.ShowDialog();
+            if (window.RequestedVideoReferenceId is Guid videoId && window.RequestedVideoTimestamp is not null)
             {
-                var window = new OccurrenceWindow(_currentProject, _currentSection, catalog, _occurrenceService,
-                    occurrence, initialCapture, IsReadOnly, duplicate) { Owner = this };
-                var result = window.ShowDialog();
-                if (window.RequestedVideoReferenceId is Guid videoId && window.RequestedVideoTimestamp is not null)
-                {
-                    await NavigateToVideoAsync(videoId, window.RequestedVideoTimestamp.Value);
-                    return;
-                }
-                if (result != true || window.SavedDraft is null) return;
-                await _occurrenceService.SaveAsync(_currentProject, _currentSection, window.SavedDraft, IsReadOnly);
-                RefreshCaptures();
-                RefreshOccurrences();
-                await SaveInspectionChangesAsync();
-                if (!window.SaveAndCreateNext) return;
-                occurrence = null;
-                initialCapture = null;
-                duplicate = false;
-            } while (true);
+                await NavigateToVideoAsync(videoId, window.RequestedVideoTimestamp.Value);
+                return;
+            }
+            if (result != true || window.SavedDraft is null) return;
+            await _occurrenceService.SaveAsync(_currentProject, _currentSection, window.SavedDraft, IsReadOnly);
+            RefreshCaptures();
+            RefreshOccurrences();
+            await SaveInspectionChangesAsync();
+            if (window.ResumeVideoAfterSave && _currentMedia is not null) _mediaPlayer.Play();
         }
         catch (Exception ex)
         {

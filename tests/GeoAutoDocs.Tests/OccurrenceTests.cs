@@ -365,6 +365,44 @@ public sealed class OccurrenceTests : IAsyncLifetime
         Assert.True(saved.Evidence.Single(x => x.CaptureId is not null).VideoReferenceId is not null);
     }
 
+    [Fact]
+    public async Task QuickAdvancedFlowPersistsObstructionPercentageWithoutOtherDetails()
+    {
+        var (project, section) = await CreateProjectAsync();
+        var capture = AddCapture(project, section, 30000);
+        var occurrence = NewOccurrence(OccurrenceLocationMode.Point, 30m, "Obstrução");
+        occurrence.Anomalies[0].EstimatedPercentage = 40m;
+        occurrence.Evidence.Add(OccurrenceService.FromCapture(capture));
+
+        await _service.SaveAsync(project, section, occurrence, false);
+        await _store.SaveAsync(project);
+
+        var saved = (await _store.GetAsync(project.Id))!.Locations[0].Sections[0].Occurrences.Single();
+        Assert.Equal(40m, saved.Anomalies.Single().EstimatedPercentage);
+        Assert.Single(saved.Evidence);
+    }
+
+    [Fact]
+    public async Task ProductivityFlowPersistsTenConsecutiveMarkersInSameVideoContext()
+    {
+        var (project, section) = await CreateProjectAsync();
+        for (var index = 0; index < 10; index++)
+        {
+            var capture = AddCapture(project, section, 1000 + index * 500);
+            var occurrence = NewOccurrence(OccurrenceLocationMode.Point, 10m + index, "Trinca");
+            occurrence.Evidence.Add(OccurrenceService.FromCapture(capture));
+            await _service.SaveAsync(project, section, occurrence, false);
+        }
+        await _store.SaveAsync(project);
+
+        var reopened = (await _store.GetAsync(project.Id))!;
+        var savedSection = reopened.Locations.Single().Sections.Single();
+        Assert.Equal(10, savedSection.Occurrences.Count);
+        Assert.Single(savedSection.VideoReferences);
+        Assert.All(savedSection.Occurrences, occurrence => Assert.Single(occurrence.Evidence));
+        Assert.Equal(10, savedSection.Occurrences.SelectMany(x => x.Evidence).Select(x => x.VideoTimestamp).Distinct().Count());
+    }
+
     private async Task<(Project Project, InspectionSection Section)> CreateProjectAsync()
     {
         var project = await _store.CreateAsync("Inspeção");

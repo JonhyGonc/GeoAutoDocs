@@ -1,173 +1,80 @@
 <Window x:Class="GeoAutoDocs.App.OccurrenceWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Anomalia técnica" Width="1180" Height="820" MinWidth="940" MinHeight="680"
-        WindowStartupLocation="CenterOwner" Background="{StaticResource WindowBackgroundBrush}">
+        Title="Anomalia" Width="570" Height="800" MinWidth="520" MinHeight="640"
+        WindowStartupLocation="Manual" ShowInTaskbar="False" ResizeMode="CanResize"
+        Background="{StaticResource WindowBackgroundBrush}">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
+        <Style x:Key="AnomalyChipStyle" TargetType="ToggleButton">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="Margin" Value="0,0,7,7"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value><ControlTemplate TargetType="ToggleButton"><Border x:Name="Chip" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="16" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chip" Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/></Trigger><Trigger Property="IsChecked" Value="True"><Setter TargetName="Chip" Property="Background" Value="{StaticResource PrimaryBrush}"/><Setter TargetName="Chip" Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chip" Property="Opacity" Value="0.45"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
-    <Grid Margin="22">
+
+    <Grid Margin="20,18">
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <StackPanel>
-                <TextBlock x:Name="WindowTitle" Text="Nova anomalia" Style="{StaticResource PageTitleTextStyle}" FontSize="24"/>
-                <TextBlock x:Name="SectionText" Margin="0,4,0,14" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap"/>
-            </StackPanel>
-            <Border Grid.Column="1" Style="{StaticResource StatusBadgeStyle}" VerticalAlignment="Top">
-                <TextBlock x:Name="DraftStatusText" Foreground="{StaticResource WarningBrush}"/>
-            </Border>
+            <StackPanel><TextBlock x:Name="WindowTitle" Text="Nova anomalia" Style="{StaticResource PageTitleTextStyle}" FontSize="23"/><TextBlock x:Name="SectionText" Margin="0,3,0,12" Foreground="{StaticResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis"/></StackPanel>
+            <Border Grid.Column="1" Style="{StaticResource StatusBadgeStyle}" VerticalAlignment="Top"><TextBlock x:Name="DraftStatusText" Foreground="{StaticResource WarningBrush}"/></Border>
         </Grid>
 
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,8,0">
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,7,0">
             <StackPanel x:Name="FormPanel">
-                <Border Style="{StaticResource CardStyle}" Padding="18" Margin="0,0,0,12">
-                    <StackPanel>
-                        <TextBlock Text="Localização da anomalia" Style="{StaticResource SectionTitleTextStyle}"/>
-                        <StackPanel Orientation="Horizontal" Margin="0,10">
-                            <RadioButton x:Name="PointRadio" Content="Metragem pontual" GroupName="Location" Checked="LocationMode_Changed" Margin="0,0,22,0"/>
-                            <RadioButton x:Name="RangeRadio" Content="Intervalo" GroupName="Location" Checked="LocationMode_Changed" Margin="0,0,22,0"/>
-                            <RadioButton x:Name="EntireSectionRadio" Content="Todo o trecho" GroupName="Location" Checked="LocationMode_Changed"/>
-                        </StackPanel>
-                        <StackPanel x:Name="PointPanel" Orientation="Horizontal">
-                            <TextBlock Text="Metragem" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}"/>
-                            <TextBox x:Name="PointMeasurementBox" Width="130" Margin="10,0,8,0" TextChanged="DraftFieldChanged"/><TextBlock Text="m" VerticalAlignment="Center"/>
-                        </StackPanel>
-                        <StackPanel x:Name="RangePanel" Orientation="Horizontal" Visibility="Collapsed">
-                            <TextBlock Text="Metragem inicial" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}"/><TextBox x:Name="RangeStartBox" Width="120" Margin="10,0,8,0" TextChanged="DraftFieldChanged"/>
-                            <TextBlock Text="m     Metragem final" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}"/><TextBox x:Name="RangeEndBox" Width="120" Margin="10,0,8,0" TextChanged="DraftFieldChanged"/><TextBlock Text="m" VerticalAlignment="Center"/>
-                        </StackPanel>
-                        <TextBlock Text="Ponto de referência (opcional)" Style="{StaticResource FieldLabelTextStyle}" Margin="0,12,0,6"/>
-                        <TextBox x:Name="ReferencePointBox" ToolTip="Ex.: próximo ao PV-02 ou após contribuição lateral"/>
-                    </StackPanel>
-                </Border>
+                <TextBlock Text="Metragem" Style="{StaticResource FieldLabelTextStyle}"/>
+                <StackPanel x:Name="PointPanel" Orientation="Horizontal" Margin="0,0,0,12"><TextBox x:Name="PointMeasurementBox" Width="150" FontSize="20" FontWeight="SemiBold" Margin="0,0,8,0" TextChanged="DraftFieldChanged" KeyDown="PointMeasurementBox_KeyDown"/><TextBlock Text="m" FontSize="16" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}"/></StackPanel>
 
-                <Border Style="{StaticResource CardStyle}" Padding="18" Margin="0,0,0,12">
-                    <StackPanel>
-                        <DockPanel>
-                            <TextBox x:Name="AnomalySearchBox" DockPanel.Dock="Right" Width="270" Margin="12,0,0,8"
-                                     ToolTip="Pesquisar no catálogo de anomalias" TextChanged="AnomalySearchBox_TextChanged"/>
-                            <StackPanel>
-                                <TextBlock Text="Anomalias identificadas" Style="{StaticResource SectionTitleTextStyle}"/>
-                                <TextBlock x:Name="SelectedAnomaliesText" Text="Nenhuma selecionada" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,10" TextWrapping="Wrap"/>
-                            </StackPanel>
-                        </DockPanel>
-                        <ItemsControl x:Name="AnomaliesList">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border Style="{StaticResource SubtleCardStyle}" Margin="0,4" Visibility="{Binding IsVisible, Converter={StaticResource BoolToVisibility}}">
-                                        <StackPanel>
-                                            <CheckBox Content="{Binding Definition.Name}" FontWeight="SemiBold"
-                                                      IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}"
-                                                      Checked="AnomalySelection_Changed" Unchecked="AnomalySelection_Changed"/>
-                                            <Grid Margin="24,12,0,0" Visibility="{Binding IsSelected, Converter={StaticResource BoolToVisibility}}">
-                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                                <StackPanel Grid.ColumnSpan="3" Visibility="{Binding Definition.AllowsCustomText, Converter={StaticResource BoolToVisibility}}">
-                                                    <TextBlock Text="Nome / descrição da anomalia *" Style="{StaticResource FieldLabelTextStyle}"/>
-                                                    <TextBox Text="{Binding CustomText, UpdateSourceTrigger=PropertyChanged}"/>
-                                                </StackPanel>
-                                                <StackPanel Grid.Row="1" Visibility="{Binding Definition.SupportsPosition, Converter={StaticResource BoolToVisibility}}">
-                                                    <TextBlock Text="Posição" Style="{StaticResource FieldLabelTextStyle}"/>
-                                                    <ComboBox ItemsSource="{Binding Positions}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding Position}"/>
-                                                </StackPanel>
-                                                <StackPanel Grid.Row="1" Grid.Column="1" Margin="12,0,0,0" Visibility="{Binding Definition.SupportsOrientation, Converter={StaticResource BoolToVisibility}}">
-                                                    <TextBlock Text="Orientação" Style="{StaticResource FieldLabelTextStyle}"/>
-                                                    <ComboBox ItemsSource="{Binding Orientations}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding Orientation}"/>
-                                                </StackPanel>
-                                                <StackPanel Grid.Row="2" Visibility="{Binding Definition.SupportsExtension, Converter={StaticResource BoolToVisibility}}">
-                                                    <TextBlock Text="Extensão aproximada (m)" Style="{StaticResource FieldLabelTextStyle}"/>
-                                                    <TextBox Text="{Binding ExtensionText, UpdateSourceTrigger=PropertyChanged}"/>
-                                                </StackPanel>
-                                                <StackPanel Grid.Row="2" Grid.Column="1" Margin="12,0,0,0" Visibility="{Binding Definition.SupportsDimension, Converter={StaticResource BoolToVisibility}}">
-                                                    <TextBlock Text="Dimensão / abertura" Style="{StaticResource FieldLabelTextStyle}"/>
-                                                    <TextBox Text="{Binding Dimension, UpdateSourceTrigger=PropertyChanged}"/>
-                                                </StackPanel>
-                                                <StackPanel Grid.Row="1" Grid.Column="2" Margin="12,0,0,0" Visibility="{Binding Definition.SupportsCondition, Converter={StaticResource BoolToVisibility}}">
-                                                    <TextBlock Text="Condição" Style="{StaticResource FieldLabelTextStyle}"/>
-                                                    <ComboBox ItemsSource="{Binding Conditions}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding Condition}"/>
-                                                </StackPanel>
-                                                <StackPanel Grid.Row="2" Grid.Column="2" Margin="12,0,0,0" Visibility="{Binding Definition.SupportsInfiltrationCondition, Converter={StaticResource BoolToVisibility}}">
-                                                    <TextBlock Text="Condição da infiltração" Style="{StaticResource FieldLabelTextStyle}"/>
-                                                    <ComboBox ItemsSource="{Binding InfiltrationConditions}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding InfiltrationCondition}"/>
-                                                </StackPanel>
-                                                <StackPanel Grid.Row="3" Visibility="{Binding Definition.SupportsPercentage, Converter={StaticResource BoolToVisibility}}">
-                                                    <TextBlock Text="Percentual estimado (%)" Style="{StaticResource FieldLabelTextStyle}"/>
-                                                    <TextBox Text="{Binding PercentageText, UpdateSourceTrigger=PropertyChanged}"/>
-                                                </StackPanel>
-                                                <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Margin="12,0,0,0">
-                                                    <TextBlock Text="Observação específica" Style="{StaticResource FieldLabelTextStyle}"/>
-                                                    <TextBox Text="{Binding Notes, UpdateSourceTrigger=PropertyChanged}"/>
-                                                </StackPanel>
-                                            </Grid>
-                                        </StackPanel>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
+                <TextBlock Text="Anomalias" Style="{StaticResource SectionTitleTextStyle}" Margin="0,2,0,9"/>
+                <ItemsControl x:Name="FrequentAnomaliesList"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><ToggleButton Content="{Binding Definition.Name}" Style="{StaticResource AnomalyChipStyle}" IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" Visibility="{Binding IsFrequent, Converter={StaticResource BoolToVisibility}}" Checked="AnomalySelection_Changed" Unchecked="AnomalySelection_Changed"/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+                <Button x:Name="MoreAnomaliesButton" Content="+ Mais" HorizontalAlignment="Left" MinWidth="86" Click="ToggleMoreAnomalies_Click" Margin="0,0,0,9"/>
+                <Border x:Name="AdditionalAnomaliesPanel" Background="{StaticResource SurfaceMutedBrush}" CornerRadius="7" Padding="11" Margin="0,0,0,12" Visibility="Collapsed">
+                    <StackPanel><TextBox x:Name="AnomalySearchBox" ToolTip="Buscar outros tipos" TextChanged="AnomalySearchBox_TextChanged" Margin="0,0,0,9"/><ItemsControl x:Name="AdditionalAnomaliesList"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><ToggleButton Content="{Binding Definition.Name}" Style="{StaticResource AnomalyChipStyle}" IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" Visibility="{Binding ShowInAdditionalList, Converter={StaticResource BoolToVisibility}}" Checked="AnomalySelection_Changed" Unchecked="AnomalySelection_Changed"/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
                 </Border>
+                <TextBlock x:Name="SelectedAnomaliesText" Text="Nenhuma selecionada" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,10" TextWrapping="Wrap"/>
+                <ItemsControl x:Name="CustomAnomalyFieldsList"><ItemsControl.ItemTemplate><DataTemplate><StackPanel Visibility="{Binding Definition.AllowsCustomText, Converter={StaticResource BoolToVisibility}}"><Grid Visibility="{Binding IsSelected, Converter={StaticResource BoolToVisibility}}"><StackPanel><TextBlock Text="Descreva a anomalia" Style="{StaticResource FieldLabelTextStyle}"/><TextBox Text="{Binding CustomText, UpdateSourceTrigger=PropertyChanged}"/></StackPanel></Grid></StackPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
 
-                <Expander Header="Mais detalhes" Margin="0,0,0,12">
-                    <Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="7" Padding="18" Margin="0,8,0,0">
-                    <StackPanel>
-                        <TextBlock Text="Observação técnica" Style="{StaticResource SectionTitleTextStyle}"/>
-                        <TextBox x:Name="NotesBox" AcceptsReturn="True" Height="72" TextWrapping="Wrap" Margin="0,8,0,14"/>
-                        <DockPanel>
-                            <Button Content="Atualizar descrição" DockPanel.Dock="Right" Click="PreviewDescription_Click"/>
-                            <TextBlock Text="Descrição no relatório" Style="{StaticResource SectionTitleTextStyle}" VerticalAlignment="Center"/>
-                        </DockPanel>
-                        <TextBox x:Name="GeneratedDescriptionBox" IsReadOnly="True" Background="{StaticResource SurfaceMutedBrush}" TextWrapping="Wrap" MinHeight="58" Margin="0,8"/>
-                        <TextBlock Text="Edição manual opcional — substitui somente o texto no relatório e preserva todos os dados estruturados." Foreground="{StaticResource TextMutedBrush}"/>
-                        <TextBox x:Name="ManualDescriptionBox" AcceptsReturn="True" Height="72" TextWrapping="Wrap" Margin="0,7,0,0"/>
+                <TextBlock Text="Observação (opcional)" Style="{StaticResource FieldLabelTextStyle}"/>
+                <TextBox x:Name="NotesBox" TextWrapping="Wrap" MinHeight="42" MaxHeight="78" AcceptsReturn="True" Margin="0,0,0,13"/>
+
+                <DockPanel Margin="0,0,0,8"><Button Content="+" Width="38" MinWidth="38" Height="38" Padding="0" DockPanel.Dock="Right" Click="ToggleImageMenu_Click" ToolTip="Adicionar imagem"/><TextBlock Text="Imagens" Style="{StaticResource SectionTitleTextStyle}" VerticalAlignment="Center"/></DockPanel>
+                <Border x:Name="AddImageMenuPanel" Background="{StaticResource SurfaceMutedBrush}" CornerRadius="7" Padding="10" Margin="0,0,0,8" Visibility="Collapsed"><StackPanel><TextBlock Text="Adicionar imagem" FontWeight="SemiBold" Margin="0,0,0,7"/><ComboBox x:Name="PendingCaptureCombo" DisplayMemberPath="Label"/><StackPanel Orientation="Horizontal"><Button Content="Captura pendente" Click="AddPendingCapture_Click"/><Button Content="Imagem do computador" Click="AddExternalImage_Click"/></StackPanel></StackPanel></Border>
+                <ListBox x:Name="EvidenceList" ItemsSource="{Binding EvidenceItems}" BorderThickness="0" MinHeight="82" MaxHeight="180" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel><ListBox.ItemTemplate><DataTemplate><Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="6" Padding="5" Margin="0,0,7,7" Width="104"><StackPanel><Grid><Image Source="{Binding Thumbnail}" Height="68" Stretch="Uniform"/><TextBlock Text="★" Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="3" Visibility="{Binding Evidence.IsPrimary, Converter={StaticResource BoolToVisibility}}"/></Grid><StackPanel Orientation="Horizontal" HorizontalAlignment="Center"><Button Content="←" MinWidth="28" Width="28" Padding="2" Tag="{Binding Id}" Click="MoveEvidenceUp_Click" ToolTip="Mover para esquerda"/><Button Content="→" MinWidth="28" Width="28" Padding="2" Tag="{Binding Id}" Click="MoveEvidenceDown_Click" ToolTip="Mover para direita"/><Button Content="×" MinWidth="28" Width="28" Padding="2" Foreground="{StaticResource DangerBrush}" Tag="{Binding Id}" Click="RemoveEvidence_Click" ToolTip="Remover"/></StackPanel></StackPanel></Border></DataTemplate></ListBox.ItemTemplate></ListBox>
+
+                <Expander x:Name="AdvancedDetailsExpander" Header="Mais detalhes" Margin="0,8,0,0">
+                    <StackPanel Margin="0,10,0,0">
+                        <TextBlock Text="Abrangência" Style="{StaticResource FieldLabelTextStyle}"/><WrapPanel Margin="0,0,0,9"><RadioButton x:Name="PointRadio" Content="Ponto" GroupName="Location" Checked="LocationMode_Changed" Margin="0,0,16,0"/><RadioButton x:Name="RangeRadio" Content="Intervalo" GroupName="Location" Checked="LocationMode_Changed" Margin="0,0,16,0"/><RadioButton x:Name="EntireSectionRadio" Content="Todo o trecho" GroupName="Location" Checked="LocationMode_Changed"/></WrapPanel>
+                        <StackPanel x:Name="RangePanel" Visibility="Collapsed"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Início (m)" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="RangeStartBox" TextChanged="DraftFieldChanged"/></StackPanel><StackPanel Grid.Column="2"><TextBlock Text="Fim (m)" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="RangeEndBox" TextChanged="DraftFieldChanged"/></StackPanel></Grid></StackPanel>
+                        <TextBlock Text="Ponto de referência (opcional)" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="ReferencePointBox"/>
+                        <ItemsControl x:Name="AdvancedAnomaliesList"><ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="7" Padding="11" Margin="0,0,0,8" Visibility="{Binding IsSelected, Converter={StaticResource BoolToVisibility}}"><StackPanel><TextBlock Text="{Binding Definition.Name}" FontWeight="SemiBold" Margin="0,0,0,8"/><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <StackPanel Visibility="{Binding Definition.SupportsPosition, Converter={StaticResource BoolToVisibility}}"><TextBlock Text="Posição" Style="{StaticResource FieldLabelTextStyle}"/><ComboBox ItemsSource="{Binding Positions}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding Position}"/></StackPanel>
+                            <StackPanel Grid.Column="2" Visibility="{Binding Definition.SupportsOrientation, Converter={StaticResource BoolToVisibility}}"><TextBlock Text="Orientação" Style="{StaticResource FieldLabelTextStyle}"/><ComboBox ItemsSource="{Binding Orientations}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding Orientation}"/></StackPanel>
+                            <StackPanel Grid.Row="1" Visibility="{Binding Definition.SupportsExtension, Converter={StaticResource BoolToVisibility}}"><TextBlock Text="Extensão (m)" Style="{StaticResource FieldLabelTextStyle}"/><TextBox Text="{Binding ExtensionText, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
+                            <StackPanel Grid.Row="1" Grid.Column="2" Visibility="{Binding Definition.SupportsDimension, Converter={StaticResource BoolToVisibility}}"><TextBlock Text="Dimensão" Style="{StaticResource FieldLabelTextStyle}"/><TextBox Text="{Binding Dimension, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
+                            <StackPanel Grid.Row="2" Visibility="{Binding Definition.SupportsCondition, Converter={StaticResource BoolToVisibility}}"><TextBlock Text="Condição" Style="{StaticResource FieldLabelTextStyle}"/><ComboBox ItemsSource="{Binding Conditions}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding Condition}"/></StackPanel>
+                            <StackPanel Grid.Row="2" Grid.Column="2" Visibility="{Binding Definition.SupportsInfiltrationCondition, Converter={StaticResource BoolToVisibility}}"><TextBlock Text="Infiltração" Style="{StaticResource FieldLabelTextStyle}"/><ComboBox ItemsSource="{Binding InfiltrationConditions}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding InfiltrationCondition}"/></StackPanel>
+                            <StackPanel Grid.Row="3" Visibility="{Binding Definition.SupportsPercentage, Converter={StaticResource BoolToVisibility}}"><TextBlock Text="Percentual (%)" Style="{StaticResource FieldLabelTextStyle}"/><TextBox Text="{Binding PercentageText, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
+                            <StackPanel Grid.Row="3" Grid.Column="2"><TextBlock Text="Característica específica" Style="{StaticResource FieldLabelTextStyle}"/><TextBox Text="{Binding Notes, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
+                        </Grid></StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
                     </StackPanel>
-                    </Border>
                 </Expander>
 
-                <Border Style="{StaticResource CardStyle}" Padding="18">
-                    <StackPanel>
-                        <TextBlock Text="Imagens da anomalia" Style="{StaticResource SectionTitleTextStyle}"/>
-                        <WrapPanel Margin="0,9">
-                            <ComboBox x:Name="PendingCaptureCombo" Width="360" DisplayMemberPath="Label"/>
-                            <Button Content="Usar captura pendente" Click="AddPendingCapture_Click"/>
-                            <Button Content="＋  Adicionar imagem" Click="AddExternalImage_Click"/>
-                        </WrapPanel>
-                        <ListBox x:Name="EvidenceList" ItemsSource="{Binding EvidenceItems}" ScrollViewer.HorizontalScrollBarVisibility="Disabled" MinHeight="190">
-                            <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
-                            <ListBox.ItemTemplate>
-                                <DataTemplate>
-                                    <Border Style="{StaticResource SubtleCardStyle}" Padding="8" Margin="5" Width="230">
-                                        <StackPanel>
-                                            <Image Source="{Binding Thumbnail}" Height="120" Stretch="Uniform"/>
-                                            <TextBlock Text="{Binding Label}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Label}" Margin="0,5,0,0"/>
-                                            <TextBlock Text="{Binding VideoName}" Foreground="{StaticResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis"/>
-                                            <TextBlock Text="{Binding TimestampText}" FontFamily="Consolas" Foreground="{StaticResource TextMutedBrush}"/>
-                                            <TextBlock Text="{Binding OrderText}" Foreground="{StaticResource TextMutedBrush}"/>
-                                            <CheckBox Content="Imagem principal" IsChecked="{Binding Evidence.IsPrimary}" Tag="{Binding Id}" Click="PrimaryEvidence_Click" Margin="0,5"/>
-                                            <Button Content="Ir para o vídeo" Tag="{Binding Id}" Click="GoToEvidenceVideo_Click" Visibility="{Binding HasVideo, Converter={StaticResource BoolToVisibility}}"/>
-                                            <WrapPanel HorizontalAlignment="Center">
-                                                <Button Content="←" Tag="{Binding Id}" Click="MoveEvidenceUp_Click" ToolTip="Mover para a esquerda"/>
-                                                <Button Content="→" Tag="{Binding Id}" Click="MoveEvidenceDown_Click" ToolTip="Mover para a direita"/>
-                                                <Button Content="Remover" Style="{StaticResource DangerButtonStyle}" Tag="{Binding Id}" Click="RemoveEvidence_Click"/>
-                                            </WrapPanel>
-                                        </StackPanel>
-                                    </Border>
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
-                        </ListBox>
-                        <TextBlock Text="A anomalia pode ser salva sem imagem e ficará marcada como incompleta." Foreground="{StaticResource WarningBrush}" Margin="0,5,0,0"/>
-                    </StackPanel>
-                </Border>
+                <TextBox x:Name="GeneratedDescriptionBox" Visibility="Collapsed"/>
+                <TextBox x:Name="ManualDescriptionBox" Visibility="Collapsed"/>
             </StackPanel>
         </ScrollViewer>
 
-        <Grid Grid.Row="2" Margin="0,14,0,0">
-            <TextBlock x:Name="FooterHintText" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/>
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button x:Name="CancelButton" Content="Cancelar" IsCancel="True" Click="Cancel_Click"/>
-                <Button x:Name="SaveAndNextButton" Content="Salvar e criar próxima" Click="SaveAndNext_Click"/>
-                <Button x:Name="SaveButton" Content="Salvar anomalia" IsDefault="True" Style="{StaticResource PrimaryButtonStyle}" Click="Save_Click"/>
-            </StackPanel>
+        <Grid Grid.Row="2" Margin="0,12,0,0">
+            <StackPanel><TextBlock x:Name="FooterHintText" Foreground="{StaticResource TextMutedBrush}" FontSize="11"/><Button x:Name="LeavePendingButton" Content="Deixar captura pendente" HorizontalAlignment="Left" Margin="0,4,0,0" Click="LeavePending_Click" Visibility="Collapsed"/></StackPanel>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom"><Button x:Name="CancelButton" Content="Cancelar" IsCancel="True" Click="Cancel_Click"/><Button x:Name="SaveButton" Content="Salvar" Click="Save_Click"/><Button x:Name="SaveAndNextButton" Content="Salvar e continuar" IsDefault="True" Style="{StaticResource PrimaryButtonStyle}" Click="SaveAndNext_Click"/></StackPanel>
         </Grid>
     </Grid>
 </Window>

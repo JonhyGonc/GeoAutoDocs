@@ -462,6 +462,11 @@ public sealed class WordReportService
             return occurrence.ManualDescriptionOverride.Trim();
         if (!string.IsNullOrWhiteSpace(occurrence.CustomGeneratedText))
             return occurrence.CustomGeneratedText.Trim();
+        var hasUsableLocation = occurrence.LocationMode == OccurrenceLocationMode.EntireSection ||
+                                occurrence.LocationMode == OccurrenceLocationMode.Point && occurrence.Meterage is not null ||
+                                occurrence.LocationMode == OccurrenceLocationMode.Range && occurrence.Meterage is not null && occurrence.EndMeterage is not null;
+        if (occurrence.Anomalies.Count > 0 && hasUsableLocation)
+            return OccurrenceRules.GenerateDescription(occurrence);
         if (!string.IsNullOrWhiteSpace(occurrence.GeneratedDescription))
             return occurrence.GeneratedDescription.Trim();
 

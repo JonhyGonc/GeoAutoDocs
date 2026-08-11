@@ -95,26 +95,17 @@ public static class OccurrenceRules
 
     public static string GenerateDescription(Occurrence occurrence)
     {
-        var anomalyNames = occurrence.Anomalies.OrderBy(x => x.Order).Select(x =>
-            x.AnomalyType.AllowsCustomText && !string.IsNullOrWhiteSpace(x.CustomText)
-                ? x.CustomText!.Trim() : x.AnomalyType.Name.Trim()).ToList();
-        var location = occurrence.LocationMode switch
-        {
-            OccurrenceLocationMode.Point => $"Na metragem de {FormatMeters(occurrence.Meterage!.Value)} m",
-            OccurrenceLocationMode.Range => $"Entre {FormatMeters(occurrence.Meterage!.Value)} m e {FormatMeters(occurrence.EndMeterage!.Value)} m",
-            OccurrenceLocationMode.EntireSection => "Ao longo de todo o trecho",
-            _ => "No trecho"
-        };
-        var sharedPositions = occurrence.Anomalies
-            .Where(x => x.Position is not AnomalyPosition.NotReported and not AnomalyPosition.NotApplicable)
-            .Select(x => FormatPosition(x.Position).ToLowerInvariant()).Distinct().ToList();
-        var position = sharedPositions.Count == 1 ? $" na posição {sharedPositions[0]} da tubulação" : string.Empty;
+        var ordered = occurrence.Anomalies.OrderBy(x => x.Order).ToList();
+        var groups = ordered.GroupBy(x => x.Position).OrderBy(x => x.Min(y => y.Order)).ToList();
+        var anomalyText = groups.Select((group, index) => FormatPositionGroup(group.ToList(), index == 0)).ToList();
+        var location = FormatFilmingReference(occurrence);
         var reference = string.IsNullOrWhiteSpace(occurrence.ReferencePoint)
-            ? string.Empty : $", com referência {occurrence.ReferencePoint.Trim()}";
-        var details = occurrence.Anomalies.OrderBy(x => x.Order).Select(FormatTechnicalDetails)
+            ? string.Empty : $", com referência em {occurrence.ReferencePoint.Trim()}";
+        var ending = occurrence.InterruptedRecording ? ", interrompendo a gravação." : ".";
+        var details = ordered.Select(FormatTechnicalDetails)
             .Where(x => x.Length > 0).ToList();
         var detailText = details.Count == 0 ? string.Empty : " " + string.Join(" ", details);
-        return $"{location}, observa-se a presença de {Join(anomalyNames)}{position}{reference}.{detailText}".Trim();
+        return $"{Join(anomalyText)} {location}{reference}{ending}{detailText}".Trim();
     }
 
     public static bool IsComplete(Occurrence occurrence) => GetPendingReasons(occurrence).Count == 0;
@@ -139,6 +130,7 @@ public static class OccurrenceRules
         AnomalyPosition.LowerLeft => "Inferior esquerda", AnomalyPosition.LowerRight => "Inferior direita",
         AnomalyPosition.Circumferential => "Circunferencial", AnomalyPosition.PipeBottom => "Fundo da tubulação",
         AnomalyPosition.PipeWall => "Parede da tubulação", AnomalyPosition.Joint => "Junta",
+        AnomalyPosition.Side => "Lateral",
         AnomalyPosition.NotApplicable => "Não aplicável", _ => "Não informado"
     };
 
@@ -182,8 +174,54 @@ public static class OccurrenceRules
         return parts.Count == 0 ? string.Empty : $"{name}: {string.Join(", ", parts)}.";
     }
 
+    private static string FormatPositionGroup(IReadOnlyList<OccurrenceAnomaly> anomalies, bool firstGroup)
+    {
+        var names = anomalies.Select((item, index) =>
+        {
+            var name = item.AnomalyType.AllowsCustomText && !string.IsNullOrWhiteSpace(item.CustomText)
+                ? item.CustomText!.Trim() : item.AnomalyType.Name.Trim();
+            return firstGroup && index == 0 ? name : LowercaseInitial(name);
+        }).ToList();
+        var position = anomalies[0].Position;
+        if (position == AnomalyPosition.Side && anomalies.Count == 1 &&
+            anomalies[0].AnomalyType.Name.Equals("Contribuição", StringComparison.CurrentCultureIgnoreCase))
+            return $"{names[0]} lateral";
+        return Join(names) + FormatPositionPhrase(position);
+    }
+
+    private static string FormatPositionPhrase(AnomalyPosition position) => position switch
+    {
+        AnomalyPosition.UpperGenerator => " na geratriz superior",
+        AnomalyPosition.LowerGenerator => " na geratriz inferior",
+        AnomalyPosition.LeftSide => " na lateral esquerda da tubulação",
+        AnomalyPosition.RightSide => " na lateral direita da tubulação",
+        AnomalyPosition.Side => " na lateral da tubulação",
+        AnomalyPosition.UpperLeft => " na parte superior esquerda da tubulação",
+        AnomalyPosition.UpperRight => " na parte superior direita da tubulação",
+        AnomalyPosition.LowerLeft => " na parte inferior esquerda da tubulação",
+        AnomalyPosition.LowerRight => " na parte inferior direita da tubulação",
+        AnomalyPosition.Circumferential => " em toda a circunferência da tubulação",
+        AnomalyPosition.PipeBottom => " no fundo da tubulação",
+        AnomalyPosition.PipeWall => " na parede da tubulação",
+        AnomalyPosition.Joint => " na junta",
+        _ => string.Empty
+    };
+
+    private static string FormatFilmingReference(Occurrence occurrence) => occurrence.LocationMode switch
+    {
+        OccurrenceLocationMode.Point when occurrence.Meterage is not null =>
+            $"a {FormatMeters(occurrence.Meterage.Value)} {(occurrence.Meterage.Value == 1 ? "metro" : "metros")} do início da filmagem",
+        OccurrenceLocationMode.Range when occurrence.Meterage is not null && occurrence.EndMeterage is not null =>
+            $"entre {FormatMeters(occurrence.Meterage.Value)} e {FormatMeters(occurrence.EndMeterage.Value)} metros do início da filmagem",
+        OccurrenceLocationMode.EntireSection => "ao longo de toda a filmagem",
+        _ => "durante a filmagem"
+    };
+
+    private static string LowercaseInitial(string value) => value.Length == 0
+        ? value : char.ToLower(value[0], CultureInfo.GetCultureInfo("pt-BR")) + value[1..];
+
     private static string FormatMeters(decimal value) =>
-        value.ToString("N2", CultureInfo.GetCultureInfo("pt-BR"));
+        value.ToString("0.##", CultureInfo.GetCultureInfo("pt-BR"));
 
     private static string Join(IReadOnlyList<string> values) => values.Count switch
     {

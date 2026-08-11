@@ -383,6 +383,8 @@ public sealed class ProjectStore : IProjectStore
             await AddColumnIfMissingAsync(db, "AnomalyDefinitions", column.Item1, column.Item2, cancellationToken);
         foreach (var column in anomalyColumns)
             await AddColumnIfMissingAsync(db, "OccurrenceAnomaly", column.Item1, column.Item2, cancellationToken);
+        await AddColumnIfMissingAsync(db, "Occurrence", "InterruptedRecording",
+            "INTEGER NOT NULL DEFAULT 0", cancellationToken);
         await AddColumnIfMissingAsync(db, "Evidence", "IsPrimary", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
     }
 

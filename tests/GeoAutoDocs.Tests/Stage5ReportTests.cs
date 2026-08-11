@@ -94,8 +94,8 @@ public sealed class Stage5ReportTests : IDisposable
         Assert.DoesNotContain("Trecho 01", text);
         Assert.DoesNotContain("Trecho 03", text);
         Assert.DoesNotContain("Trecho 05", text);
-        Assert.Contains("Na metragem de 18,00 m, observa-se a presença de Trinca e Infiltração", text);
-        Assert.Contains("Entre 18,00 m e 24,50 m", text);
+        Assert.Contains("Trinca e infiltração a 18 metros do início da filmagem", text);
+        Assert.Contains("Assoreamento entre 18 e 24,5 metros do início da filmagem", text);
         Assert.Contains("Descrição manual revisada para todo o trecho", text);
         Assert.Contains("Figuras 4.1 a 4.2", text);
         Assert.Contains("Figura 4.3", text);
@@ -217,10 +217,30 @@ public sealed class Stage5ReportTests : IDisposable
         Assert.True(File.Exists(output));
         Assert.Contains("GF-RL-STAGE6-001", text);
         Assert.Contains("Trecho operacional", text);
-        Assert.Contains("Na metragem de 1,00 m", text);
-        Assert.Contains("Na metragem de 10,00 m", text);
+        Assert.Contains("a 1 metro do início da filmagem", text);
+        Assert.Contains("a 10 metros do início da filmagem", text);
         Assert.Contains("Figuras 3.7 a 3.9", text);
         Assert.Contains("Figura 4.10", text);
+    }
+
+    [Fact]
+    public async Task WordUsesCentralOccurrenceFormatterIncludingRecordingInterruption()
+    {
+        var project = NewProject();
+        var report = project.CreateReport("Relatório textual");
+        Configure(report, "GF-RL-TEXT-001");
+        var (_, section) = AddSection(project, "Local", "Trecho", 0, 0);
+        report.SelectSection(section);
+        var occurrence = AddOccurrence(section, OccurrenceLocationMode.Point, 25m, null,
+            ["Trinca", "Assoreamento"]);
+        occurrence.Anomalies[0].Position = AnomalyPosition.UpperGenerator;
+        occurrence.Anomalies[1].Position = AnomalyPosition.PipeWall;
+        occurrence.InterruptedRecording = true;
+
+        var output = await new WordReportService(_paths).GenerateAsync(project, report);
+        var text = ReadBody(output);
+
+        Assert.Contains("Trinca na geratriz superior e assoreamento na parede da tubulação a 25 metros do início da filmagem, interrompendo a gravação.", text);
     }
 
     private Project NewProject() => new()

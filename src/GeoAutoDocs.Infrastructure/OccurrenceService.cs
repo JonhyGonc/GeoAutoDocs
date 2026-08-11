@@ -28,6 +28,7 @@ public sealed class OccurrenceService(AppDataPaths paths, LocalLogger logger)
             CustomGeneratedText = duplicate ? null : source.CustomGeneratedText,
             GeneratedDescription = duplicate ? string.Empty : source.GeneratedDescription,
             ManualDescriptionOverride = duplicate ? null : source.ManualDescriptionOverride,
+            InterruptedRecording = !duplicate && source.InterruptedRecording,
             CreatedAt = duplicate ? DateTime.UtcNow : source.CreatedAt,
             UpdatedAt = DateTime.UtcNow,
             Order = duplicate ? (section.Occurrences.Count == 0 ? 0 : section.Occurrences.Max(x => x.Order) + 1) : source.Order,

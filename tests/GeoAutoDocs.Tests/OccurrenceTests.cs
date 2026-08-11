@@ -189,7 +189,89 @@ public sealed class OccurrenceTests : IAsyncLifetime
         var first = OccurrenceRules.GenerateDescription(occurrence);
         var second = OccurrenceRules.GenerateDescription(occurrence);
         Assert.Equal(first, second);
-        Assert.Equal("Na metragem de 18,00 m, observa-se a presença de Trinca e Infiltração.", first);
+        Assert.Equal("Trinca e infiltração a 18 metros do início da filmagem.", first);
+    }
+
+    [Fact]
+    public void FormatterGroupsAnomaliesAtTheSamePosition()
+    {
+        var occurrence = NewOccurrence(OccurrenceLocationMode.Point, 18m, "Trinca", "Infiltração");
+        occurrence.Anomalies.ForEach(x => x.Position = AnomalyPosition.UpperGenerator);
+
+        Assert.Equal("Trinca e infiltração na geratriz superior a 18 metros do início da filmagem.",
+            OccurrenceRules.GenerateDescription(occurrence));
+    }
+
+    [Fact]
+    public void FormatterKeepsEachAnomalyAtItsOwnPosition()
+    {
+        var occurrence = NewOccurrence(OccurrenceLocationMode.Point, 18m, "Trinca", "Infiltração");
+        occurrence.Anomalies[0].Position = AnomalyPosition.UpperGenerator;
+        occurrence.Anomalies[1].Position = AnomalyPosition.Side;
+
+        Assert.Equal("Trinca na geratriz superior e infiltração na lateral da tubulação a 18 metros do início da filmagem.",
+            OccurrenceRules.GenerateDescription(occurrence));
+    }
+
+    [Fact]
+    public void FormatterUsesCommasAndFinalConjunctionForThreePositions()
+    {
+        var occurrence = NewOccurrence(OccurrenceLocationMode.Point, 18m, "Trinca", "Infiltração", "Obstrução");
+        occurrence.Anomalies[0].Position = AnomalyPosition.UpperGenerator;
+        occurrence.Anomalies[1].Position = AnomalyPosition.Side;
+        occurrence.Anomalies[2].Position = AnomalyPosition.LowerGenerator;
+
+        Assert.Equal("Trinca na geratriz superior, infiltração na lateral da tubulação e obstrução na geratriz inferior a 18 metros do início da filmagem.",
+            OccurrenceRules.GenerateDescription(occurrence));
+    }
+
+    [Fact]
+    public void FormatterUsesNaturalContributionLateralWordingAfterGroupedPosition()
+    {
+        var occurrence = NewOccurrence(OccurrenceLocationMode.Point, 18m, "Trinca", "Infiltração", "Contribuição");
+        occurrence.Anomalies[0].Position = AnomalyPosition.UpperGenerator;
+        occurrence.Anomalies[1].Position = AnomalyPosition.UpperGenerator;
+        occurrence.Anomalies[2].Position = AnomalyPosition.Side;
+
+        Assert.Equal("Trinca e infiltração na geratriz superior e contribuição lateral a 18 metros do início da filmagem.",
+            OccurrenceRules.GenerateDescription(occurrence));
+    }
+
+    [Fact]
+    public void FormatterRemovesInsignificantMeasurementZerosAndUsesSingular()
+    {
+        var cases = new[] { (20m, "20 metros"), (18.50m, "18,5 metros"), (18.35m, "18,35 metros"), (1m, "1 metro") };
+        foreach (var (measurement, expected) in cases)
+        {
+            var occurrence = NewOccurrence(OccurrenceLocationMode.Point, measurement, "Trinca");
+            Assert.Contains($"a {expected} do início da filmagem", OccurrenceRules.GenerateDescription(occurrence));
+        }
+    }
+
+    [Fact]
+    public void FormatterAddsInterruptionOnlyWhenOperatorMarksIt()
+    {
+        var normal = NewOccurrence(OccurrenceLocationMode.Point, 25m, "Assoreamento");
+        var interrupted = NewOccurrence(OccurrenceLocationMode.Point, 25m, "Assoreamento");
+        interrupted.InterruptedRecording = true;
+
+        Assert.DoesNotContain("interrompendo a gravação", OccurrenceRules.GenerateDescription(normal));
+        Assert.EndsWith(", interrompendo a gravação.", OccurrenceRules.GenerateDescription(interrupted));
+    }
+
+    [Fact]
+    public async Task InterruptedRecordingPersistsWithoutChangingOlderDefaults()
+    {
+        var (project, section) = await CreateProjectAsync();
+        var occurrence = NewOccurrence(OccurrenceLocationMode.Point, 25m, "Obstrução");
+        occurrence.InterruptedRecording = true;
+        await _service.SaveAsync(project, section, occurrence, false);
+        await _store.SaveAsync(project);
+
+        var saved = (await _store.GetAsync(project.Id))!.Locations[0].Sections[0].Occurrences.Single();
+        Assert.True(saved.InterruptedRecording);
+        Assert.Contains("interrompendo a gravação", saved.GeneratedDescription);
+        Assert.False(new Occurrence().InterruptedRecording);
     }
 
     [Fact]
@@ -267,7 +349,7 @@ public sealed class OccurrenceTests : IAsyncLifetime
         Assert.Equal("Trinca longitudinal.", crack.Notes);
         Assert.Equal(InfiltrationCondition.ContinuousFlow, infiltration.InfiltrationCondition);
         Assert.Contains("contribuição lateral", saved.GeneratedDescription);
-        Assert.Contains("extensão aproximada de 1,20 m", saved.GeneratedDescription);
+        Assert.Contains("extensão aproximada de 1,2 m", saved.GeneratedDescription);
     }
 
     [Fact]
@@ -361,7 +443,7 @@ public sealed class OccurrenceTests : IAsyncLifetime
         Assert.Equal(2, saved.Anomalies.Count);
         Assert.Equal(3, saved.Evidence.Count);
         Assert.Equal(TimeSpan.FromMilliseconds(278420), saved.Evidence.Single(x => x.CaptureId is not null).VideoTimestamp);
-        Assert.Contains("Trinca e Infiltração", saved.GeneratedDescription);
+        Assert.Contains("Trinca e infiltração", saved.GeneratedDescription);
         Assert.True(saved.Evidence.Single(x => x.CaptureId is not null).VideoReferenceId is not null);
     }
 

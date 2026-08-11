@@ -193,7 +193,8 @@ public enum AnomalyPosition
 {
     NotReported = 0, UpperGenerator = 1, LowerGenerator = 2, LeftSide = 3, RightSide = 4,
     Circumferential = 5, NotApplicable = 6, UpperLeft = 7, UpperRight = 8,
-    LowerLeft = 9, LowerRight = 10, PipeBottom = 11, PipeWall = 12, Joint = 13
+    LowerLeft = 9, LowerRight = 10, PipeBottom = 11, PipeWall = 12, Joint = 13,
+    Side = 14
 }
 
 public enum AnomalyOrientation
@@ -224,6 +225,7 @@ public sealed class Occurrence
     public string? CustomGeneratedText { get; set; }
     public string GeneratedDescription { get; set; } = string.Empty;
     public string? ManualDescriptionOverride { get; set; }
+    public bool InterruptedRecording { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public int Order { get; set; }

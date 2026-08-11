@@ -57,8 +57,11 @@ public partial class OccurrenceWindow : Window
         }));
         FrequentAnomaliesList.ItemsSource = _anomalyItems;
         AdditionalAnomaliesList.ItemsSource = _anomalyItems;
+        QuickAnomalyPositionsList.ItemsSource = _anomalyItems;
         CustomAnomalyFieldsList.ItemsSource = _anomalyItems;
         AdvancedAnomaliesList.ItemsSource = _anomalyItems;
+        foreach (var item in _anomalyItems)
+            item.PropertyChanged += (_, _) => RefreshLivePreview();
 
         foreach (var evidence in _draft.Evidence.OrderBy(x => x.Order)) AddEvidenceItem(evidence);
         if (initialCapture is not null && EvidenceItems.All(x => x.Evidence.CaptureId != initialCapture.Id))
@@ -103,10 +106,12 @@ public partial class OccurrenceWindow : Window
         NotesBox.Text = _draft.Notes ?? "";
         GeneratedDescriptionBox.Text = _draft.GeneratedDescription;
         ManualDescriptionBox.Text = _draft.ManualDescriptionOverride ?? "";
+        InterruptedRecordingCheck.IsChecked = _draft.InterruptedRecording;
         UpdateLocationPanels();
         UpdateSelectedAnomalies();
         RefreshEvidencePresentation();
         UpdateDraftStatus();
+        RefreshLivePreview();
     }
 
     private void Save_Click(object sender, RoutedEventArgs e) => CompleteSave(false);
@@ -162,6 +167,7 @@ public partial class OccurrenceWindow : Window
         _draft.ReferencePoint = ReferencePointBox.Text;
         _draft.Notes = NotesBox.Text;
         _draft.ManualDescriptionOverride = ManualDescriptionBox.Text;
+        _draft.InterruptedRecording = InterruptedRecordingCheck.IsChecked == true;
         _draft.Anomalies = _anomalyItems.Where(x => x.IsSelected).Select((x, index) => new OccurrenceAnomaly
         {
             OccurrenceId = _draft.Id, AnomalyTypeId = x.Definition.Id, AnomalyType = x.Definition,
@@ -199,7 +205,11 @@ public partial class OccurrenceWindow : Window
         UpdateDraftStatus();
     }
 
-    private void DraftFieldChanged(object sender, TextChangedEventArgs e) => UpdateDraftStatus();
+    private void DraftFieldChanged(object sender, TextChangedEventArgs e)
+    {
+        UpdateDraftStatus();
+        RefreshLivePreview();
+    }
 
     private void PointMeasurementBox_KeyDown(object sender, KeyEventArgs e)
     {
@@ -217,8 +227,30 @@ public partial class OccurrenceWindow : Window
         SelectedAnomaliesText.Text = selected.Count == 0 ? "Nenhuma selecionada" :
             $"{selected.Count} selecionada(s): " + string.Join("  •  ", selected);
         CustomAnomalyFieldsList?.Items.Refresh();
+        QuickAnomalyPositionsList?.Items.Refresh();
         AdvancedAnomaliesList?.Items.Refresh();
         UpdateDraftStatus();
+        RefreshLivePreview();
+    }
+
+    private void AnomalyPosition_Changed(object sender, SelectionChangedEventArgs e) => RefreshLivePreview();
+
+    private void LivePreview_Changed(object sender, RoutedEventArgs e) => RefreshLivePreview();
+
+    private void RefreshLivePreview()
+    {
+        if (ReportPreviewText is null || _anomalyItems is null) return;
+        try
+        {
+            ApplyFormToDraft();
+            ReportPreviewText.Text = _draft.Anomalies.Count == 0
+                ? "Selecione ao menos uma anomalia para visualizar a descrição."
+                : OccurrenceRules.GenerateDescription(_draft);
+        }
+        catch
+        {
+            ReportPreviewText.Text = "Informe uma metragem válida para visualizar a descrição.";
+        }
     }
 
     private void ToggleMoreAnomalies_Click(object sender, RoutedEventArgs e)
@@ -377,6 +409,8 @@ public sealed class AnomalySelectionItem : INotifyPropertyChanged
     private bool _isSelected;
     private bool _isVisible = true;
     private bool _showInAdditionalList;
+    private AnomalyPosition _position;
+    private string? _customText;
     private static readonly HashSet<string> FrequentNames = new(StringComparer.CurrentCultureIgnoreCase)
     {
         "Fissura", "Trinca", "Infiltração", "Obstrução", "Assoreamento", "Contribuição"
@@ -390,7 +424,7 @@ public sealed class AnomalySelectionItem : INotifyPropertyChanged
     public bool IsVisible { get => _isVisible; set { _isVisible = value; OnPropertyChanged(); } }
     public bool IsFrequent => FrequentNames.Contains(Definition.Name);
     public bool ShowInAdditionalList { get => _showInAdditionalList; set { _showInAdditionalList = value; OnPropertyChanged(); } }
-    public AnomalyPosition Position { get; set; }
+    public AnomalyPosition Position { get => _position; set { if (_position == value) return; _position = value; OnPropertyChanged(); } }
     public AnomalyOrientation Orientation { get; set; }
     public string ExtensionText { get; set; } = "";
     public string? Dimension { get; set; }
@@ -398,7 +432,7 @@ public sealed class AnomalySelectionItem : INotifyPropertyChanged
     public InfiltrationCondition InfiltrationCondition { get; set; }
     public string PercentageText { get; set; } = "";
     public string? Notes { get; set; }
-    public string? CustomText { get; set; }
+    public string? CustomText { get => _customText; set { if (_customText == value) return; _customText = value; OnPropertyChanged(); } }
 
     public AnomalySelectionItem(AnomalyDefinition definition, OccurrenceAnomaly? selected)
     {

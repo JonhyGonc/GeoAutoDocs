@@ -4,7 +4,7 @@
         Title="Novo projeto • GeoAutoDocs" Width="900" Height="620" MinWidth="720" MinHeight="460"
         ResizeMode="CanResize" SizeToContent="Manual" WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Background="{StaticResource WindowBackgroundBrush}">
-    <Grid Margin="28,24">
+    <Grid Margin="28,24" MaxWidth="1100" HorizontalAlignment="Center">
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <StackPanel><TextBlock Text="Novo projeto" Style="{StaticResource PageTitleTextStyle}"/><TextBlock Text="Defina os dados principais. Eles serão herdados automaticamente pelos relatórios." Foreground="{StaticResource TextSecondaryBrush}" FontSize="14" Margin="0,6,0,0"/></StackPanel>
 

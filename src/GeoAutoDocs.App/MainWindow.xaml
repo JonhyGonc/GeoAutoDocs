@@ -12,7 +12,7 @@
         </Style>
     </Window.Resources>
     <Grid>
-        <Grid x:Name="ProjectsView" Margin="34,28" HorizontalAlignment="Stretch">
+        <Grid x:Name="ProjectsView" Margin="34,28" MaxWidth="1600" HorizontalAlignment="Center">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="1"/><RowDefinition Height="*"/></Grid.RowDefinitions>
             <StackPanel>
                 <TextBlock Text="Projetos" Style="{StaticResource PageTitleTextStyle}"/>
@@ -66,7 +66,7 @@
             <Grid Grid.Row="2"><TextBlock Text="Somente o nome é obrigatório." Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button Content="Cancelar" Click="CancelNewProject_Click" MinWidth="110"/><Button Content="Criar projeto" Style="{StaticResource PrimaryButtonStyle}" MinWidth="160" Click="CreateProject_Click"/></StackPanel></Grid>
         </Grid>
 
-        <Grid x:Name="EditorView" Visibility="Collapsed" Margin="24,18,28,14" HorizontalAlignment="Stretch">
+        <Grid x:Name="EditorView" Visibility="Collapsed" Margin="24,18,28,14" MaxWidth="1600" HorizontalAlignment="Center">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <Grid Margin="0,0,0,12">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -78,7 +78,7 @@
             <TabControl x:Name="ReportEditorTabs" Grid.Row="1" Margin="0">
                 <TabItem x:Name="OverviewTab" Header="Visão geral">
                     <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,14,8,0">
-                        <StackPanel MaxWidth="940" HorizontalAlignment="Left">
+                        <StackPanel MaxWidth="940" HorizontalAlignment="Center">
                             <TextBlock Text="Visão geral" Style="{StaticResource PageTitleTextStyle}" FontSize="22"/>
                             <TextBlock Text="Acompanhe o projeto e continue de onde parou." Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,20"/>
                             <Border Style="{StaticResource CardStyle}" Padding="20">
@@ -186,7 +186,7 @@
                             </Grid>
                         </StackPanel>
                         <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="0,0,8,0">
-                            <StackPanel MaxWidth="940" HorizontalAlignment="Left">
+                            <StackPanel MaxWidth="940" HorizontalAlignment="Center">
                                 <StackPanel Margin="0,0,0,16"><TextBlock x:Name="ActiveReportTitle" Text="Selecione um relatório" Style="{StaticResource PageTitleTextStyle}" FontSize="22"/><TextBlock Text="Preparação do documento" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,3,0,0"/></StackPanel>
                                 <Grid x:Name="ReportHeaderTab" Visibility="Collapsed"><TextBox x:Name="ClientBox"/><TextBox x:Name="CnpjBox"/><TextBox x:Name="AreaBox"/><TextBox x:Name="ContractBox"/><TextBox x:Name="PurchaseOrderBox"/><TextBox x:Name="TemplateBox"/><TextBox x:Name="LogoBox"/></Grid>
                                 <TextBlock Text="Dados da emissão" Style="{StaticResource SectionTitleTextStyle}"/>
@@ -231,7 +231,7 @@
                 </TabItem>
 
                 <TabItem x:Name="ProjectDefaultsTab" Header="Dados do projeto">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,14,8,0"><StackPanel MaxWidth="940" HorizontalAlignment="Left"><TextBlock Text="Dados do projeto" Style="{StaticResource PageTitleTextStyle}" FontSize="22"/><TextBlock Text="Estas informações são herdadas automaticamente pelos novos relatórios." Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,20"/>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,14,8,0"><StackPanel MaxWidth="940" HorizontalAlignment="Center"><TextBlock Text="Dados do projeto" Style="{StaticResource PageTitleTextStyle}" FontSize="22"/><TextBlock Text="Estas informações são herdadas automaticamente pelos novos relatórios." Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,20"/>
                         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="22"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                             <StackPanel><TextBlock Text="Cliente" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultClientBox" TextChanged="FieldChanged"/></StackPanel><StackPanel Grid.Column="2"><TextBlock Text="CNPJ" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultCnpjBox" TextChanged="FieldChanged"/></StackPanel>
                             <StackPanel Grid.Row="1"><TextBlock Text="Área / localização" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultAreaBox" TextChanged="FieldChanged"/></StackPanel><StackPanel Grid.Row="1" Grid.Column="2"><TextBlock Text="Contrato" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultContractBox" TextChanged="FieldChanged"/></StackPanel>

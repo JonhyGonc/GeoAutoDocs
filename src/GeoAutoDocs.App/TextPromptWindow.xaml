@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="GeoAutoDocs" Height="220" Width="500" MinWidth="380" MinHeight="190" ResizeMode="CanResize"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False" Background="{StaticResource WindowBackgroundBrush}">
-    <Grid Margin="26">
+    <Grid Margin="26" MaxWidth="680" HorizontalAlignment="Center">
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
         <TextBlock x:Name="PromptText" FontSize="17" FontWeight="SemiBold" />
         <TextBox x:Name="ValueBox" Grid.Row="1" Margin="0,12,0,18" />

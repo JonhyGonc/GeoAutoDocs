@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Novo trecho" Width="680" Height="560" MinWidth="520" MinHeight="420"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False" Background="{StaticResource WindowBackgroundBrush}">
-    <Grid Margin="26,22">
+    <Grid Margin="26,22" MaxWidth="760" HorizontalAlignment="Center">
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <StackPanel><TextBlock Text="Novo trecho" Style="{StaticResource PageTitleTextStyle}" FontSize="23"/><TextBlock Text="Informe a identificação e, se desejar, complete os dados técnicos." Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5,0,0"/></StackPanel>
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0"><Grid Margin="0,20,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>

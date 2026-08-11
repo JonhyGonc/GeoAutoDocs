@@ -38,9 +38,9 @@ public static class ReportValidation
         foreach (var image in report.DevelopmentImages)
         {
             if (string.IsNullOrWhiteSpace(image.FilePath) || !File.Exists(image.FilePath))
-                errors.Add($"Imagem da Seção 3 não encontrada: {image.FilePath ?? "arquivo não informado"}.");
+                errors.Add($"Imagem da Seção 3 não encontrada: {FriendlyFileName(image.FilePath)}.");
             else if (!IsSupportedImage(image.FilePath))
-                errors.Add($"Formato de imagem da Seção 3 não suportado: {image.FilePath}.");
+                errors.Add($"Formato de imagem da Seção 3 não suportado: {FriendlyFileName(image.FilePath)}.");
         }
 
         var occurrences = selected.SelectMany(x => x.Section.Occurrences).ToList();
@@ -48,9 +48,9 @@ public static class ReportValidation
         foreach (var item in evidences)
         {
             if (string.IsNullOrWhiteSpace(item.FilePath) || !File.Exists(item.FilePath))
-                errors.Add($"Imagem/evidência não encontrada: {item.FilePath ?? "arquivo não informado"}.");
+                errors.Add($"Imagem/evidência não encontrada: {FriendlyFileName(item.FilePath)}.");
             else if (!IsSupportedImage(item.FilePath))
-                errors.Add($"Formato de evidência não suportado: {item.FilePath}.");
+                errors.Add($"Formato de evidência não suportado: {FriendlyFileName(item.FilePath)}.");
         }
 
         foreach (var occurrence in occurrences.Where(x => x.Evidence.Count == 0))
@@ -86,6 +86,9 @@ public static class ReportValidation
     {
         if (string.IsNullOrWhiteSpace(value)) errors.Add($"Preencha o campo obrigatório: {label}.");
     }
+
+    private static string FriendlyFileName(string? path) =>
+        string.IsNullOrWhiteSpace(path) ? "arquivo não informado" : Path.GetFileName(path);
 
     private static bool IsSupportedImage(string path) => Path.GetExtension(path).ToLowerInvariant() is
         ".png" or ".jpg" or ".jpeg";

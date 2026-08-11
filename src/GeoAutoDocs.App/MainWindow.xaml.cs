@@ -67,7 +67,7 @@ public partial class MainWindow : Window
         _mediaPlayer = new MediaPlayer(_libVlc);
         VideoView.MediaPlayer = _mediaPlayer;
         _mediaPlayer.EncounteredError += (_, _) => Dispatcher.BeginInvoke(() => HandlePlayerError());
-        _mediaPlayer.Playing += (_, _) => Dispatcher.BeginInvoke(() => { VideoMessage.Visibility = Visibility.Collapsed; PlayPauseButton.Content = "❚❚"; });
+        _mediaPlayer.Playing += (_, _) => Dispatcher.BeginInvoke(() => { VideoEmptyState.Visibility = Visibility.Collapsed; PlayPauseButton.Content = "❚❚"; });
         _mediaPlayer.Paused += (_, _) => Dispatcher.BeginInvoke(() => PlayPauseButton.Content = "▶");
         _mediaPlayer.Stopped += (_, _) => Dispatcher.BeginInvoke(() => PlayPauseButton.Content = "▶");
         ProjectsList.ItemsSource = _projects;
@@ -91,6 +91,7 @@ public partial class MainWindow : Window
             _projects.Clear();
             foreach (var project in await _store.ListAsync()) _projects.Add(project);
             CollectionViewSource.GetDefaultView(_projects).Refresh();
+            RefreshProjectsEmptyState();
         }
         catch (Exception ex) { ShowError("Não foi possível carregar os projetos.", ex); }
     }
@@ -123,6 +124,19 @@ public partial class MainWindow : Window
             (query.Length == 0 || project.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
              project.DefaultClient.Contains(query, StringComparison.CurrentCultureIgnoreCase));
         view.Refresh();
+        RefreshProjectsEmptyState();
+    }
+
+    private void RefreshProjectsEmptyState()
+    {
+        var query = ProjectsSearchBox.Text.Trim();
+        var view = CollectionViewSource.GetDefaultView(_projects);
+        ProjectsEmptyState.Visibility = view.IsEmpty ? Visibility.Visible : Visibility.Collapsed;
+        ProjectsEmptyTitle.Text = query.Length == 0 ? "Nenhum projeto criado" : "Nenhum projeto encontrado";
+        ProjectsEmptyDescription.Text = query.Length == 0
+            ? "Crie o primeiro projeto para iniciar uma inspeção."
+            : "Tente buscar por outro nome de projeto ou cliente.";
+        ProjectsEmptyAction.Visibility = query.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private async void OpenProject_Click(object sender, RoutedEventArgs e)
@@ -226,6 +240,7 @@ public partial class MainWindow : Window
             : "Local";
         ShareProjectButton.IsEnabled = project.StorageKind == ProjectStorageKind.Local;
         NewReportButton.IsEnabled = _sharedSession?.IsReadOnly != true;
+        ReportsEmptyState.Visibility = reports.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         ProjectDefaultsTab.IsEnabled = true;
         ReportHeaderTab.IsEnabled = !IsReadOnly && _currentReport is not null;
         WordConfigTab.IsEnabled = true;
@@ -234,6 +249,8 @@ public partial class MainWindow : Window
         UpdateInspectionWriteState();
         LoadReport(_currentReport);
         RefreshFilePreviews();
+        RefreshOverview();
+        OverviewTab.IsSelected = true;
         SaveStatus.Text = "✓ Salvo";
         _hasPendingChanges = false;
         _loadingFields = false;
@@ -248,6 +265,7 @@ public partial class MainWindow : Window
         ClientBox.Text = report?.Client ?? ""; CnpjBox.Text = report?.Cnpj ?? "";
         AreaBox.Text = report?.Area ?? ""; ContractBox.Text = report?.Contract ?? "";
         PurchaseOrderBox.Text = report?.PurchaseOrder ?? ""; ReportCodeBox.Text = report?.ReportCode ?? "";
+        ReportNameBox.Text = report?.Name ?? "";
         ReportDatePicker.SelectedDate = report?.ReportDate; LocationBox.Text = report?.LocationDescription ?? "";
         MetersBox.Text = report?.TotalInvestigatedMeters?.ToString("0.###", CultureInfo.CurrentCulture) ?? "";
         TemplateBox.Text = report?.TemplatePath ?? ""; LogoBox.Text = report?.LogoPath ?? "";
@@ -270,11 +288,13 @@ public partial class MainWindow : Window
         RefreshDevelopmentImageSummary();
         CustomSectionsList.ItemsSource = report?.CustomSections;
         RefreshReportSectionSelection();
-        GeneratedReportText.Text = File.Exists(report?.GeneratedReportPath) ? "✓ Relatório gerado" : "";
+        GeneratedReportText.Text = File.Exists(report?.GeneratedReportPath)
+            ? $"✓ Relatório gerado\n{Path.GetFileName(report!.GeneratedReportPath)}" : "";
         OpenReportButton.IsEnabled = File.Exists(report?.GeneratedReportPath);
         OpenReportFolderButton.IsEnabled = File.Exists(report?.GeneratedReportPath);
         RefreshFilePreviews();
         _loadingFields = false;
+        RefreshReportReview();
     }
 
     private void ReportsCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -307,13 +327,25 @@ public partial class MainWindow : Window
         var reports = _currentProject.Reports.OrderBy(x => x.Order).ToList();
         ReportsCombo.ItemsSource = reports;
         ReportsList.ItemsSource = reports;
+        ReportsEmptyState.Visibility = Visibility.Collapsed;
         _currentReport = created;
         ReportsCombo.SelectedItem = created;
         ReportsList.SelectedItem = created;
         _loadingFields = false;
         LoadReport(_currentReport);
+        WordConfigTab.IsSelected = true;
         _hasPendingChanges = true;
         await SavePendingAsync();
+        ReportNameBox.Focus();
+        ReportNameBox.SelectAll();
+    }
+
+    private void ContinueInspection_Click(object sender, RoutedEventArgs e) => InspectionsTab.IsSelected = true;
+
+    private void OverviewNewReport_Click(object sender, RoutedEventArgs e)
+    {
+        WordConfigTab.IsSelected = true;
+        NewReport_Click(sender, e);
     }
 
     private void FieldChanged(object sender, RoutedEventArgs e)
@@ -321,6 +353,7 @@ public partial class MainWindow : Window
         if (_loadingFields || _currentProject is null || _sharedSession?.IsReadOnly == true) return;
         _hasPendingChanges = true;
         SaveStatus.Text = "Salvando...";
+        if (sender == OpeningCheck || sender == GprCheck) RefreshDevelopmentImageSummary();
         _saveTimer.Stop(); _saveTimer.Start();
     }
 
@@ -332,12 +365,14 @@ public partial class MainWindow : Window
         _currentProject.DefaultPurchaseOrder = DefaultPurchaseOrderBox.Text.Trim(); _currentProject.DefaultLogoPath = EmptyToNull(DefaultLogoBox.Text);
         if (_currentReport is null) return;
         var report = _currentReport;
-        report.Client = ClientBox.Text.Trim(); report.Cnpj = CnpjBox.Text.Trim(); report.Area = AreaBox.Text.Trim();
-        report.Contract = ContractBox.Text.Trim(); report.PurchaseOrder = PurchaseOrderBox.Text.Trim();
+        report.Client = _currentProject.DefaultClient; report.Cnpj = _currentProject.DefaultCnpj;
+        report.Area = _currentProject.DefaultArea; report.Contract = _currentProject.DefaultContract;
+        report.PurchaseOrder = _currentProject.DefaultPurchaseOrder; report.LogoPath = _currentProject.DefaultLogoPath;
+        report.Name = string.IsNullOrWhiteSpace(ReportNameBox.Text) ? report.Name : ReportNameBox.Text.Trim();
         report.ReportCode = ReportCodeBox.Text.Trim(); report.ReportDate = ReportDatePicker.SelectedDate;
         report.LocationDescription = LocationBox.Text.Trim();
         report.TotalInvestigatedMeters = decimal.TryParse(MetersBox.Text, NumberStyles.Number, CultureInfo.CurrentCulture, out var meters) ? meters : null;
-        report.TemplatePath = EmptyToNull(TemplateBox.Text); report.LogoPath = EmptyToNull(LogoBox.Text); report.LocationImagePath = EmptyToNull(LocationImageBox.Text);
+        report.TemplatePath = EmptyToNull(TemplateBox.Text); report.LocationImagePath = EmptyToNull(LocationImageBox.Text);
         report.Equipments = EquipmentSelection.None | (EndoscopeCheck.IsChecked == true ? EquipmentSelection.Endoscope : 0) | (BugCheck.IsChecked == true ? EquipmentSelection.Bug : 0) | (HunterCheck.IsChecked == true ? EquipmentSelection.Hunter : 0) | (SpiderCheck.IsChecked == true ? EquipmentSelection.Spider : 0) | (TrackerCheck.IsChecked == true ? EquipmentSelection.Tracker : 0);
         report.Diameters = StandardDiameterSelection.None | (D300Check.IsChecked == true ? StandardDiameterSelection.Mm300 : 0) | (D400Check.IsChecked == true ? StandardDiameterSelection.Mm400 : 0) | (D500Check.IsChecked == true ? StandardDiameterSelection.Mm500 : 0) | (D600Check.IsChecked == true ? StandardDiameterSelection.Mm600 : 0) | (D800Check.IsChecked == true ? StandardDiameterSelection.Mm800 : 0) | (D1000Check.IsChecked == true ? StandardDiameterSelection.Mm1000 : 0) | (D1500Check.IsChecked == true ? StandardDiameterSelection.Mm1500 : 0);
         report.CustomDiameters = CustomDiametersBox.Text.Trim(); report.IncludeInspectionOpening = OpeningCheck.IsChecked == true; report.IncludeGpr = GprCheck.IsChecked == true;
@@ -356,6 +391,10 @@ public partial class MainWindow : Window
             _saveErrorNotified = false;
             ProjectClientSummary.Text = string.IsNullOrWhiteSpace(_currentProject.DefaultClient)
                 ? "Dados do cliente ainda não informados" : _currentProject.DefaultClient;
+            ActiveReportTitle.Text = _currentReport?.Name ?? "Selecione um relatório";
+            ReportsList.Items.Refresh();
+            RefreshOverview();
+            RefreshReportReview();
             SaveStatus.Text = "✓ Salvo";
         }
         catch (Exception ex)
@@ -479,14 +518,24 @@ public partial class MainWindow : Window
 
     private void RefreshDevelopmentImageSummary()
     {
-        string Summary(DevelopmentImageGroup group, string label)
+        List<DevelopmentImagePreviewItem> Items(DevelopmentImageGroup group) => _currentReport?.DevelopmentImages
+            .Where(x => x.Group == group).OrderBy(x => x.Order)
+            .Select(x => new DevelopmentImagePreviewItem(x.FilePath)).ToList() ?? [];
+
+        string Summary(DevelopmentImageGroup group)
         {
             var count = _currentReport?.DevelopmentImages.Count(x => x.Group == group) ?? 0;
-            return count == 0 ? $"{label}: imagens do modelo" : $"{label}: {count} imagem(ns) selecionada(s)";
+            return count == 0 ? "Imagens padrão do modelo" : $"{count} imagem(ns) selecionada(s)";
         }
-        VideoInspectionImagesText.Text = Summary(DevelopmentImageGroup.VideoInspection, "Vídeo inspeção");
-        OpeningImagesText.Text = Summary(DevelopmentImageGroup.InspectionOpening, "Abertura");
-        GprImagesText.Text = Summary(DevelopmentImageGroup.Gpr, "GPR / Georadar");
+        VideoInspectionImagesList.ItemsSource = Items(DevelopmentImageGroup.VideoInspection);
+        OpeningImagesList.ItemsSource = Items(DevelopmentImageGroup.InspectionOpening);
+        GprImagesList.ItemsSource = Items(DevelopmentImageGroup.Gpr);
+        VideoInspectionImagesText.Text = Summary(DevelopmentImageGroup.VideoInspection);
+        OpeningImagesText.Text = Summary(DevelopmentImageGroup.InspectionOpening);
+        GprImagesText.Text = Summary(DevelopmentImageGroup.Gpr);
+        OpeningImagesPanel.Visibility = OpeningCheck.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        GprImagesPanel.Visibility = GprCheck.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        RefreshReportReview();
     }
 
     private void SelectFile(TextBox target, string filter)
@@ -532,8 +581,12 @@ public partial class MainWindow : Window
         try
         {
             var validation = _wordReportService.Validate(_currentProject, _currentReport);
-            var validationWindow = new ReportValidationWindow(validation) { Owner = this };
-            if (validationWindow.ShowDialog() != true) return;
+            RefreshReportReview(validation);
+            if (validation.Errors.Count > 0 || validation.Warnings.Count > 0)
+            {
+                var validationWindow = new ReportValidationWindow(validation) { Owner = this };
+                if (validationWindow.ShowDialog() != true) return;
+            }
 
             var reportsDirectory = Path.Combine(_currentProject.ProjectPath ?? "", "reports");
             if (!string.IsNullOrWhiteSpace(_currentProject.ProjectPath)) Directory.CreateDirectory(reportsDirectory);
@@ -553,9 +606,11 @@ public partial class MainWindow : Window
             GeneratedReportText.Text = "Preparando relatório... Processando trechos e inserindo imagens...";
             var path = await _wordReportService.GenerateToAsync(_currentProject, _currentReport, dialog.FileName);
             if (_sharedSession?.IsReadOnly != true) { _hasPendingChanges = true; await SavePendingAsync(); }
-            GeneratedReportText.Text = "✓ Relatório gerado com sucesso"; OpenReportButton.IsEnabled = true; OpenReportFolderButton.IsEnabled = true;
-            MessageBox.Show("Relatório gerado com sucesso.\n\nUse os botões ‘Abrir arquivo’ ou ‘Abrir pasta’.",
-                "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Information);
+            GeneratedReportText.Text = $"✓ Relatório gerado\n{Path.GetFileName(path)}";
+            OpenReportButton.IsEnabled = true; OpenReportFolderButton.IsEnabled = true;
+            ReportsList.Items.Refresh();
+            RefreshOverview();
+            RefreshReportReview();
         }
         catch (Exception ex) { GeneratedReportText.Text = "Falha ao gerar relatório."; ShowError(ex.Message, ex); }
     }
@@ -598,6 +653,7 @@ public partial class MainWindow : Window
         if (checkBox.IsChecked == true) _currentReport.SelectSection(section);
         else _currentReport.SectionLinks.RemoveAll(x => x.SectionId == sectionId);
         NormalizeReportSectionOrder();
+        RefreshReportReview();
         ScheduleSave();
     }
 
@@ -608,6 +664,7 @@ public partial class MainWindow : Window
             _currentReport.SelectSection(section);
         NormalizeReportSectionOrder();
         RefreshReportSectionSelection();
+        RefreshReportReview();
         ScheduleSave();
     }
 
@@ -616,6 +673,7 @@ public partial class MainWindow : Window
         if (_currentReport is null || IsReadOnly) return;
         _currentReport.SectionLinks.Clear();
         RefreshReportSectionSelection();
+        RefreshReportReview();
         ScheduleSave();
     }
 
@@ -637,6 +695,51 @@ public partial class MainWindow : Window
 
     private bool IsReadOnly => _sharedSession?.IsReadOnly == true;
 
+    private void RefreshOverview()
+    {
+        if (_currentProject is null) return;
+        var sections = _currentProject.Locations.SelectMany(x => x.Sections).ToList();
+        OverviewProjectName.Text = _currentProject.Name;
+        OverviewClientName.Text = string.IsNullOrWhiteSpace(_currentProject.DefaultClient)
+            ? "Cliente não informado" : _currentProject.DefaultClient;
+        OverviewReportsCount.Text = _currentProject.Reports.Count.ToString(CultureInfo.CurrentCulture);
+        OverviewSectionsCount.Text = sections.Count.ToString(CultureInfo.CurrentCulture);
+        OverviewOccurrencesCount.Text = sections.Sum(x => x.Occurrences.Count).ToString(CultureInfo.CurrentCulture);
+        OverviewUpdatedAt.Text = _currentProject.UpdatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
+    }
+
+    private void RefreshReportReview(ReportValidationResult? validation = null)
+    {
+        if (_currentProject is null || _currentReport is null)
+        {
+            ReportReviewTitle.Text = "Selecione um relatório";
+            ReportReviewSummary.Text = "";
+            ReportReviewIssues.Text = "";
+            return;
+        }
+
+        validation ??= _wordReportService.Validate(_currentProject, _currentReport);
+        var emissionReady = !string.IsNullOrWhiteSpace(_currentReport.ReportCode) &&
+                            _currentReport.ReportDate is not null && _currentReport.TotalInvestigatedMeters > 0;
+        var equipmentCount = Enum.GetValues<EquipmentSelection>()
+            .Count(x => x != EquipmentSelection.None && _currentReport.Equipments.HasFlag(x));
+        ReportReviewTitle.Text = validation.Errors.Count == 0
+            ? validation.Warnings.Count == 0 ? "Relatório pronto" : "Relatório pronto com avisos"
+            : "Revisão necessária";
+        ReportReviewSummary.Text =
+            $"Dados da emissão        {(emissionReady ? "✓" : "• pendente")}\n" +
+            $"Equipamentos            {(equipmentCount > 0 ? $"✓ {equipmentCount}" : "• nenhum selecionado")}\n" +
+            $"Desenvolvimento         ✓\n" +
+            $"Trechos                 ✓ {validation.SelectedSections}\n" +
+            $"Anomalias               ✓ {validation.Occurrences}\n" +
+            $"Imagens                 ✓ {validation.Evidences + _currentReport.DevelopmentImages.Count}";
+        var issues = validation.Errors.Select(x => "• " + x)
+            .Concat(validation.Warnings.Select(x => "⚠ " + x)).Take(6).ToList();
+        ReportReviewIssues.Text = issues.Count == 0 ? "Nenhuma pendência encontrada." : string.Join("\n", issues);
+        ReportReviewIssues.Foreground = (System.Windows.Media.Brush)FindResource(
+            validation.Errors.Count == 0 && validation.Warnings.Count == 0 ? "SuccessBrush" : "WarningBrush");
+    }
+
     private void RefreshInspectionTree()
     {
         if (_currentProject is null) return;
@@ -648,6 +751,7 @@ public partial class MainWindow : Window
         LocationsList.SelectedItem = _currentLocation;
         RefreshSections();
         RefreshReportSectionSelection();
+        RefreshOverview();
         _loadingInspections = false;
     }
 
@@ -673,6 +777,12 @@ public partial class MainWindow : Window
         var selected = items.FirstOrDefault(x => x.Id == videoId);
         VideosList.SelectedItem = selected;
         if (selected is null) _currentVideo = null;
+        if (_currentSection is null)
+            ShowVideoState("Crie ou selecione um trecho para iniciar.", false);
+        else if (items.Count == 0)
+            ShowVideoState("Nenhum vídeo neste trecho", !IsReadOnly);
+        else if (selected is null)
+            ShowVideoState("Selecione um vídeo para iniciar.", false);
         UpdateInspectionWriteState();
     }
 
@@ -698,12 +808,16 @@ public partial class MainWindow : Window
         {
             OccurrencesList.ItemsSource = null;
             if (AnomalySummaryText is not null) AnomalySummaryText.Text = "Selecione um trecho";
+            OccurrencesEmptyTitle.Text = "Selecione um trecho";
+            OccurrencesEmptyDescription.Text = "As anomalias registradas aparecerão aqui.";
+            OccurrencesEmptyState.Visibility = Visibility.Visible;
             return;
         }
         var all = _currentSection.Occurrences
             .OrderBy(x => x.LocationMode == OccurrenceLocationMode.EntireSection ? 1 : 0)
             .ThenBy(x => x.Meterage ?? decimal.MaxValue).ThenBy(x => x.Order)
             .Select(x => new OccurrenceListItem(x, !IsReadOnly)).ToList();
+        var unfilteredCount = all.Count;
         var incomplete = all.Count(x => !x.IsComplete);
         AnomalySummaryText.Text = $"{all.Count} apontamento(s) • {all.Sum(x => x.EvidenceCount)} imagem(ns) • {incomplete} pendência(s)";
         var query = AnomalyListSearchBox?.Text.Trim() ?? "";
@@ -715,6 +829,14 @@ public partial class MainWindow : Window
         if (status == "Complete") all = all.Where(x => x.IsComplete).ToList();
         if (status == "Incomplete") all = all.Where(x => !x.IsComplete).ToList();
         OccurrencesList.ItemsSource = all;
+        OccurrencesEmptyTitle.Text = unfilteredCount == 0
+            ? "Nenhuma anomalia registrada neste trecho."
+            : "Nenhuma anomalia encontrada.";
+        OccurrencesEmptyDescription.Text = unfilteredCount == 0
+            ? "Durante a inspeção, capture um frame para começar."
+            : "Ajuste a pesquisa ou o filtro para ver outros registros.";
+        OccurrencesEmptyState.Visibility = all.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        RefreshOverview();
     }
 
     private void AnomalyListFilterChanged(object sender, RoutedEventArgs e)
@@ -727,6 +849,7 @@ public partial class MainWindow : Window
         AddLocationButton.IsEnabled = !IsReadOnly && _currentProject is not null;
         AddSectionButton.IsEnabled = !IsReadOnly && _currentLocation is not null;
         AddVideoButton.IsEnabled = !IsReadOnly && _currentSection is not null;
+        EmptyVideoButton.IsEnabled = AddVideoButton.IsEnabled;
         CaptureFrameButton.IsEnabled = !IsReadOnly && _currentVideo is not null && File.Exists(_currentVideo.FilePath);
         RelocateVideoButton.IsEnabled = !IsReadOnly && _currentVideo is not null && !File.Exists(_currentVideo.FilePath);
         RemoveVideoButton.IsEnabled = !IsReadOnly && _currentVideo is not null;
@@ -835,15 +958,13 @@ public partial class MainWindow : Window
         _playerErrorNotified = false;
         if (!File.Exists(video.FilePath))
         {
-            VideoMessage.Text = "Vídeo não encontrado. Use ‘Localizar arquivo’.";
-            VideoMessage.Visibility = Visibility.Visible;
+            ShowVideoState("Vídeo não encontrado. Use ‘Localizar arquivo’.", false);
             RefreshVideos();
             return;
         }
         try
         {
-            VideoMessage.Text = "Carregando vídeo...";
-            VideoMessage.Visibility = Visibility.Visible;
+            ShowVideoState("Carregando vídeo...", false);
             _currentMedia = new Media(_libVlc, video.FilePath, FromType.FromPath);
             if (!_mediaPlayer.Play(_currentMedia)) throw new InvalidOperationException("O player não conseguiu iniciar o vídeo.");
             _logger.Info($"Vídeo aberto: {video.FilePath}");
@@ -857,8 +978,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            VideoMessage.Text = "Vídeo indisponível.";
-            VideoMessage.Visibility = Visibility.Visible;
+            ShowVideoState("Vídeo indisponível.", false);
             _logger.Error($"Falha ao abrir vídeo: {video.FilePath}", ex);
         }
     }
@@ -1123,8 +1243,7 @@ public partial class MainWindow : Window
     {
         if (_playerErrorNotified) return;
         _playerErrorNotified = true;
-        VideoMessage.Text = "Vídeo indisponível.";
-        VideoMessage.Visibility = Visibility.Visible;
+        ShowVideoState("Vídeo indisponível.", false);
         _logger.Error($"Erro de codec, rede ou leitura no vídeo '{_currentVideo?.FilePath}'.",
             new IOException("O LibVLC informou falha durante a reprodução."));
     }
@@ -1135,9 +1254,20 @@ public partial class MainWindow : Window
         try { _mediaPlayer.Stop(); } catch (Exception ex) { _logger.Error("Falha ao interromper o player.", ex); }
         _currentMedia?.Dispose();
         _currentMedia = null;
-        VideoMessage.Text = _currentSection is null ? "Selecione um trecho e um vídeo." : "Selecione um vídeo.";
-        VideoMessage.Visibility = Visibility.Visible;
+        if (_currentSection is null)
+            ShowVideoState("Crie ou selecione um trecho para iniciar.", false);
+        else if (_currentSection.VideoReferences.Count == 0)
+            ShowVideoState("Nenhum vídeo neste trecho", !IsReadOnly);
+        else
+            ShowVideoState("Selecione um vídeo para iniciar.", false);
         PlayPauseButton.Content = "▶";
+    }
+
+    private void ShowVideoState(string message, bool showAddVideo)
+    {
+        VideoMessage.Text = message;
+        EmptyVideoButton.Visibility = showAddVideo ? Visibility.Visible : Visibility.Collapsed;
+        VideoEmptyState.Visibility = Visibility.Visible;
     }
 
     private void DisposePlayer()
@@ -1219,6 +1349,12 @@ public partial class MainWindow : Window
         public BitmapImage? Thumbnail { get; } = LoadThumbnail(capture.FilePath);
         public string Timestamp => FormatTime(capture.VideoTimestamp);
         public string VideoName => string.IsNullOrWhiteSpace(videoName) ? "Vídeo de origem" : videoName;
+    }
+
+    private sealed class DevelopmentImagePreviewItem(string filePath)
+    {
+        public BitmapImage? Thumbnail { get; } = LoadThumbnail(filePath);
+        public string DisplayName { get; } = Path.GetFileName(filePath);
     }
 
     private sealed class OccurrenceListItem

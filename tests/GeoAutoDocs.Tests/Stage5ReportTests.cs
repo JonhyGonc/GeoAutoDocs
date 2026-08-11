@@ -175,6 +175,54 @@ public sealed class Stage5ReportTests : IDisposable
         Assert.Contains("Figura 4.1", text);
     }
 
+    [Fact]
+    public async Task Stage6OperationalSmokeGeneratesCompleteWordWithTenAnomalies()
+    {
+        var project = NewProject();
+        project.Name = "Projeto Smoke Etapa 6";
+        var report = project.CreateReport("Relatório operacional");
+        Configure(report, "GF-RL-STAGE6-001");
+        report.Equipments = EquipmentSelection.Endoscope | EquipmentSelection.Hunter;
+        report.IncludeInspectionOpening = true;
+        report.IncludeGpr = true;
+        var (_, section) = AddSection(project, "Local operacional", "Trecho operacional", 0, 0);
+        report.SelectSection(section);
+
+        var anomalyNames = new[]
+        {
+            "Fissura", "Trinca", "Infiltração", "Assoreamento", "Deformação",
+            "Fissura", "Trinca", "Infiltração", "Assoreamento", "Deformação"
+        };
+        for (var index = 0; index < anomalyNames.Length; index++)
+        {
+            var occurrence = AddOccurrence(section, OccurrenceLocationMode.Point, index + 1, null,
+                [anomalyNames[index]]);
+            AddEvidence(occurrence, 1, $"Evidência {index + 1:00}");
+        }
+
+        AddDevelopmentImages(report, DevelopmentImageGroup.VideoInspection, 4);
+        AddDevelopmentImages(report, DevelopmentImageGroup.InspectionOpening, 2);
+        AddDevelopmentImages(report, DevelopmentImageGroup.Gpr, 3);
+        var service = new WordReportService(_paths);
+
+        var validation = service.Validate(project, report);
+        Assert.True(validation.CanGenerate);
+        Assert.Empty(validation.Warnings);
+        Assert.Equal(10, validation.Occurrences);
+        Assert.Equal(10, validation.Evidences);
+
+        var output = await service.GenerateAsync(project, report);
+        var text = ReadBody(output);
+
+        Assert.True(File.Exists(output));
+        Assert.Contains("GF-RL-STAGE6-001", text);
+        Assert.Contains("Trecho operacional", text);
+        Assert.Contains("Na metragem de 1,00 m", text);
+        Assert.Contains("Na metragem de 10,00 m", text);
+        Assert.Contains("Figuras 3.7 a 3.9", text);
+        Assert.Contains("Figura 4.10", text);
+    }
+
     private Project NewProject() => new()
     {
         Id = Guid.NewGuid(), Name = "Projeto Etapa 5", CreatedAt = DateTime.UtcNow,

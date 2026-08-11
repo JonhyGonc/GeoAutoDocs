@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -87,16 +88,39 @@ public partial class MainWindow : Window
         {
             _projects.Clear();
             foreach (var project in await _store.ListAsync()) _projects.Add(project);
+            CollectionViewSource.GetDefaultView(_projects).Refresh();
         }
         catch (Exception ex) { ShowError("Não foi possível carregar os projetos.", ex); }
     }
 
     private async void NewProject_Click(object sender, RoutedEventArgs e)
     {
-        var name = TextPromptWindow.Ask(this, "Novo projeto", "Nome do projeto:");
-        if (string.IsNullOrWhiteSpace(name)) return;
-        try { await OpenEditorAsync((await _store.CreateAsync(name)).Id); }
+        var draft = NewProjectWindow.Show(this);
+        if (draft is null) return;
+        try
+        {
+            var project = await _store.CreateAsync(draft.Name);
+            project.DefaultClient = draft.Client;
+            project.DefaultCnpj = draft.Cnpj;
+            project.DefaultArea = draft.Area;
+            project.DefaultContract = draft.Contract;
+            project.DefaultPurchaseOrder = draft.PurchaseOrder;
+            project.DefaultLogoPath = draft.LogoPath;
+            await _store.SaveAsync(project);
+            await OpenEditorAsync(project.Id);
+        }
         catch (Exception ex) { ShowError("Não foi possível criar o projeto.", ex); }
+    }
+
+    private void ProjectsSearchBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        var query = ProjectsSearchBox.Text.Trim();
+        ProjectsSearchHint.Visibility = query.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        var view = CollectionViewSource.GetDefaultView(_projects);
+        view.Filter = item => item is Project project &&
+            (query.Length == 0 || project.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
+             project.DefaultClient.Contains(query, StringComparison.CurrentCultureIgnoreCase));
+        view.Refresh();
     }
 
     private async void OpenProject_Click(object sender, RoutedEventArgs e)
@@ -1116,7 +1140,7 @@ public partial class MainWindow : Window
         public Guid Id => _video.Id;
         public string DisplayName => string.IsNullOrWhiteSpace(_video.DisplayName) ? Path.GetFileName(_video.FilePath) : _video.DisplayName;
         public string Availability => File.Exists(_video.FilePath) ? "Disponível" : "Vídeo não encontrado";
-        public string StatusColor => File.Exists(_video.FilePath) ? "#4C7161" : "#9C2731";
+        public string StatusColor => File.Exists(_video.FilePath) ? "#39D17E" : "#EC6670";
         public string PathKind => _video.Status == MediaReferenceStatus.SharedUnc ? "Arquivo em rede (UNC)" : "Arquivo local";
     }
 
@@ -1152,7 +1176,7 @@ public partial class MainWindow : Window
             CanGoToVideo = occurrence.Evidence.Any(x => x.VideoReferenceId is not null && x.VideoTimestamp is not null);
             var complete = OccurrenceRules.IsComplete(occurrence);
             Completeness = complete ? "✓ Completa" : "⚠ Sem imagem ou descrição";
-            CompletenessColor = complete ? "#4C7161" : "#9C6B16";
+            CompletenessColor = complete ? "#39D17E" : "#F2B84B";
         }
     }
 

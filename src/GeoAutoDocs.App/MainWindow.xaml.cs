@@ -836,6 +836,13 @@ public partial class MainWindow : Window
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (e.Key == Key.Escape && CapturePreviewPanel.Visibility == Visibility.Visible)
+        {
+            RetakeCapture_Click(sender, e);
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Space && InspectionsTab.IsSelected && CapturePreviewPanel.Visibility != Visibility.Visible)
         {
             PlayPause_Click(sender, e);

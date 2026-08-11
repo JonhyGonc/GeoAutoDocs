@@ -955,28 +955,14 @@ public partial class MainWindow : Window
         NewOccurrenceButton.IsEnabled = !IsReadOnly && _currentSection is not null;
     }
 
-    private void AddLocation_Click(object sender, RoutedEventArgs e)
+    private async void AddLocation_Click(object sender, RoutedEventArgs e)
     {
         if (_currentProject is null || IsReadOnly) return;
-        NewLocationNameBox.Clear();
-        NewSectionPanel.Visibility = Visibility.Collapsed;
-        NewLocationPanel.Visibility = Visibility.Visible;
-        VideoView.Visibility = Visibility.Hidden;
-        InspectionFormOverlay.Visibility = Visibility.Visible;
-        NewLocationNameBox.Focus();
-    }
-
-    private async void CreateLocation_Click(object sender, RoutedEventArgs e)
-    {
-        if (_currentProject is null || IsReadOnly || string.IsNullOrWhiteSpace(NewLocationNameBox.Text))
-        {
-            NewLocationNameBox.Focus();
-            return;
-        }
-        var location = new Location { ProjectId = _currentProject.Id, Name = NewLocationNameBox.Text.Trim(), Order = _currentProject.Locations.Count };
+        var name = NewLocationWindow.Show(this);
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var location = new Location { ProjectId = _currentProject.Id, Name = name, Order = _currentProject.Locations.Count };
         _currentProject.Locations.Add(location);
         _currentLocation = location;
-        CloseInspectionForm();
         RefreshInspectionTree();
         await SaveInspectionChangesAsync();
     }
@@ -988,7 +974,6 @@ public partial class MainWindow : Window
         NewSectionDiameterBox.Clear(); NewSectionReferenceBox.Clear(); NewSectionDescriptionBox.Clear();
         NewSectionValidationText.Text = "Campos opcionais podem permanecer vazios.";
         NewSectionValidationText.Foreground = (System.Windows.Media.Brush)FindResource("TextMutedBrush");
-        NewLocationPanel.Visibility = Visibility.Collapsed;
         NewSectionPanel.Visibility = Visibility.Visible;
         VideoView.Visibility = Visibility.Hidden;
         InspectionFormOverlay.Visibility = Visibility.Visible;
@@ -1037,7 +1022,6 @@ public partial class MainWindow : Window
     private void CloseInspectionForm()
     {
         InspectionFormOverlay.Visibility = Visibility.Collapsed;
-        NewLocationPanel.Visibility = Visibility.Collapsed;
         NewSectionPanel.Visibility = Visibility.Collapsed;
         VideoView.Visibility = Visibility.Visible;
     }
@@ -1455,8 +1439,6 @@ public partial class MainWindow : Window
         if (InspectionFormOverlay.Visibility == Visibility.Visible)
         {
             if (e.Key == Key.Escape) CloseInspectionForm();
-            else if (e.Key == Key.Enter && NewLocationPanel.Visibility == Visibility.Visible)
-                CreateLocation_Click(sender, e);
             else if (e.Key == Key.Enter && NewSectionPanel.Visibility == Visibility.Visible)
                 CreateSection_Click(sender, e);
             else return;

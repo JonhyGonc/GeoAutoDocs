@@ -247,13 +247,6 @@
         <Grid x:Name="InspectionFormOverlay" Visibility="Collapsed" Background="#B5000000" Panel.ZIndex="20">
             <Border Width="620" MaxWidth="620" MaxHeight="680" Margin="24" Padding="26,22" CornerRadius="10" Background="{StaticResource WindowBackgroundBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center">
                 <Grid>
-                    <StackPanel x:Name="NewLocationPanel" Visibility="Collapsed">
-                        <TextBlock Text="Novo local" Style="{StaticResource PageTitleTextStyle}" FontSize="23"/>
-                        <TextBlock Text="Informe um nome para organizar os trechos da inspeção." Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5,0,20"/>
-                        <TextBlock Style="{StaticResource FieldLabelTextStyle}"><Run Text="Nome do local "/><Run Text="*" Foreground="{StaticResource DangerBrush}"/></TextBlock>
-                        <TextBox x:Name="NewLocationNameBox" MaxLength="180"/>
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,22,0,0"><Button Content="Cancelar" Click="CancelInspectionForm_Click"/><Button x:Name="CreateLocationButton" Content="Adicionar" Style="{StaticResource PrimaryButtonStyle}" Click="CreateLocation_Click"/></StackPanel>
-                    </StackPanel>
                     <Grid x:Name="NewSectionPanel" Visibility="Collapsed">
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                         <StackPanel><TextBlock Text="Novo trecho" Style="{StaticResource PageTitleTextStyle}" FontSize="23"/><TextBlock Text="Informe a identificação e complete somente os dados disponíveis." Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5,0,0"/></StackPanel>

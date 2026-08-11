@@ -7,7 +7,7 @@ public partial class NewLocationWindow : Window
     private NewLocationWindow()
     {
         InitializeComponent();
-        WindowLayout.KeepInsideWorkArea(this, 840, 480);
+        WindowLayout.KeepInsideWorkArea(this, 560, 360);
         Loaded += (_, _) => NameBox.Focus();
     }
 

@@ -10,7 +10,7 @@ public partial class NewProjectWindow : Window
     private NewProjectWindow()
     {
         InitializeComponent();
-        WindowLayout.KeepInsideWorkArea(this, 1120, 780);
+        WindowLayout.KeepInsideWorkArea(this, 980, 700);
         Loaded += (_, _) => NameBox.Focus();
     }
 

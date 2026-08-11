@@ -12,7 +12,7 @@
         </Style>
     </Window.Resources>
     <Grid>
-        <Grid x:Name="ProjectsView" Margin="34,28" MaxWidth="1600" HorizontalAlignment="Center">
+        <Grid x:Name="ProjectsView" Margin="32,28" MaxWidth="1600" HorizontalAlignment="Stretch">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="1"/><RowDefinition Height="*"/></Grid.RowDefinitions>
             <StackPanel>
                 <TextBlock Text="Projetos" Style="{StaticResource PageTitleTextStyle}"/>

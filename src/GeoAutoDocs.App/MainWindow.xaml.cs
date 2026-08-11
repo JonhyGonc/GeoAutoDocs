@@ -63,7 +63,7 @@ public partial class MainWindow : Window
         _frameCaptureService = frameCaptureService;
         _occurrenceService = occurrenceService;
         LibVLCSharp.Shared.Core.Initialize();
-        _libVlc = new LibVLC("--no-video-title-show", "--quiet");
+        _libVlc = new LibVLC("--no-video-title-show", "--quiet", "--no-audio");
         _mediaPlayer = new MediaPlayer(_libVlc);
         VideoView.MediaPlayer = _mediaPlayer;
         _mediaPlayer.EncounteredError += (_, _) => Dispatcher.BeginInvoke(() => HandlePlayerError());
@@ -96,23 +96,63 @@ public partial class MainWindow : Window
         catch (Exception ex) { ShowError("Não foi possível carregar os projetos.", ex); }
     }
 
-    private async void NewProject_Click(object sender, RoutedEventArgs e)
+    private void NewProject_Click(object sender, RoutedEventArgs e)
     {
-        var draft = NewProjectWindow.Show(this);
-        if (draft is null) return;
+        ResetNewProjectForm();
+        ProjectsView.Visibility = Visibility.Collapsed;
+        EditorView.Visibility = Visibility.Collapsed;
+        NewProjectView.Visibility = Visibility.Visible;
+        NewProjectNameBox.Focus();
+    }
+
+    private void CancelNewProject_Click(object sender, RoutedEventArgs e)
+    {
+        NewProjectView.Visibility = Visibility.Collapsed;
+        ProjectsView.Visibility = Visibility.Visible;
+    }
+
+    private async void CreateProject_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(NewProjectNameBox.Text))
+        {
+            NewProjectNameBox.Focus();
+            return;
+        }
         try
         {
-            var project = await _store.CreateAsync(draft.Name);
-            project.DefaultClient = draft.Client;
-            project.DefaultCnpj = draft.Cnpj;
-            project.DefaultArea = draft.Area;
-            project.DefaultContract = draft.Contract;
-            project.DefaultPurchaseOrder = draft.PurchaseOrder;
-            project.DefaultLogoPath = draft.LogoPath;
+            var project = await _store.CreateAsync(NewProjectNameBox.Text.Trim());
+            project.DefaultClient = NewProjectClientBox.Text.Trim();
+            project.DefaultCnpj = NewProjectCnpjBox.Text.Trim();
+            project.DefaultArea = NewProjectAreaBox.Text.Trim();
+            project.DefaultContract = NewProjectContractBox.Text.Trim();
+            project.DefaultPurchaseOrder = NewProjectPurchaseOrderBox.Text.Trim();
+            project.DefaultLogoPath = EmptyToNull(NewProjectLogoBox.Text);
             await _store.SaveAsync(project);
+            NewProjectView.Visibility = Visibility.Collapsed;
             await OpenEditorAsync(project.Id);
         }
         catch (Exception ex) { ShowError("Não foi possível criar o projeto.", ex); }
+    }
+
+    private void SelectNewProjectLogo_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Filter = "Imagens (*.png;*.jpg;*.jpeg)|*.png;*.jpg;*.jpeg",
+            CheckFileExists = true,
+            Title = "Selecione o logo do cliente"
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        NewProjectLogoBox.Text = dialog.FileName;
+        NewProjectLogoPreview.Source = LoadThumbnail(dialog.FileName);
+        NewProjectLogoStatus.Text = Path.GetFileName(dialog.FileName);
+    }
+
+    private void ResetNewProjectForm()
+    {
+        NewProjectNameBox.Clear(); NewProjectClientBox.Clear(); NewProjectCnpjBox.Clear();
+        NewProjectAreaBox.Clear(); NewProjectContractBox.Clear(); NewProjectPurchaseOrderBox.Clear();
+        NewProjectLogoBox.Clear(); NewProjectLogoPreview.Source = null; NewProjectLogoStatus.Text = "Sem imagem";
     }
 
     private void ProjectsSearchBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -137,6 +177,8 @@ public partial class MainWindow : Window
             ? "Crie o primeiro projeto para iniciar uma inspeção."
             : "Tente buscar por outro nome de projeto ou cliente.";
         ProjectsEmptyAction.Visibility = query.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        NewProjectTopButton.Visibility = _projects.Count == 0 && query.Length == 0
+            ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private async void OpenProject_Click(object sender, RoutedEventArgs e)
@@ -849,6 +891,9 @@ public partial class MainWindow : Window
         AddLocationButton.IsEnabled = !IsReadOnly && _currentProject is not null;
         AddSectionButton.IsEnabled = !IsReadOnly && _currentLocation is not null;
         AddVideoButton.IsEnabled = !IsReadOnly && _currentSection is not null;
+        AddVideoButton.ToolTip = IsReadOnly ? "Projeto aberto somente para leitura."
+            : _currentSection is null ? "Selecione ou crie um trecho antes de adicionar um vídeo."
+            : "Adicionar vídeo ao trecho selecionado";
         EmptyVideoButton.IsEnabled = AddVideoButton.IsEnabled;
         CaptureFrameButton.IsEnabled = !IsReadOnly && _currentVideo is not null && File.Exists(_currentVideo.FilePath);
         RelocateVideoButton.IsEnabled = !IsReadOnly && _currentVideo is not null && !File.Exists(_currentVideo.FilePath);
@@ -856,38 +901,88 @@ public partial class MainWindow : Window
         NewOccurrenceButton.IsEnabled = !IsReadOnly && _currentSection is not null;
     }
 
-    private async void AddLocation_Click(object sender, RoutedEventArgs e)
+    private void AddLocation_Click(object sender, RoutedEventArgs e)
     {
         if (_currentProject is null || IsReadOnly) return;
-        var name = TextPromptWindow.Ask(this, "Novo local", "Nome do local:");
-        if (string.IsNullOrWhiteSpace(name)) return;
-        var location = new Location { ProjectId = _currentProject.Id, Name = name.Trim(), Order = _currentProject.Locations.Count };
+        NewLocationNameBox.Clear();
+        NewSectionPanel.Visibility = Visibility.Collapsed;
+        NewLocationPanel.Visibility = Visibility.Visible;
+        InspectionFormOverlay.Visibility = Visibility.Visible;
+        NewLocationNameBox.Focus();
+    }
+
+    private async void CreateLocation_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null || IsReadOnly || string.IsNullOrWhiteSpace(NewLocationNameBox.Text))
+        {
+            NewLocationNameBox.Focus();
+            return;
+        }
+        var location = new Location { ProjectId = _currentProject.Id, Name = NewLocationNameBox.Text.Trim(), Order = _currentProject.Locations.Count };
         _currentProject.Locations.Add(location);
         _currentLocation = location;
+        CloseInspectionForm();
         RefreshInspectionTree();
         await SaveInspectionChangesAsync();
     }
 
-    private async void AddSection_Click(object sender, RoutedEventArgs e)
+    private void AddSection_Click(object sender, RoutedEventArgs e)
     {
         if (_currentProject is null || _currentLocation is null || IsReadOnly) return;
-        var draft = NewSectionWindow.Show(this);
-        if (draft is null) return;
+        NewSectionNameBox.Clear(); NewSectionStartBox.Clear(); NewSectionEndBox.Clear();
+        NewSectionDiameterBox.Clear(); NewSectionReferenceBox.Clear(); NewSectionDescriptionBox.Clear();
+        NewSectionValidationText.Text = "Campos opcionais podem permanecer vazios.";
+        NewSectionValidationText.Foreground = (System.Windows.Media.Brush)FindResource("TextMutedBrush");
+        NewLocationPanel.Visibility = Visibility.Collapsed;
+        NewSectionPanel.Visibility = Visibility.Visible;
+        InspectionFormOverlay.Visibility = Visibility.Visible;
+        NewSectionNameBox.Focus();
+    }
+
+    private async void CreateSection_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null || _currentLocation is null || IsReadOnly) return;
+        if (string.IsNullOrWhiteSpace(NewSectionNameBox.Text))
+        {
+            NewSectionNameBox.Focus();
+            return;
+        }
+        decimal? diameter = null;
+        decimal parsed = 0;
+        if (!string.IsNullOrWhiteSpace(NewSectionDiameterBox.Text) &&
+            !decimal.TryParse(NewSectionDiameterBox.Text, NumberStyles.Number, CultureInfo.CurrentCulture, out parsed))
+        {
+            NewSectionValidationText.Text = "Informe um diâmetro válido ou deixe o campo vazio.";
+            NewSectionValidationText.Foreground = (System.Windows.Media.Brush)FindResource("DangerBrush");
+            NewSectionDiameterBox.Focus(); NewSectionDiameterBox.SelectAll();
+            return;
+        }
+        else if (!string.IsNullOrWhiteSpace(NewSectionDiameterBox.Text)) diameter = parsed;
         var section = new InspectionSection
         {
             LocationId = _currentLocation.Id,
-            Name = draft.Name,
-            Description = draft.Description,
-            Diameter = draft.Diameter,
-            StartPoint = draft.StartPoint,
-            EndPoint = draft.EndPoint,
-            Reference = draft.Reference,
+            Name = NewSectionNameBox.Text.Trim(),
+            Description = EmptyToNull(NewSectionDescriptionBox.Text),
+            Diameter = diameter,
+            StartPoint = EmptyToNull(NewSectionStartBox.Text),
+            EndPoint = EmptyToNull(NewSectionEndBox.Text),
+            Reference = EmptyToNull(NewSectionReferenceBox.Text),
             Order = _currentLocation.Sections.Count
         };
         _currentLocation.Sections.Add(section);
         _currentSection = section;
+        CloseInspectionForm();
         RefreshSections();
         await SaveInspectionChangesAsync();
+    }
+
+    private void CancelInspectionForm_Click(object sender, RoutedEventArgs e) => CloseInspectionForm();
+
+    private void CloseInspectionForm()
+    {
+        InspectionFormOverlay.Visibility = Visibility.Collapsed;
+        NewLocationPanel.Visibility = Visibility.Collapsed;
+        NewSectionPanel.Visibility = Visibility.Collapsed;
     }
 
     private void LocationsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -926,20 +1021,28 @@ public partial class MainWindow : Window
             Multiselect = true
         };
         if (dialog.ShowDialog(this) != true) return;
+        var added = new List<VideoReference>();
         foreach (var file in dialog.FileNames)
         {
             if (_currentSection.VideoReferences.Any(x => PathsEqual(x.FilePath, file))) continue;
-            _currentSection.VideoReferences.Add(new VideoReference
+            var video = new VideoReference
             {
                 InspectionSectionId = _currentSection.Id,
                 FilePath = file,
                 DisplayName = Path.GetFileName(file),
                 CreatedAt = DateTime.UtcNow,
                 Order = _currentSection.VideoReferences.Count
-            });
+            };
+            _currentSection.VideoReferences.Add(video);
+            added.Add(video);
         }
-        RefreshVideos();
+        if (added.Count == 0) return;
+        _currentVideo = added[0];
         await SaveInspectionChangesAsync();
+        _loadingInspections = true;
+        RefreshVideos();
+        _loadingInspections = false;
+        await LoadVideoAsync(_currentVideo);
     }
 
     private async void VideosList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -978,8 +1081,8 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            ShowVideoState("Vídeo indisponível.", false);
-            _logger.Error($"Falha ao abrir vídeo: {video.FilePath}", ex);
+            ShowVideoState("Não foi possível abrir este vídeo.", false);
+            _logger.Error($"Falha ao abrir vídeo. Caminho='{video.FilePath}', extensão='{Path.GetExtension(video.FilePath)}', backend='LibVLC'.", ex);
         }
     }
 
@@ -1243,8 +1346,8 @@ public partial class MainWindow : Window
     {
         if (_playerErrorNotified) return;
         _playerErrorNotified = true;
-        ShowVideoState("Vídeo indisponível.", false);
-        _logger.Error($"Erro de codec, rede ou leitura no vídeo '{_currentVideo?.FilePath}'.",
+        ShowVideoState("Não foi possível abrir este vídeo.", false);
+        _logger.Error($"Erro de codec, rede ou leitura. Caminho='{_currentVideo?.FilePath}', extensão='{Path.GetExtension(_currentVideo?.FilePath)}', backend='LibVLC'.",
             new IOException("O LibVLC informou falha durante a reprodução."));
     }
 
@@ -1283,6 +1386,27 @@ public partial class MainWindow : Window
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (NewProjectView.Visibility == Visibility.Visible)
+        {
+            if (e.Key == Key.Escape) CancelNewProject_Click(sender, e);
+            else if (e.Key == Key.Enter) CreateProject_Click(sender, e);
+            else return;
+            e.Handled = true;
+            return;
+        }
+
+        if (InspectionFormOverlay.Visibility == Visibility.Visible)
+        {
+            if (e.Key == Key.Escape) CloseInspectionForm();
+            else if (e.Key == Key.Enter && NewLocationPanel.Visibility == Visibility.Visible)
+                CreateLocation_Click(sender, e);
+            else if (e.Key == Key.Enter && NewSectionPanel.Visibility == Visibility.Visible)
+                CreateSection_Click(sender, e);
+            else return;
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Escape && CapturePreviewPanel.Visibility == Visibility.Visible)
         {
             RetakeCapture_Click(sender, e);

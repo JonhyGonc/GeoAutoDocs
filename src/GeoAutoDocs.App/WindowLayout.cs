@@ -14,7 +14,10 @@ internal static class WindowLayout
     {
         window.SourceInitialized += (_, _) => Fit(window, preferredWidth, preferredHeight);
         window.DpiChanged += (_, _) => window.Dispatcher.BeginInvoke(() =>
-            Fit(window, Math.Min(window.Width, preferredWidth), Math.Min(window.Height, preferredHeight)));
+        {
+            if (window.WindowState == WindowState.Normal)
+                Fit(window, Math.Min(window.Width, preferredWidth), Math.Min(window.Height, preferredHeight));
+        });
     }
 
     private static void Fit(Window window, double preferredWidth, double preferredHeight)
@@ -58,8 +61,6 @@ internal static class WindowLayout
     {
         window.MinWidth = Math.Min(window.MinWidth, workWidth);
         window.MinHeight = Math.Min(window.MinHeight, workHeight);
-        window.MaxWidth = workWidth;
-        window.MaxHeight = workHeight;
         window.Width = Math.Min(preferredWidth, workWidth);
         window.Height = Math.Min(preferredHeight, workHeight);
 

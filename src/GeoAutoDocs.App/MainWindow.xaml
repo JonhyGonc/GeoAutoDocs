@@ -14,7 +14,7 @@
             </StackPanel>
             <Grid Grid.Row="1" Margin="0,24,0,18">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="330"/></Grid.ColumnDefinitions>
-                <Button Content="+  Novo projeto" Style="{StaticResource PrimaryButtonStyle}" MinWidth="190" Margin="0" Click="NewProject_Click"/>
+                <Button x:Name="NewProjectTopButton" Content="+  Novo projeto" Style="{StaticResource PrimaryButtonStyle}" MinWidth="190" Margin="0" Click="NewProject_Click"/>
                 <Grid Grid.Column="2">
                     <TextBlock Text="&#xE721;" FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="13,0,0,13" Panel.ZIndex="1" IsHitTestVisible="False"/>
                     <TextBox x:Name="ProjectsSearchBox" Padding="40,9,12,9" Margin="0" ToolTip="Pesquisar projetos por nome ou cliente" TextChanged="ProjectsSearchBox_TextChanged"/>
@@ -36,8 +36,28 @@
                     </Border>
                 </DataTemplate></ListView.ItemTemplate>
             </ListView>
-                <StackPanel x:Name="ProjectsEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"><TextBlock x:Name="ProjectsEmptyTitle" Text="Nenhum projeto criado" FontWeight="SemiBold" FontSize="16" HorizontalAlignment="Center"/><TextBlock x:Name="ProjectsEmptyDescription" Text="Crie o primeiro projeto para iniciar uma inspeção." Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,0"/><Button x:Name="ProjectsEmptyAction" Content="Novo projeto" Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Center" Margin="0,12,0,0" Click="NewProject_Click"/></StackPanel>
+                <StackPanel x:Name="ProjectsEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"><TextBlock x:Name="ProjectsEmptyTitle" Text="Nenhum projeto criado" FontWeight="SemiBold" FontSize="16" HorizontalAlignment="Center"/><TextBlock x:Name="ProjectsEmptyDescription" Text="Crie seu primeiro projeto para iniciar." Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,0"/><Button x:Name="ProjectsEmptyAction" Content="+  Novo projeto" Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Center" Margin="0,12,0,0" Click="NewProject_Click"/></StackPanel>
             </Grid>
+        </Grid>
+
+        <Grid x:Name="NewProjectView" Visibility="Collapsed" Margin="34,24">
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <StackPanel>
+                <Button Content="←  Projetos" HorizontalAlignment="Left" Margin="0,0,0,18" Click="CancelNewProject_Click"/>
+                <TextBlock Text="Novo projeto" Style="{StaticResource PageTitleTextStyle}"/>
+                <TextBlock Text="Defina os dados principais. Eles serão herdados automaticamente pelos relatórios." Foreground="{StaticResource TextSecondaryBrush}" FontSize="14" Margin="0,6,0,0"/>
+            </StackPanel>
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+                <Grid Margin="0,24,0,16" MaxWidth="980" HorizontalAlignment="Left">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="22"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <StackPanel Grid.ColumnSpan="3"><TextBlock Style="{StaticResource FieldLabelTextStyle}"><Run Text="Nome do projeto "/><Run Text="*" Foreground="{StaticResource DangerBrush}"/></TextBlock><TextBox x:Name="NewProjectNameBox" MaxLength="180"/></StackPanel>
+                    <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Text="Dados do projeto" Style="{StaticResource SectionTitleTextStyle}" Margin="0,18,0,14"/>
+                    <StackPanel Grid.Row="2"><TextBlock Text="Cliente" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectClientBox"/><TextBlock Text="Área / localização" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectAreaBox"/><TextBlock Text="Pedido de compra" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectPurchaseOrderBox"/></StackPanel>
+                    <StackPanel Grid.Row="2" Grid.Column="2"><TextBlock Text="CNPJ" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectCnpjBox"/><TextBlock Text="Contrato" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectContractBox"/><TextBlock Text="Logo do cliente" Style="{StaticResource FieldLabelTextStyle}"/><Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="7" Padding="8"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="62"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Image x:Name="NewProjectLogoPreview" Width="54" Height="45" Stretch="Uniform"/><TextBlock x:Name="NewProjectLogoStatus" Grid.Column="1" Text="Sem imagem" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" Margin="8,0" TextTrimming="CharacterEllipsis"/><Button Grid.Column="2" Content="Selecionar" Click="SelectNewProjectLogo_Click"/><TextBox x:Name="NewProjectLogoBox" Visibility="Collapsed"/></Grid></Border></StackPanel>
+                </Grid>
+            </ScrollViewer>
+            <Grid Grid.Row="2"><TextBlock Text="Somente o nome é obrigatório." Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button Content="Cancelar" Click="CancelNewProject_Click" MinWidth="110"/><Button Content="Criar projeto" Style="{StaticResource PrimaryButtonStyle}" MinWidth="160" Click="CreateProject_Click"/></StackPanel></Grid>
         </Grid>
 
         <Grid x:Name="EditorView" Visibility="Collapsed" Margin="24,18,28,14">
@@ -79,27 +99,29 @@
                     <Grid Margin="0,10,8,0" MinHeight="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType={x:Type ScrollViewer}}}">
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="3*" MinHeight="300"/><RowDefinition Height="Auto"/><RowDefinition Height="1.55*" MinHeight="160"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 
-                        <WrapPanel Margin="0,0,0,10">
-                            <Grid Width="310" Margin="0,0,12,8">
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <Grid Margin="0,0,0,8">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <TextBlock Text="Local" Style="{StaticResource FieldLabelTextStyle}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                <ComboBox x:Name="LocationsList" Grid.Column="1" DisplayMemberPath="Name" SelectionChanged="LocationsList_SelectionChanged" MinWidth="150" Margin="0"/>
+                                <ComboBox x:Name="LocationsList" Grid.Column="1" DisplayMemberPath="Name" SelectionChanged="LocationsList_SelectionChanged" Margin="0"/>
                                 <Button x:Name="AddLocationButton" Grid.Column="2" Content="+ Local" MinWidth="72" Margin="4,0,0,0" Click="AddLocation_Click" ToolTip="Novo local"/>
                             </Grid>
-                            <Grid Width="330" Margin="0,0,12,8">
+                            <Grid Grid.Column="2" Margin="0,0,0,8">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <TextBlock Text="Trecho" Style="{StaticResource FieldLabelTextStyle}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                <ComboBox x:Name="SectionsList" Grid.Column="1" DisplayMemberPath="Name" SelectionChanged="SectionsList_SelectionChanged" MinWidth="160" Margin="0"/>
+                                <ComboBox x:Name="SectionsList" Grid.Column="1" DisplayMemberPath="Name" SelectionChanged="SectionsList_SelectionChanged" Margin="0"/>
                                 <Button x:Name="AddSectionButton" Grid.Column="2" Content="+ Trecho" MinWidth="82" Margin="4,0,0,0" Click="AddSection_Click" ToolTip="Novo trecho"/>
                             </Grid>
-                            <Grid Width="550" Margin="0,0,0,8">
+                            <Grid Grid.Row="1" Grid.ColumnSpan="3">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <TextBlock Text="Vídeo" Style="{StaticResource FieldLabelTextStyle}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                <ComboBox x:Name="VideosList" Grid.Column="1" SelectionChanged="VideosList_SelectionChanged" MinWidth="190" Margin="0"><ComboBox.ItemTemplate><DataTemplate><StackPanel><TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Availability}" Foreground="{Binding StatusColor}" FontSize="10"/></StackPanel></DataTemplate></ComboBox.ItemTemplate></ComboBox>
+                                <ComboBox x:Name="VideosList" Grid.Column="1" SelectionChanged="VideosList_SelectionChanged" Margin="0"><ComboBox.ItemTemplate><DataTemplate><StackPanel><TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Availability}" Foreground="{Binding StatusColor}" FontSize="10"/></StackPanel></DataTemplate></ComboBox.ItemTemplate></ComboBox>
                                 <Button x:Name="AddVideoButton" Grid.Column="2" Content="+ Vídeo" MinWidth="76" Margin="4,0" Click="AddVideo_Click" ToolTip="Adicionar vídeo"/>
                                 <StackPanel Grid.Column="3" Orientation="Horizontal"><Button x:Name="RelocateVideoButton" Content="Localizar" Margin="0" Click="RelocateVideo_Click" IsEnabled="False" ToolTip="Localizar arquivo ausente"/><Button x:Name="RemoveVideoButton" Content="Remover" Margin="4,0,0,0" Style="{StaticResource DangerButtonStyle}" Click="RemoveVideo_Click" IsEnabled="False"/></StackPanel>
                             </Grid>
-                        </WrapPanel>
+                        </Grid>
 
                         <Border Grid.Row="1" Background="#030608" CornerRadius="8" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" ClipToBounds="True">
                             <vlc:VideoView x:Name="VideoView">
@@ -213,6 +235,31 @@
                 </TabItem>
             </TabControl>
             <TextBlock Grid.Row="2" x:Name="SaveStatus" Text="✓ Salvo" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="2,6,0,0"/>
+        </Grid>
+
+        <Grid x:Name="InspectionFormOverlay" Visibility="Collapsed" Background="#B5000000" Panel.ZIndex="20">
+            <Border Width="620" MaxWidth="620" MaxHeight="680" Margin="24" Padding="26,22" CornerRadius="10" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Grid>
+                    <StackPanel x:Name="NewLocationPanel" Visibility="Collapsed">
+                        <TextBlock Text="Novo local" Style="{StaticResource PageTitleTextStyle}" FontSize="23"/>
+                        <TextBlock Text="Informe um nome para organizar os trechos da inspeção." Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5,0,20"/>
+                        <TextBlock Style="{StaticResource FieldLabelTextStyle}"><Run Text="Nome do local "/><Run Text="*" Foreground="{StaticResource DangerBrush}"/></TextBlock>
+                        <TextBox x:Name="NewLocationNameBox" MaxLength="180"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,22,0,0"><Button Content="Cancelar" Click="CancelInspectionForm_Click"/><Button x:Name="CreateLocationButton" Content="Adicionar" Style="{StaticResource PrimaryButtonStyle}" Click="CreateLocation_Click"/></StackPanel>
+                    </StackPanel>
+                    <Grid x:Name="NewSectionPanel" Visibility="Collapsed">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <StackPanel><TextBlock Text="Novo trecho" Style="{StaticResource PageTitleTextStyle}" FontSize="23"/><TextBlock Text="Informe a identificação e complete somente os dados disponíveis." Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5,0,0"/></StackPanel>
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0"><Grid Margin="0,20,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <StackPanel Grid.ColumnSpan="3"><TextBlock Style="{StaticResource FieldLabelTextStyle}"><Run Text="Identificação "/><Run Text="*" Foreground="{StaticResource DangerBrush}"/></TextBlock><TextBox x:Name="NewSectionNameBox" MaxLength="180"/></StackPanel>
+                            <StackPanel Grid.Row="1"><TextBlock Text="Ponto inicial (opcional)" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewSectionStartBox"/></StackPanel><StackPanel Grid.Row="1" Grid.Column="2"><TextBlock Text="Ponto final (opcional)" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewSectionEndBox"/></StackPanel>
+                            <StackPanel Grid.Row="2"><TextBlock Text="Diâmetro (mm, opcional)" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewSectionDiameterBox"/></StackPanel><StackPanel Grid.Row="2" Grid.Column="2"><TextBlock Text="Referência (opcional)" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewSectionReferenceBox"/></StackPanel>
+                            <StackPanel Grid.Row="3" Grid.ColumnSpan="3"><TextBlock Text="Descrição (opcional)" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewSectionDescriptionBox" AcceptsReturn="True" Height="64" TextWrapping="Wrap"/></StackPanel>
+                        </Grid></ScrollViewer>
+                        <Grid Grid.Row="2"><TextBlock x:Name="NewSectionValidationText" Text="Campos opcionais podem permanecer vazios." Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button Content="Cancelar" Click="CancelInspectionForm_Click"/><Button x:Name="CreateSectionButton" Content="Criar trecho" Style="{StaticResource PrimaryButtonStyle}" Click="CreateSection_Click"/></StackPanel></Grid>
+                    </Grid>
+                </Grid>
+            </Border>
         </Grid>
     </Grid>
 </Window>

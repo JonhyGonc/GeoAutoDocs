@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
-        Title="GeoAutoDocs" Height="900" Width="1480" MinHeight="560" MinWidth="900"
+        Title="GeoAutoDocs" Height="900" Width="1480" MinHeight="480" MinWidth="820"
         WindowStartupLocation="CenterScreen" WindowState="Maximized" Background="{StaticResource WindowBackgroundBrush}"
         PreviewKeyDown="Window_PreviewKeyDown">
     <Window.Resources>
@@ -11,59 +11,182 @@
             <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToggleButton"><Border x:Name="Chip" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="18" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chip" Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/></Trigger><Trigger Property="IsChecked" Value="True"><Setter TargetName="Chip" Property="Background" Value="{StaticResource PrimaryBrush}"/><Setter TargetName="Chip" Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chip" Property="Opacity" Value="0.45"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
         </Style>
     </Window.Resources>
-    <Grid>
-        <Grid x:Name="ProjectsView" Margin="32,28" MaxWidth="1600" HorizontalAlignment="Stretch">
-            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="1"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <StackPanel>
-                <TextBlock Text="Projetos" Style="{StaticResource PageTitleTextStyle}"/>
-                <TextBlock Text="Gerencie seus projetos de vídeo inspeção" Foreground="{StaticResource TextSecondaryBrush}" FontSize="14" Margin="0,5,0,0"/>
-            </StackPanel>
-            <Grid Grid.Row="1" Margin="0,24,0,18">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="330"/></Grid.ColumnDefinitions>
-                <Button x:Name="NewProjectTopButton" Content="+  Novo projeto" Style="{StaticResource PrimaryButtonStyle}" MinWidth="190" Margin="0" Click="NewProject_Click"/>
-                <Grid Grid.Column="2">
-                    <TextBlock Text="&#xE721;" FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="13,0,0,13" Panel.ZIndex="1" IsHitTestVisible="False"/>
-                    <TextBox x:Name="ProjectsSearchBox" Padding="40,9,12,9" Margin="0" ToolTip="Pesquisar projetos por nome ou cliente" TextChanged="ProjectsSearchBox_TextChanged"/>
-                    <TextBlock x:Name="ProjectsSearchHint" Text="Pesquisar projetos..." Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" Margin="40,0,0,13" IsHitTestVisible="False"/>
-                </Grid>
-            </Grid>
-            <Border Grid.Row="2" Background="{StaticResource BorderBrush}"/>
-            <Grid Grid.Row="3" Margin="0,14,0,0"><ListView x:Name="ProjectsList" BorderThickness="0" ScrollViewer.VerticalScrollBarVisibility="Auto">
-                <ListView.ItemContainerStyle><Style TargetType="ListViewItem" BasedOn="{StaticResource {x:Type ListViewItem}}"><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,8,9"/><Setter Property="Background" Value="Transparent"/></Style></ListView.ItemContainerStyle>
-                <ListView.ItemTemplate><DataTemplate>
-                    <Border Style="{StaticResource CardStyle}" Padding="17" Background="{StaticResource SurfaceBrush}">
-                        <Grid>
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="70"/><ColumnDefinition Width="2.2*"/><ColumnDefinition Width="1.2*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                            <Border Width="54" Height="54" CornerRadius="9" Background="#123A53" HorizontalAlignment="Left"><Path Data="M 3,7 L 10,7 L 13,10 L 25,10 L 25,22 L 3,22 Z" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="2" Width="28" Height="22" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="{Binding Name}" FontSize="17" FontWeight="Bold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding DefaultClient, TargetNullValue='Cliente não informado'}" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0"/></StackPanel>
-                            <StackPanel Grid.Column="2" VerticalAlignment="Center"><TextBlock Text="Última alteração" Foreground="{StaticResource TextMutedBrush}" FontSize="11"/><TextBlock Text="{Binding UpdatedAt, StringFormat={}{0:dd/MM/yyyy HH:mm}}" Foreground="{StaticResource TextSecondaryBrush}" FontWeight="SemiBold" Margin="0,3,0,0"/><TextBlock Text="{Binding Reports.Count, StringFormat={}{0} relatório(s)}" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,3,0,0"/></StackPanel>
-                            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center"><Button Content="Abrir" Tag="{Binding Id}" Click="OpenProject_Click" Foreground="{StaticResource PrimaryBrush}"/><Button Content="&#xE70F;" Style="{StaticResource IconButtonStyle}" Tag="{Binding Id}" Click="RenameProject_Click" ToolTip="Renomear projeto"/><Button Content="&#xE74D;" Style="{StaticResource DangerButtonStyle}" FontFamily="Segoe MDL2 Assets" Tag="{Binding Id}" Click="DeleteProject_Click" ToolTip="Excluir projeto"/></StackPanel>
-                        </Grid>
-                    </Border>
-                </DataTemplate></ListView.ItemTemplate>
-            </ListView>
-                <StackPanel x:Name="ProjectsEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"><TextBlock x:Name="ProjectsEmptyTitle" Text="Nenhum projeto criado" FontWeight="SemiBold" FontSize="16" HorizontalAlignment="Center"/><TextBlock x:Name="ProjectsEmptyDescription" Text="Crie seu primeiro projeto para iniciar." Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,0"/><Button x:Name="ProjectsEmptyAction" Content="+  Novo projeto" Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Center" Margin="0,12,0,0" Click="NewProject_Click"/></StackPanel>
-            </Grid>
-        </Grid>
+    <Grid Background="{StaticResource WindowBackgroundBrush}">
+        <Grid x:Name="HomeShell">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="226"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
 
-        <Grid x:Name="NewProjectView" Visibility="Collapsed" Margin="34,24" MaxWidth="1120" HorizontalAlignment="Center">
-            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-            <StackPanel>
-                <Button Content="←  Projetos" HorizontalAlignment="Left" Margin="0,0,0,18" Click="CancelNewProject_Click"/>
-                <TextBlock Text="Novo projeto" Style="{StaticResource PageTitleTextStyle}"/>
-                <TextBlock Text="Defina os dados principais. Eles serão herdados automaticamente pelos relatórios." Foreground="{StaticResource TextSecondaryBrush}" FontSize="14" Margin="0,6,0,0"/>
-            </StackPanel>
-            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
-                <Grid Margin="0,24,0,16" MaxWidth="1080" HorizontalAlignment="Stretch">
-                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="22"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                    <StackPanel Grid.ColumnSpan="3"><TextBlock Style="{StaticResource FieldLabelTextStyle}"><Run Text="Nome do projeto "/><Run Text="*" Foreground="{StaticResource DangerBrush}"/></TextBlock><TextBox x:Name="NewProjectNameBox" MaxLength="180"/></StackPanel>
-                    <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Text="Dados do projeto" Style="{StaticResource SectionTitleTextStyle}" Margin="0,18,0,14"/>
-                    <StackPanel Grid.Row="2"><TextBlock Text="Cliente" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectClientBox"/><TextBlock Text="Área / localização" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectAreaBox"/><TextBlock Text="Pedido de compra" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectPurchaseOrderBox"/></StackPanel>
-                    <StackPanel Grid.Row="2" Grid.Column="2"><TextBlock Text="CNPJ" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectCnpjBox"/><TextBlock Text="Contrato" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectContractBox"/><TextBlock Text="Logo do cliente" Style="{StaticResource FieldLabelTextStyle}"/><Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="7" Padding="8"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="62"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Image x:Name="NewProjectLogoPreview" Width="54" Height="45" Stretch="Uniform"/><TextBlock x:Name="NewProjectLogoStatus" Grid.Column="1" Text="Sem imagem" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" Margin="8,0" TextTrimming="CharacterEllipsis"/><Button Grid.Column="2" Content="Selecionar" Click="SelectNewProjectLogo_Click"/><TextBox x:Name="NewProjectLogoBox" Visibility="Collapsed"/></Grid></Border></StackPanel>
+            <Border x:Name="HomeSidebar" Panel.ZIndex="2" Background="#081827" BorderBrush="#203143" BorderThickness="0,0,1,0">
+                <Grid Margin="16,26,16,22">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <Grid Margin="8,0,8,0">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="38"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <Border Width="32" Height="32" CornerRadius="16" Background="#173F70" HorizontalAlignment="Left">
+                            <TextBlock Text="&#xE774;" FontFamily="Segoe MDL2 Assets" FontSize="17" Foreground="#55B9FF" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <TextBlock Grid.Column="1" Text="GeoAutoDocs" FontSize="17" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    </Grid>
+
+                    <StackPanel Grid.Row="1" Margin="0,34,0,0">
+                        <Button Style="{StaticResource SidebarItemActiveStyle}">
+                            <StackPanel Orientation="Horizontal"><Grid Width="32"><Path Data="{StaticResource FolderIconGeometry}" Stroke="#55B9FF" StrokeThickness="2" Width="20" Height="16" Stretch="Uniform" HorizontalAlignment="Left" VerticalAlignment="Center"/></Grid><TextBlock Text="Projetos" FontSize="14"/></StackPanel>
+                        </Button>
+                        <Button Style="{StaticResource SidebarItemStyle}" IsEnabled="False" ToolTipService.ShowOnDisabled="True" ToolTip="Abra um projeto para acessar as inspeções.">
+                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE714;" FontFamily="Segoe MDL2 Assets" FontSize="16" Width="32"/><TextBlock Text="Inspeções" FontSize="14"/></StackPanel>
+                        </Button>
+                        <Button Style="{StaticResource SidebarItemStyle}" IsEnabled="False" ToolTipService.ShowOnDisabled="True" ToolTip="Abra um projeto para acessar os relatórios.">
+                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8A5;" FontFamily="Segoe MDL2 Assets" FontSize="16" Width="32"/><TextBlock Text="Relatórios" FontSize="14"/></StackPanel>
+                        </Button>
+                    </StackPanel>
+
+                    <Border Grid.Row="2" BorderBrush="#203143" BorderThickness="1" CornerRadius="8" Padding="12,10" Background="#0A1B2A">
+                        <StackPanel>
+                            <TextBlock Text="GeoAutoDocs Desktop" FontWeight="SemiBold" FontSize="12"/>
+                            <TextBlock x:Name="SidebarVersionText" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,3,0,0"/>
+                        </StackPanel>
+                    </Border>
                 </Grid>
-            </ScrollViewer>
-            <Grid Grid.Row="2"><TextBlock Text="Somente o nome é obrigatório." Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button Content="Cancelar" Click="CancelNewProject_Click" MinWidth="110"/><Button Content="Criar projeto" Style="{StaticResource PrimaryButtonStyle}" MinWidth="160" Click="CreateProject_Click"/></StackPanel></Grid>
+            </Border>
+
+            <Grid Grid.Column="1" ClipToBounds="True">
+                <Grid x:Name="ProjectsView" Margin="40,32,46,30" MaxWidth="1680" HorizontalAlignment="Stretch">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Projetos" Style="{StaticResource PageTitleTextStyle}"/>
+                            <TextBlock Text="Gerencie seus projetos de vídeo inspeção" Foreground="{StaticResource TextSecondaryBrush}" FontSize="14" Margin="0,6,0,0"/>
+                        </StackPanel>
+                        <Button x:Name="NewProjectTopButton" Grid.Column="1" Style="{StaticResource PrimaryButtonStyle}" MinWidth="154" Height="46" Margin="0" Click="NewProject_Click">
+                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" FontFamily="Segoe MDL2 Assets" Margin="0,0,9,0"/><TextBlock Text="Novo projeto"/></StackPanel>
+                        </Button>
+                    </Grid>
+
+                    <Grid Grid.Row="1" Margin="0,24,0,22" HorizontalAlignment="Right" Width="390">
+                        <TextBlock Text="&#xE721;" FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="15,0,0,0" Panel.ZIndex="1" IsHitTestVisible="False"/>
+                        <TextBox x:Name="ProjectsSearchBox" Style="{StaticResource SearchBoxStyle}" ToolTip="Pesquisar projetos por nome ou cliente" TextChanged="ProjectsSearchBox_TextChanged"/>
+                        <TextBlock x:Name="ProjectsSearchHint" Text="Pesquisar projetos..." Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" Margin="42,0,0,0" IsHitTestVisible="False"/>
+                    </Grid>
+
+                    <UniformGrid Grid.Row="2" Columns="4" Margin="0,0,0,24">
+                        <Border x:Name="TotalProjectsCard" Style="{StaticResource StatCardStyle}" Margin="0,0,12,0">
+                            <Grid><Grid.ColumnDefinitions><ColumnDefinition x:Name="TotalProjectsIconColumn" Width="54"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <Border Width="44" Height="44" CornerRadius="22" Background="#102F4C" BorderBrush="#235B89" BorderThickness="1"><Path Data="{StaticResource FolderIconGeometry}" Stroke="#55B9FF" StrokeThickness="2" Width="23" Height="19" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                <StackPanel Grid.Column="1"><TextBlock x:Name="TotalProjectsLabel" Text="Total de projetos" Foreground="{StaticResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="TotalProjectsMetric" Text="0" FontSize="25" FontWeight="Bold" Margin="0,3,0,0"/><TextBlock x:Name="TotalProjectsDetail" Text="Nenhum projeto cadastrado" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/></StackPanel>
+                            </Grid>
+                        </Border>
+                        <Border x:Name="TotalReportsCard" Style="{StaticResource StatCardStyle}" Margin="0,0,12,0">
+                            <Grid><Grid.ColumnDefinitions><ColumnDefinition x:Name="TotalReportsIconColumn" Width="54"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <Border Width="44" Height="44" CornerRadius="22" Background="#122F2B" BorderBrush="#235E4A" BorderThickness="1"><TextBlock Text="&#xE8A5;" FontFamily="Segoe MDL2 Assets" FontSize="19" Foreground="{StaticResource SuccessBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                <StackPanel Grid.Column="1"><TextBlock x:Name="TotalReportsLabel" Text="Relatórios" Foreground="{StaticResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="TotalReportsMetric" Text="0" FontSize="25" FontWeight="Bold" Margin="0,3,0,0"/><TextBlock x:Name="TotalReportsDetail" Text="Nenhum relatório" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/></StackPanel>
+                            </Grid>
+                        </Border>
+                        <Border x:Name="InProgressReportsCard" Style="{StaticResource StatCardStyle}" Margin="0,0,12,0">
+                            <Grid><Grid.ColumnDefinitions><ColumnDefinition x:Name="InProgressReportsIconColumn" Width="54"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <Border Width="44" Height="44" CornerRadius="22" Background="#302B19" BorderBrush="#705D22" BorderThickness="1"><TextBlock Text="&#xE823;" FontFamily="Segoe MDL2 Assets" FontSize="19" Foreground="{StaticResource WarningBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                <StackPanel Grid.Column="1"><TextBlock x:Name="InProgressReportsLabel" Text="Em andamento" Foreground="{StaticResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="InProgressReportsMetric" Text="0" FontSize="25" FontWeight="Bold" Margin="0,3,0,0"/><TextBlock x:Name="InProgressReportsDetail" Text="Nenhum em andamento" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/></StackPanel>
+                            </Grid>
+                        </Border>
+                        <Border x:Name="SharedProjectsCard" Style="{StaticResource StatCardStyle}">
+                            <Grid><Grid.ColumnDefinitions><ColumnDefinition x:Name="SharedProjectsIconColumn" Width="54"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <Border Width="44" Height="44" CornerRadius="22" Background="#25213C" BorderBrush="#514886" BorderThickness="1"><TextBlock Text="&#xE72D;" FontFamily="Segoe MDL2 Assets" FontSize="19" Foreground="#9A8BFF" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                <StackPanel Grid.Column="1"><TextBlock x:Name="SharedProjectsLabel" Text="Compartilhados" Foreground="{StaticResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="SharedProjectsMetric" Text="0" FontSize="25" FontWeight="Bold" Margin="0,3,0,0"/><TextBlock x:Name="SharedProjectsDetail" Text="Somente projetos locais" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/></StackPanel>
+                            </Grid>
+                        </Border>
+                    </UniformGrid>
+
+                    <Grid Grid.Row="3">
+                        <Grid x:Name="ProjectsListPanel">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                            <TextBlock Text="Projetos cadastrados" Style="{StaticResource SectionTitleTextStyle}" Margin="0,0,0,12"/>
+                            <ListView x:Name="ProjectsList" Grid.Row="1" BorderThickness="0" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                <ListView.ItemContainerStyle><Style TargetType="ListViewItem" BasedOn="{StaticResource {x:Type ListViewItem}}"><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,10,11"/><Setter Property="Background" Value="Transparent"/></Style></ListView.ItemContainerStyle>
+                                <ListView.ItemTemplate><DataTemplate>
+                                    <Border Style="{StaticResource ProjectCardStyle}" Tag="{Binding Id}" MouseLeftButtonUp="ProjectCard_MouseLeftButtonUp">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="68"/><ColumnDefinition Width="*"/><ColumnDefinition Width="205"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <Border Width="52" Height="52" CornerRadius="9" Background="#123A53" HorizontalAlignment="Left"><Path Data="{StaticResource FolderIconGeometry}" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="2" Width="27" Height="22" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,18,0">
+                                                <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis">
+                                                    <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Text" Value="{Binding DefaultClient}"/><Style.Triggers><DataTrigger Binding="{Binding DefaultClient}" Value=""><Setter Property="Text" Value="Cliente não informado"/><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/></DataTrigger><DataTrigger Binding="{Binding DefaultClient}" Value="{x:Null}"><Setter Property="Text" Value="Cliente não informado"/><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                                                </TextBlock>
+                                                <Border HorizontalAlignment="Left" Margin="0,8,0,0">
+                                                    <Border.Style><Style TargetType="Border" BasedOn="{StaticResource StatusBadgeStyle}"><Style.Triggers><DataTrigger Binding="{Binding StorageKind}" Value="Shared"><Setter Property="Background" Value="#202B49"/></DataTrigger></Style.Triggers></Style></Border.Style>
+                                                    <TextBlock x:Name="ProjectStorageBadge" Text="Local" Foreground="{StaticResource SuccessBrush}" FontSize="10" FontWeight="SemiBold"/>
+                                                </Border>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                                <TextBlock Text="Última alteração" Foreground="{StaticResource TextMutedBrush}" FontSize="11"/>
+                                                <TextBlock Text="{Binding UpdatedAt, StringFormat={}{0:dd/MM/yyyy HH:mm}}" Foreground="{StaticResource TextSecondaryBrush}" FontWeight="SemiBold" Margin="0,3,0,0"/>
+                                                <TextBlock Text="{Binding Reports.Count, StringFormat={}{0} relatório(s)}" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,3,0,0"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <Button Content="Abrir" Style="{StaticResource PrimaryButtonStyle}" Tag="{Binding Id}" Click="OpenProject_Click" MinWidth="82" Margin="0,0,7,0"/>
+                                                <Button Content="&#xE712;" Style="{StaticResource IconButtonStyle}" Tag="{Binding Id}" Click="ProjectActions_Click" ToolTip="Ações do projeto" Margin="0">
+                                                    <Button.ContextMenu>
+                                                        <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                                            <MenuItem Header="Renomear" Tag="{Binding Id}" Click="RenameProject_Click"/>
+                                                            <Separator/>
+                                                            <MenuItem Header="Excluir" Tag="{Binding Id}" Click="DeleteProject_Click" Foreground="{StaticResource DangerBrush}"/>
+                                                        </ContextMenu>
+                                                    </Button.ContextMenu>
+                                                </Button>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                    <DataTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding StorageKind}" Value="Shared">
+                                            <Setter TargetName="ProjectStorageBadge" Property="Text" Value="Compartilhado"/>
+                                            <Setter TargetName="ProjectStorageBadge" Property="Foreground" Value="#A99DFF"/>
+                                        </DataTrigger>
+                                    </DataTemplate.Triggers>
+                                </DataTemplate></ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
+
+                        <Border x:Name="ProjectsEmptyState" Visibility="Collapsed" Background="#0E1C2B" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" MinHeight="120">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" VerticalContentAlignment="Center" HorizontalContentAlignment="Center">
+                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24">
+                                    <Border Width="88" Height="88" CornerRadius="44" Background="#142536" Margin="0,0,0,22"><Path Data="{StaticResource FolderIconGeometry}" Stroke="#71859A" StrokeThickness="2" Width="42" Height="34" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                    <TextBlock x:Name="ProjectsEmptyTitle" Text="Nenhum projeto criado" FontWeight="SemiBold" FontSize="20" HorizontalAlignment="Center"/>
+                                    <TextBlock x:Name="ProjectsEmptyDescription" Text="Crie seu primeiro projeto para começar." Foreground="{StaticResource TextSecondaryBrush}" FontSize="14" Margin="0,8,0,0" TextAlignment="Center"/>
+                                    <Button x:Name="ProjectsEmptyAction" Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Center" Margin="0,22,0,0" Click="NewProject_Click" MinWidth="158">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" FontFamily="Segoe MDL2 Assets" Margin="0,0,9,0"/><TextBlock Text="Novo projeto"/></StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
+                    </Grid>
+                </Grid>
+
+                <Grid x:Name="NewProjectView" Visibility="Collapsed" Margin="40,30,46,28" MaxWidth="1240" HorizontalAlignment="Stretch">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <StackPanel>
+                        <Button Style="{StaticResource SecondaryButtonStyle}" HorizontalAlignment="Left" Margin="0,0,0,18" Click="CancelNewProject_Click">
+                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72B;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/><TextBlock Text="Projetos"/></StackPanel>
+                        </Button>
+                        <TextBlock Text="Novo projeto" Style="{StaticResource PageTitleTextStyle}"/>
+                        <TextBlock Text="Defina os dados principais do projeto." Foreground="{StaticResource TextSecondaryBrush}" FontSize="14" Margin="0,6,0,0"/>
+                    </StackPanel>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+                        <Border Style="{StaticResource CardStyle}" Margin="0,24,0,0" Padding="28,24" MaxWidth="1160" HorizontalAlignment="Stretch">
+                            <Grid>
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <StackPanel Grid.ColumnSpan="3"><TextBlock Style="{StaticResource FieldLabelTextStyle}"><Run Text="Nome do projeto "/><Run Text="*" Foreground="{StaticResource DangerBrush}"/></TextBlock><TextBox x:Name="NewProjectNameBox" MaxLength="180"/></StackPanel>
+                                <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Text="Dados do projeto" Style="{StaticResource SectionTitleTextStyle}" Margin="0,14,0,16"/>
+                                <StackPanel Grid.Row="2"><TextBlock Text="Cliente" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectClientBox"/><TextBlock Text="Área / localização" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectAreaBox"/><TextBlock Text="Pedido de compra" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectPurchaseOrderBox"/></StackPanel>
+                                <StackPanel Grid.Row="2" Grid.Column="2"><TextBlock Text="CNPJ" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectCnpjBox"/><TextBlock Text="Contrato" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectContractBox"/><TextBlock Text="Logo do cliente" Style="{StaticResource FieldLabelTextStyle}"/><Border Background="{StaticResource SurfaceMutedBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="7" Padding="10"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="66"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Image x:Name="NewProjectLogoPreview" Width="56" Height="46" Stretch="Uniform"/><TextBlock x:Name="NewProjectLogoStatus" Grid.Column="1" Text="Nenhuma imagem selecionada" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" Margin="8,0" TextTrimming="CharacterEllipsis"/><Button Grid.Column="2" Content="Selecionar" Click="SelectNewProjectLogo_Click"/><TextBox x:Name="NewProjectLogoBox" Visibility="Collapsed"/></Grid></Border></StackPanel>
+                                <Grid Grid.Row="3" Grid.ColumnSpan="3" Margin="0,22,0,0"><TextBlock Text="Somente o nome é obrigatório." Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button Content="Cancelar" Style="{StaticResource SecondaryButtonStyle}" Click="CancelNewProject_Click" MinWidth="110"/><Button Content="Criar projeto" Style="{StaticResource PrimaryButtonStyle}" MinWidth="160" Click="CreateProject_Click"/></StackPanel></Grid>
+                            </Grid>
+                        </Border>
+                    </ScrollViewer>
+                </Grid>
+            </Grid>
         </Grid>
 
         <Grid x:Name="EditorView" Visibility="Collapsed" Margin="24,18,28,14" MaxWidth="1600" HorizontalAlignment="Center">
@@ -257,6 +380,44 @@
                             <StackPanel Grid.Row="3" Grid.ColumnSpan="3"><TextBlock Text="Descrição (opcional)" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewSectionDescriptionBox" AcceptsReturn="True" Height="64" TextWrapping="Wrap"/></StackPanel>
                         </Grid></ScrollViewer>
                         <Grid Grid.Row="2"><TextBlock x:Name="NewSectionValidationText" Text="Campos opcionais podem permanecer vazios." Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button Content="Cancelar" Click="CancelInspectionForm_Click"/><Button x:Name="CreateSectionButton" Content="Criar trecho" Style="{StaticResource PrimaryButtonStyle}" Click="CreateSection_Click"/></StackPanel></Grid>
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <Grid x:Name="ProjectDialogOverlay" Visibility="Collapsed" Background="#C2000000" Panel.ZIndex="40">
+            <Border Style="{StaticResource DialogStyle}" Width="500" MaxWidth="500" Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Grid>
+                    <Grid x:Name="RenameProjectDialogPanel" Visibility="Collapsed">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Renomear projeto" Style="{StaticResource PageTitleTextStyle}" FontSize="21"/>
+                            <TextBlock Text="Atualize o nome usado para identificar este projeto." Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5,0,0"/>
+                        </StackPanel>
+                        <StackPanel Grid.Row="1" Margin="0,22,0,4">
+                            <TextBlock Text="Novo nome" Style="{StaticResource FieldLabelTextStyle}"/>
+                            <TextBox x:Name="RenameProjectNameBox" MaxLength="180"/>
+                            <TextBlock x:Name="RenameProjectValidationText" Text="O nome do projeto é obrigatório." Foreground="{StaticResource DangerBrush}" Visibility="Collapsed" Margin="0,-5,0,0"/>
+                        </StackPanel>
+                        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+                            <Button Content="Cancelar" Style="{StaticResource SecondaryButtonStyle}" Click="CancelProjectDialog_Click" MinWidth="104"/>
+                            <Button Content="Renomear" Style="{StaticResource PrimaryButtonStyle}" Click="ConfirmRenameProject_Click" MinWidth="112"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid x:Name="DeleteProjectDialogPanel" Visibility="Collapsed">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Excluir projeto?" Style="{StaticResource PageTitleTextStyle}" FontSize="21"/>
+                            <TextBlock x:Name="DeleteProjectMessage" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <Border Grid.Row="1" Background="#2D1B21" BorderBrush="#63323B" BorderThickness="1" CornerRadius="7" Padding="12" Margin="0,20,0,0">
+                            <TextBlock Text="Esta ação remove o projeto e seus dados persistidos." Foreground="#F2A8AE" TextWrapping="Wrap"/>
+                        </Border>
+                        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+                            <Button Content="Cancelar" Style="{StaticResource SecondaryButtonStyle}" Click="CancelProjectDialog_Click" MinWidth="104"/>
+                            <Button Content="Excluir" Style="{StaticResource DangerButtonStyle}" Click="ConfirmDeleteProject_Click" MinWidth="104"/>
+                        </StackPanel>
                     </Grid>
                 </Grid>
             </Border>

@@ -50,6 +50,7 @@ public partial class MainWindow : Window
     private bool _playerDisposed;
     private bool _loadingInspections;
     private Point _occurrenceDragStart;
+    private Guid? _projectDialogProjectId;
 
     public MainWindow(IProjectStore store, WordReportService wordReportService,
         SharedProjectService sharedProjects, LocalLogger logger, FrameCaptureService frameCaptureService,
@@ -67,6 +68,8 @@ public partial class MainWindow : Window
         _libVlc = new LibVLC("--no-video-title-show", "--quiet", "--no-audio");
         _mediaPlayer = new MediaPlayer(_libVlc);
         VideoView.MediaPlayer = _mediaPlayer;
+        var version = typeof(App).Assembly.GetName().Version;
+        SidebarVersionText.Text = version is null ? "Versão local" : $"Versão {version.Major}.{version.Minor}";
         _mediaPlayer.EncounteredError += (_, _) => Dispatcher.BeginInvoke(() => HandlePlayerError());
         _mediaPlayer.Playing += (_, _) => Dispatcher.BeginInvoke(() => { VideoEmptyState.Visibility = Visibility.Collapsed; PlayPauseButton.Content = "❚❚"; });
         _mediaPlayer.Paused += (_, _) => Dispatcher.BeginInvoke(() => PlayPauseButton.Content = "▶");
@@ -81,6 +84,7 @@ public partial class MainWindow : Window
         _playerTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         _playerTimer.Tick += (_, _) => RefreshPlayerPosition();
         _playerTimer.Start();
+        SizeChanged += (_, _) => ApplyDashboardDensity();
         Loaded += async (_, _) => await ReloadProjectsAsync();
         Closing += OnClosing;
     }
@@ -92,6 +96,7 @@ public partial class MainWindow : Window
             _projects.Clear();
             foreach (var project in await _store.ListAsync()) _projects.Add(project);
             CollectionViewSource.GetDefaultView(_projects).Refresh();
+            RefreshDashboardMetrics();
             RefreshProjectsEmptyState();
         }
         catch (Exception ex) { ShowError("Não foi possível carregar os projetos.", ex); }
@@ -100,6 +105,7 @@ public partial class MainWindow : Window
     private void NewProject_Click(object sender, RoutedEventArgs e)
     {
         ResetNewProjectForm();
+        HomeShell.Visibility = Visibility.Visible;
         ProjectsView.Visibility = Visibility.Collapsed;
         EditorView.Visibility = Visibility.Collapsed;
         NewProjectView.Visibility = Visibility.Visible;
@@ -163,7 +169,7 @@ public partial class MainWindow : Window
         var view = CollectionViewSource.GetDefaultView(_projects);
         view.Filter = item => item is Project project &&
             (query.Length == 0 || project.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
-             project.DefaultClient.Contains(query, StringComparison.CurrentCultureIgnoreCase));
+             project.DefaultClient?.Contains(query, StringComparison.CurrentCultureIgnoreCase) == true);
         view.Refresh();
         RefreshProjectsEmptyState();
     }
@@ -173,18 +179,86 @@ public partial class MainWindow : Window
         var query = ProjectsSearchBox.Text.Trim();
         var view = CollectionViewSource.GetDefaultView(_projects);
         ProjectsEmptyState.Visibility = view.IsEmpty ? Visibility.Visible : Visibility.Collapsed;
+        ProjectsListPanel.Visibility = view.IsEmpty ? Visibility.Collapsed : Visibility.Visible;
         ProjectsEmptyTitle.Text = query.Length == 0 ? "Nenhum projeto criado" : "Nenhum projeto encontrado";
         ProjectsEmptyDescription.Text = query.Length == 0
-            ? "Crie o primeiro projeto para iniciar uma inspeção."
+            ? "Crie seu primeiro projeto para começar."
             : "Tente buscar por outro nome de projeto ou cliente.";
         ProjectsEmptyAction.Visibility = query.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         NewProjectTopButton.Visibility = _projects.Count == 0 && query.Length == 0
             ? Visibility.Collapsed : Visibility.Visible;
     }
 
+    private void RefreshDashboardMetrics()
+    {
+        var projectCount = _projects.Count;
+        var reportCount = _projects.Sum(project => project.Reports.Count);
+        var inProgressCount = _projects.Sum(project =>
+            project.Reports.Count(report => string.IsNullOrWhiteSpace(report.GeneratedReportPath)));
+        var sharedCount = _projects.Count(project => project.StorageKind == ProjectStorageKind.Shared);
+
+        TotalProjectsMetric.Text = projectCount.ToString(CultureInfo.CurrentCulture);
+        TotalProjectsDetail.Text = projectCount switch
+        {
+            0 => "Nenhum projeto cadastrado",
+            1 => "1 projeto cadastrado",
+            _ => $"{projectCount} projetos cadastrados"
+        };
+        TotalReportsMetric.Text = reportCount.ToString(CultureInfo.CurrentCulture);
+        TotalReportsDetail.Text = reportCount switch
+        {
+            0 => "Nenhum relatório",
+            1 => "1 relatório no sistema",
+            _ => $"{reportCount} relatórios no sistema"
+        };
+        InProgressReportsMetric.Text = inProgressCount.ToString(CultureInfo.CurrentCulture);
+        InProgressReportsDetail.Text = inProgressCount switch
+        {
+            0 => "Nenhum em andamento",
+            1 => "1 relatório sem arquivo final",
+            _ => $"{inProgressCount} relatórios sem arquivo final"
+        };
+        SharedProjectsMetric.Text = sharedCount.ToString(CultureInfo.CurrentCulture);
+        SharedProjectsDetail.Text = sharedCount switch
+        {
+            0 => "Somente projetos locais",
+            1 => "1 projeto compartilhado",
+            _ => $"{sharedCount} projetos compartilhados"
+        };
+    }
+
+    private void ApplyDashboardDensity()
+    {
+        var compact = ActualWidth > 0 && ActualWidth < 1100;
+        var padding = compact ? new Thickness(8, 16, 8, 16) : new Thickness(18, 16, 18, 16);
+        foreach (var card in new[] { TotalProjectsCard, TotalReportsCard, InProgressReportsCard, SharedProjectsCard })
+            card.Padding = padding;
+        foreach (var column in new[] { TotalProjectsIconColumn, TotalReportsIconColumn, InProgressReportsIconColumn, SharedProjectsIconColumn })
+            column.Width = new GridLength(compact ? 44 : 54);
+        foreach (var label in new[] { TotalProjectsLabel, TotalReportsLabel, InProgressReportsLabel, SharedProjectsLabel })
+            label.FontSize = compact ? 9.5 : 13;
+        foreach (var detail in new[] { TotalProjectsDetail, TotalReportsDetail, InProgressReportsDetail, SharedProjectsDetail })
+            detail.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+    }
+
     private async void OpenProject_Click(object sender, RoutedEventArgs e)
     {
-        if (((Button)sender).Tag is Guid id) await OpenEditorAsync(id);
+        if (sender is FrameworkElement { Tag: Guid id }) await OpenEditorAsync(id);
+    }
+
+    private async void ProjectCard_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (FindVisualParent<Button>(e.OriginalSource as DependencyObject) is not null) return;
+        if (sender is FrameworkElement { Tag: Guid id }) await OpenEditorAsync(id);
+    }
+
+    private void ProjectActions_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { ContextMenu: not null } button) return;
+        button.ContextMenu.PlacementTarget = button;
+        button.ContextMenu.Placement = PlacementMode.Bottom;
+        button.ContextMenu.IsOpen = true;
+        e.Handled = true;
     }
 
     private async Task OpenEditorAsync(Guid id)
@@ -202,6 +276,8 @@ public partial class MainWindow : Window
             _currentProject = project;
             LoadProject(project);
             ProjectsView.Visibility = Visibility.Collapsed;
+            NewProjectView.Visibility = Visibility.Collapsed;
+            HomeShell.Visibility = Visibility.Collapsed;
             EditorView.Visibility = Visibility.Visible;
             SetSharedTimers(_sharedSession is { IsReadOnly: false });
         }
@@ -234,23 +310,79 @@ public partial class MainWindow : Window
 
     private async void RenameProject_Click(object sender, RoutedEventArgs e)
     {
-        if (((Button)sender).Tag is not Guid id) return;
-        var project = await _store.GetAsync(id);
+        if (sender is not FrameworkElement { Tag: Guid id }) return;
+        try
+        {
+            var project = await _store.GetAsync(id);
+            if (project is null) return;
+            _projectDialogProjectId = id;
+            RenameProjectNameBox.Text = project.Name;
+            RenameProjectValidationText.Visibility = Visibility.Collapsed;
+            DeleteProjectDialogPanel.Visibility = Visibility.Collapsed;
+            RenameProjectDialogPanel.Visibility = Visibility.Visible;
+            ProjectDialogOverlay.Visibility = Visibility.Visible;
+            RenameProjectNameBox.Focus();
+            RenameProjectNameBox.SelectAll();
+        }
+        catch (Exception ex) { ShowError("Não foi possível carregar o projeto para renomear.", ex); }
+    }
+
+    private void DeleteProject_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: Guid id }) return;
+        var project = _projects.FirstOrDefault(x => x.Id == id);
         if (project is null) return;
-        var name = TextPromptWindow.Ask(this, "Renomear projeto", "Novo nome:", project.Name);
-        if (string.IsNullOrWhiteSpace(name)) return;
-        try { project.Name = name; await _store.SaveAsync(project); await ReloadProjectsAsync(); }
+        _projectDialogProjectId = id;
+        DeleteProjectMessage.Text = $"“{project.Name}” será removido.";
+        RenameProjectDialogPanel.Visibility = Visibility.Collapsed;
+        DeleteProjectDialogPanel.Visibility = Visibility.Visible;
+        ProjectDialogOverlay.Visibility = Visibility.Visible;
+    }
+
+    private async void ConfirmRenameProject_Click(object sender, RoutedEventArgs e)
+    {
+        if (_projectDialogProjectId is not Guid id) return;
+        var name = RenameProjectNameBox.Text.Trim();
+        if (name.Length == 0)
+        {
+            RenameProjectValidationText.Visibility = Visibility.Visible;
+            RenameProjectNameBox.Focus();
+            return;
+        }
+
+        try
+        {
+            var project = await _store.GetAsync(id);
+            if (project is null) { CloseProjectDialog(); return; }
+            project.Name = name;
+            await _store.SaveAsync(project);
+            CloseProjectDialog();
+            await ReloadProjectsAsync();
+        }
         catch (Exception ex) { ShowError("Não foi possível renomear o projeto.", ex); }
     }
 
-    private async void DeleteProject_Click(object sender, RoutedEventArgs e)
+    private async void ConfirmDeleteProject_Click(object sender, RoutedEventArgs e)
     {
-        if (((Button)sender).Tag is not Guid id) return;
-        var project = _projects.FirstOrDefault(x => x.Id == id);
-        if (project is null || MessageBox.Show($"Excluir o projeto '{project.Name}'?", "Confirmar exclusão",
-                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        try { await _store.DeleteAsync(id); await ReloadProjectsAsync(); }
+        if (_projectDialogProjectId is not Guid id) return;
+        try
+        {
+            await _store.DeleteAsync(id);
+            CloseProjectDialog();
+            await ReloadProjectsAsync();
+        }
         catch (Exception ex) { ShowError("Não foi possível excluir o projeto.", ex); }
+    }
+
+    private void CancelProjectDialog_Click(object sender, RoutedEventArgs e) => CloseProjectDialog();
+
+    private void CloseProjectDialog()
+    {
+        ProjectDialogOverlay.Visibility = Visibility.Collapsed;
+        RenameProjectDialogPanel.Visibility = Visibility.Collapsed;
+        DeleteProjectDialogPanel.Visibility = Visibility.Collapsed;
+        RenameProjectValidationText.Visibility = Visibility.Collapsed;
+        _projectDialogProjectId = null;
     }
 
     private async void Back_Click(object sender, RoutedEventArgs e)
@@ -259,6 +391,8 @@ public partial class MainWindow : Window
         StopAndReleaseCurrentMedia();
         _currentProject = null; _currentReport = null; _sharedSession = null;
         EditorView.Visibility = Visibility.Collapsed;
+        HomeShell.Visibility = Visibility.Visible;
+        NewProjectView.Visibility = Visibility.Collapsed;
         ProjectsView.Visibility = Visibility.Visible;
         await ReloadProjectsAsync();
     }
@@ -1427,6 +1561,18 @@ public partial class MainWindow : Window
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (ProjectDialogOverlay.Visibility == Visibility.Visible)
+        {
+            if (e.Key == Key.Escape) CloseProjectDialog();
+            else if (e.Key == Key.Enter && RenameProjectDialogPanel.Visibility == Visibility.Visible)
+                ConfirmRenameProject_Click(sender, e);
+            else if (e.Key == Key.Enter && DeleteProjectDialogPanel.Visibility == Visibility.Visible)
+                ConfirmDeleteProject_Click(sender, e);
+            else return;
+            e.Handled = true;
+            return;
+        }
+
         if (NewProjectView.Visibility == Visibility.Visible)
         {
             if (e.Key == Key.Escape) CancelNewProject_Click(sender, e);

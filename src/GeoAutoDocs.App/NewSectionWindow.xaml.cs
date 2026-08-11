@@ -8,6 +8,7 @@ public partial class NewSectionWindow : Window
     private NewSectionWindow()
     {
         InitializeComponent();
+        WindowLayout.KeepInsideWorkArea(this, 680, 560);
         Loaded += (_, _) => NameBox.Focus();
     }
 

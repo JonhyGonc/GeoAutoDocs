@@ -10,6 +10,7 @@ public partial class NewProjectWindow : Window
     private NewProjectWindow()
     {
         InitializeComponent();
+        WindowLayout.KeepInsideWorkArea(this, 900, 620);
         Loaded += (_, _) => NameBox.Focus();
     }
 
@@ -34,7 +35,7 @@ public partial class NewProjectWindow : Window
         {
             LogoBox.Text = dialog.FileName;
             LogoPreview.Source = LoadPreview(dialog.FileName);
-            LogoStatus.Text = "Imagem selecionada";
+            LogoStatus.Text = "Selecionada";
         }
     }
 

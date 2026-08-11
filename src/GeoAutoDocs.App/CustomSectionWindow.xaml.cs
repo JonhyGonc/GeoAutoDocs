@@ -10,7 +10,11 @@ public partial class CustomSectionWindow : Window
     public string SectionText => TextBox.Text.Trim();
     public IReadOnlyList<string> ImagePaths => _imagePaths;
 
-    public CustomSectionWindow() => InitializeComponent();
+    public CustomSectionWindow()
+    {
+        InitializeComponent();
+        WindowLayout.KeepInsideWorkArea(this, 680, 540);
+    }
 
     private void AddImages_Click(object sender, RoutedEventArgs e)
     {

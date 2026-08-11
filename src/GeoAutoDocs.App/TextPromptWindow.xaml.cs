@@ -7,6 +7,7 @@ public partial class TextPromptWindow : Window
     private TextPromptWindow(string title, string prompt, string initialValue)
     {
         InitializeComponent();
+        WindowLayout.KeepInsideWorkArea(this, 500, 220);
         Title = title;
         PromptText.Text = prompt;
         ValueBox.Text = initialValue;

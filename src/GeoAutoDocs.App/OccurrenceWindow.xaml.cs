@@ -31,6 +31,7 @@ public partial class OccurrenceWindow : Window
         Occurrence? source = null, Capture? initialCapture = null, bool readOnly = false, bool duplicate = false)
     {
         InitializeComponent();
+        WindowLayout.KeepInsideWorkArea(this, 570, 760);
         DataContext = this;
         _project = project;
         _section = section;
@@ -85,13 +86,6 @@ public partial class OccurrenceWindow : Window
         FooterHintText.Text = initialCapture is null ? "Detalhes opcionais." : "Captura anexada.";
         Loaded += (_, _) =>
         {
-            if (Owner is not null)
-            {
-                var availableHeight = Math.Max(MinHeight, Owner.ActualHeight - 28);
-                Height = Math.Min(800, availableHeight);
-                Left = Math.Max(SystemParameters.WorkArea.Left, Owner.Left + Owner.ActualWidth - Width - 14);
-                Top = Math.Max(SystemParameters.WorkArea.Top, Owner.Top + 14);
-            }
             PointMeasurementBox.Focus();
             PointMeasurementBox.SelectAll();
         };

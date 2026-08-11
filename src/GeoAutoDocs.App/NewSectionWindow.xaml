@@ -1,17 +1,17 @@
 <Window x:Class="GeoAutoDocs.App.NewSectionWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Novo trecho" Width="720" Height="610" MinWidth="620" MinHeight="560"
+        Title="Novo trecho" Width="680" Height="560" MinWidth="520" MinHeight="420"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False" Background="{StaticResource WindowBackgroundBrush}">
     <Grid Margin="26,22">
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <StackPanel><TextBlock Text="Novo trecho" Style="{StaticResource PageTitleTextStyle}" FontSize="23"/><TextBlock Text="Informe a identificação e, se desejar, complete os dados técnicos." Foreground="{StaticResource TextSecondaryBrush}" Margin="0,5,0,0"/></StackPanel>
-        <Grid Grid.Row="1" Margin="0,20,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0"><Grid Margin="0,20,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <StackPanel Grid.ColumnSpan="3"><TextBlock Style="{StaticResource FieldLabelTextStyle}"><Run Text="Identificação "/><Run Text="*" Foreground="{StaticResource DangerBrush}"/></TextBlock><TextBox x:Name="NameBox"/></StackPanel>
             <StackPanel Grid.Row="1"><TextBlock Text="Ponto inicial (opcional)" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="StartPointBox"/></StackPanel><StackPanel Grid.Row="1" Grid.Column="2"><TextBlock Text="Ponto final (opcional)" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="EndPointBox"/></StackPanel>
             <StackPanel Grid.Row="2"><TextBlock Text="Diâmetro (mm, opcional)" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DiameterBox"/></StackPanel><StackPanel Grid.Row="2" Grid.Column="2"><TextBlock Text="Referência (opcional)" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="ReferenceBox"/></StackPanel>
             <StackPanel Grid.Row="3" Grid.ColumnSpan="3"><TextBlock Text="Descrição (opcional)" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DescriptionBox" AcceptsReturn="True" Height="64" TextWrapping="Wrap"/></StackPanel>
-        </Grid>
+        </Grid></ScrollViewer>
         <Grid Grid.Row="2"><TextBlock Text="Campos opcionais podem permanecer vazios." Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button Content="Cancelar" IsCancel="True"/><Button Content="Criar trecho" IsDefault="True" Style="{StaticResource PrimaryButtonStyle}" Click="Create_Click"/></StackPanel></Grid>
     </Grid>
 </Window>

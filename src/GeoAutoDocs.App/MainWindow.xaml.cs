@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
@@ -54,6 +55,7 @@ public partial class MainWindow : Window
         OccurrenceService occurrenceService)
     {
         InitializeComponent();
+        WindowLayout.KeepInsideWorkArea(this, 1480, 900);
         _store = store;
         _wordReportService = wordReportService;
         _sharedProjects = sharedProjects;
@@ -1158,7 +1160,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (e.Key == Key.Space && InspectionsTab.IsSelected && CapturePreviewPanel.Visibility != Visibility.Visible)
+        if (e.Key == Key.Space && InspectionsTab.IsSelected && CapturePreviewPanel.Visibility != Visibility.Visible &&
+            Keyboard.FocusedElement is not TextBoxBase and not PasswordBox and not ComboBox { IsEditable: true })
         {
             PlayPause_Click(sender, e);
             e.Handled = true;

@@ -33,7 +33,7 @@ public partial class OccurrenceWindow : Window
         Occurrence? source = null, Capture? initialCapture = null, bool readOnly = false, bool duplicate = false)
     {
         InitializeComponent();
-        WindowLayout.KeepInsideWorkArea(this, 570, 760);
+        WindowLayout.KeepInsideWorkArea(this, 680, 820);
         DataContext = this;
         _project = project;
         _section = section;

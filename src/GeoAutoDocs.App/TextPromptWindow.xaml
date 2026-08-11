@@ -1,7 +1,7 @@
 <Window x:Class="GeoAutoDocs.App.TextPromptWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="GeoAutoDocs" Height="220" Width="500" MinWidth="380" MinHeight="190" ResizeMode="CanResize"
+        Title="GeoAutoDocs" Height="280" Width="560" MinWidth="420" MinHeight="240" ResizeMode="CanResize"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False" Background="{StaticResource WindowBackgroundBrush}">
     <Grid Margin="26" MaxWidth="680" HorizontalAlignment="Center">
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>

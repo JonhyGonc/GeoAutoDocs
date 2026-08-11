@@ -13,7 +13,7 @@ public partial class CustomSectionWindow : Window
     public CustomSectionWindow()
     {
         InitializeComponent();
-        WindowLayout.KeepInsideWorkArea(this, 680, 540);
+        WindowLayout.KeepInsideWorkArea(this, 740, 620);
     }
 
     private void AddImages_Click(object sender, RoutedEventArgs e)

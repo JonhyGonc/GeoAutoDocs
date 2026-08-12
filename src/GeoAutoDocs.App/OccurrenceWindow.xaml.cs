@@ -27,6 +27,9 @@ public partial class OccurrenceWindow : Window
     public bool ResumeVideoAfterSave { get; private set; }
     public Guid? RequestedVideoReferenceId { get; private set; }
     public TimeSpan? RequestedVideoTimestamp { get; private set; }
+    public bool IsEmbedded { get; set; }
+    public bool? EmbeddedResult { get; private set; }
+    public event EventHandler? EmbeddedCompleted;
 
     public OccurrenceWindow(Project project, InspectionSection section,
         IReadOnlyList<AnomalyDefinition> catalog, OccurrenceService service,
@@ -134,7 +137,7 @@ public partial class OccurrenceWindow : Window
             _draft.GeneratedDescription = OccurrenceRules.GenerateDescription(_draft);
             SavedDraft = _draft;
             ResumeVideoAfterSave = resumeVideo;
-            DialogResult = true;
+            CompleteEditor(true);
         }
         catch (Exception ex)
         {
@@ -327,7 +330,7 @@ public partial class OccurrenceWindow : Window
             Title = "Adicionar imagem da anomalia", Filter = "Imagens (*.png;*.jpg;*.jpeg)|*.png;*.jpg;*.jpeg",
             CheckFileExists = true, Multiselect = true
         };
-        if (dialog.ShowDialog(this) != true) return;
+        if (dialog.ShowDialog(IsEmbedded ? Application.Current.MainWindow : this) != true) return;
         foreach (var file in dialog.FileNames) AddEvidenceItem(OccurrenceService.FromExternalImage(file));
         RefreshEvidencePresentation();
         AddImageMenuPanel.Visibility = Visibility.Collapsed;
@@ -377,7 +380,7 @@ public partial class OccurrenceWindow : Window
             item.Evidence.VideoReferenceId is not Guid videoId || item.Evidence.VideoTimestamp is null) return;
         RequestedVideoReferenceId = videoId;
         RequestedVideoTimestamp = item.Evidence.VideoTimestamp;
-        Close();
+        CompleteEditor(null);
     }
 
     private void RefreshEvidencePresentation()
@@ -410,9 +413,23 @@ public partial class OccurrenceWindow : Window
                decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out value) ? value : null;
     }
 
-    private void Cancel_Click(object sender, RoutedEventArgs e) => Close();
+    private void Cancel_Click(object sender, RoutedEventArgs e) => CompleteEditor(null);
 
-    private void LeavePending_Click(object sender, RoutedEventArgs e) => DialogResult = false;
+    private void LeavePending_Click(object sender, RoutedEventArgs e) => CompleteEditor(false);
+
+    public void CancelEmbedded() => CompleteEditor(null);
+
+    private void CompleteEditor(bool? result)
+    {
+        if (!IsEmbedded)
+        {
+            if (result is null) Close();
+            else DialogResult = result;
+            return;
+        }
+        EmbeddedResult = result;
+        EmbeddedCompleted?.Invoke(this, EventArgs.Empty);
+    }
 
     private static decimal ParseRequired(string text, string field) => ParseOptional(text, field) ??
         throw new InvalidOperationException($"Informe um valor válido para {field}.");

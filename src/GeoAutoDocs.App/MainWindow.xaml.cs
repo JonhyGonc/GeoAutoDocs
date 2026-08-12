@@ -51,6 +51,7 @@ public partial class MainWindow : Window
     private bool _loadingInspections;
     private Point _occurrenceDragStart;
     private Guid? _projectDialogProjectId;
+    private OccurrenceWindow? _embeddedOccurrenceEditor;
 
     public MainWindow(IProjectStore store, WordReportService wordReportService,
         SharedProjectService sharedProjects, LocalLogger logger, FrameCaptureService frameCaptureService,
@@ -71,7 +72,12 @@ public partial class MainWindow : Window
         var version = typeof(App).Assembly.GetName().Version;
         SidebarVersionText.Text = version is null ? "Versão local" : $"Versão {version.Major}.{version.Minor}";
         _mediaPlayer.EncounteredError += (_, _) => Dispatcher.BeginInvoke(() => HandlePlayerError());
-        _mediaPlayer.Playing += (_, _) => Dispatcher.BeginInvoke(() => { VideoEmptyState.Visibility = Visibility.Collapsed; PlayPauseButton.Content = "❚❚"; });
+        _mediaPlayer.Playing += (_, _) => Dispatcher.BeginInvoke(() =>
+        {
+            VideoEmptyState.Visibility = Visibility.Collapsed;
+            VideoLoadedBadge.Visibility = Visibility.Visible;
+            PlayPauseButton.Content = "❚❚";
+        });
         _mediaPlayer.Paused += (_, _) => Dispatcher.BeginInvoke(() => PlayPauseButton.Content = "▶");
         _mediaPlayer.Stopped += (_, _) => Dispatcher.BeginInvoke(() => PlayPauseButton.Content = "▶");
         ProjectsList.ItemsSource = _projects;
@@ -417,6 +423,7 @@ public partial class MainWindow : Window
             : "Local";
         ShareProjectButton.IsEnabled = project.StorageKind == ProjectStorageKind.Local;
         NewReportButton.IsEnabled = _sharedSession?.IsReadOnly != true;
+        HeaderNewReportButton.IsEnabled = _sharedSession?.IsReadOnly != true;
         ReportsEmptyState.Visibility = reports.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         ProjectDefaultsTab.IsEnabled = true;
         ReportHeaderTab.IsEnabled = !IsReadOnly && _currentReport is not null;
@@ -963,9 +970,9 @@ public partial class MainWindow : Window
         var items = _currentSection?.VideoReferences.OrderBy(x => x.Order)
             .Select(x => new VideoListItem(x)).ToList() ?? [];
         VideosList.ItemsSource = items;
-        var selected = items.FirstOrDefault(x => x.Id == videoId);
+        var selected = items.FirstOrDefault(x => x.Id == videoId) ?? items.FirstOrDefault();
         VideosList.SelectedItem = selected;
-        if (selected is null) _currentVideo = null;
+        _currentVideo = selected?.Video;
         if (_currentSection is null)
             ShowVideoState("Crie ou selecione um trecho para iniciar.", false);
         else if (items.Count == 0)
@@ -1084,19 +1091,40 @@ public partial class MainWindow : Window
             : "Adicionar vídeo ao trecho selecionado";
         EmptyVideoButton.IsEnabled = AddVideoButton.IsEnabled;
         CaptureFrameButton.IsEnabled = !IsReadOnly && _currentVideo is not null && File.Exists(_currentVideo.FilePath);
+        CaptureFrameOverlayButton.IsEnabled = CaptureFrameButton.IsEnabled;
         RelocateVideoButton.IsEnabled = !IsReadOnly && _currentVideo is not null && !File.Exists(_currentVideo.FilePath);
+        RelocateVideoButton.Visibility = _currentVideo is not null && !File.Exists(_currentVideo.FilePath)
+            ? Visibility.Visible : Visibility.Collapsed;
         RemoveVideoButton.IsEnabled = !IsReadOnly && _currentVideo is not null;
         NewOccurrenceButton.IsEnabled = !IsReadOnly && _currentSection is not null;
     }
 
-    private async void AddLocation_Click(object sender, RoutedEventArgs e)
+    private void AddLocation_Click(object sender, RoutedEventArgs e)
     {
         if (_currentProject is null || IsReadOnly) return;
-        var name = NewLocationWindow.Show(this);
-        if (string.IsNullOrWhiteSpace(name)) return;
+        NewLocationNameBox.Clear();
+        NewLocationValidationText.Visibility = Visibility.Collapsed;
+        NewSectionPanel.Visibility = Visibility.Collapsed;
+        NewLocationPanel.Visibility = Visibility.Visible;
+        VideoView.Visibility = Visibility.Hidden;
+        InspectionFormOverlay.Visibility = Visibility.Visible;
+        NewLocationNameBox.Focus();
+    }
+
+    private async void CreateLocation_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null || IsReadOnly) return;
+        var name = NewLocationNameBox.Text.Trim();
+        if (name.Length == 0)
+        {
+            NewLocationValidationText.Visibility = Visibility.Visible;
+            NewLocationNameBox.Focus();
+            return;
+        }
         var location = new Location { ProjectId = _currentProject.Id, Name = name, Order = _currentProject.Locations.Count };
         _currentProject.Locations.Add(location);
         _currentLocation = location;
+        CloseInspectionForm();
         RefreshInspectionTree();
         await SaveInspectionChangesAsync();
     }
@@ -1108,6 +1136,7 @@ public partial class MainWindow : Window
         NewSectionDiameterBox.Clear(); NewSectionReferenceBox.Clear(); NewSectionDescriptionBox.Clear();
         NewSectionValidationText.Text = "Campos opcionais podem permanecer vazios.";
         NewSectionValidationText.Foreground = (System.Windows.Media.Brush)FindResource("TextMutedBrush");
+        NewLocationPanel.Visibility = Visibility.Collapsed;
         NewSectionPanel.Visibility = Visibility.Visible;
         VideoView.Visibility = Visibility.Hidden;
         InspectionFormOverlay.Visibility = Visibility.Visible;
@@ -1156,6 +1185,7 @@ public partial class MainWindow : Window
     private void CloseInspectionForm()
     {
         InspectionFormOverlay.Visibility = Visibility.Collapsed;
+        NewLocationPanel.Visibility = Visibility.Collapsed;
         NewSectionPanel.Visibility = Visibility.Collapsed;
         VideoView.Visibility = Visibility.Visible;
     }
@@ -1367,20 +1397,44 @@ public partial class MainWindow : Window
         try
         {
             var catalog = await _store.ListAnomalyDefinitionsAsync();
-            var window = new OccurrenceWindow(_currentProject, _currentSection, catalog, _occurrenceService,
-                occurrence, initialCapture, IsReadOnly, duplicate) { Owner = this };
-            var result = window.ShowDialog();
-            if (window.RequestedVideoReferenceId is Guid videoId && window.RequestedVideoTimestamp is not null)
+            var editor = new OccurrenceWindow(_currentProject, _currentSection, catalog, _occurrenceService,
+                occurrence, initialCapture, IsReadOnly, duplicate) { IsEmbedded = true };
+            _embeddedOccurrenceEditor = editor;
+            editor.EmbeddedCompleted += EmbeddedOccurrenceEditor_Completed;
+            var content = (UIElement)editor.Content;
+            editor.Content = null;
+            OccurrenceEditorHost.Content = content;
+            VideoView.Visibility = Visibility.Hidden;
+            OccurrenceEditorOverlay.Visibility = Visibility.Visible;
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Falha ao salvar anomalia técnica.", ex);
+            ShowError("Não foi possível salvar a anomalia.", ex);
+        }
+    }
+
+    private async void EmbeddedOccurrenceEditor_Completed(object? sender, EventArgs e)
+    {
+        if (sender is not OccurrenceWindow editor) return;
+        editor.EmbeddedCompleted -= EmbeddedOccurrenceEditor_Completed;
+        OccurrenceEditorOverlay.Visibility = Visibility.Collapsed;
+        OccurrenceEditorHost.Content = null;
+        _embeddedOccurrenceEditor = null;
+        VideoView.Visibility = Visibility.Visible;
+        try
+        {
+            if (editor.RequestedVideoReferenceId is Guid videoId && editor.RequestedVideoTimestamp is not null)
             {
-                await NavigateToVideoAsync(videoId, window.RequestedVideoTimestamp.Value);
+                await NavigateToVideoAsync(videoId, editor.RequestedVideoTimestamp.Value);
                 return;
             }
-            if (result != true || window.SavedDraft is null) return;
-            await _occurrenceService.SaveAsync(_currentProject, _currentSection, window.SavedDraft, IsReadOnly);
+            if (editor.EmbeddedResult != true || editor.SavedDraft is null || _currentProject is null || _currentSection is null) return;
+            await _occurrenceService.SaveAsync(_currentProject, _currentSection, editor.SavedDraft, IsReadOnly);
             RefreshCaptures();
             RefreshOccurrences();
             await SaveInspectionChangesAsync();
-            if (window.ResumeVideoAfterSave && _currentMedia is not null) _mediaPlayer.Play();
+            if (editor.ResumeVideoAfterSave && _currentMedia is not null) _mediaPlayer.Play();
         }
         catch (Exception ex)
         {
@@ -1543,6 +1597,7 @@ public partial class MainWindow : Window
 
     private void ShowVideoState(string message, bool showAddVideo)
     {
+        VideoLoadedBadge.Visibility = Visibility.Collapsed;
         VideoMessage.Text = message;
         EmptyVideoButton.Visibility = showAddVideo ? Visibility.Visible : Visibility.Collapsed;
         VideoEmptyState.Visibility = Visibility.Visible;
@@ -1561,6 +1616,14 @@ public partial class MainWindow : Window
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (OccurrenceEditorOverlay.Visibility == Visibility.Visible)
+        {
+            if (e.Key == Key.Escape) _embeddedOccurrenceEditor?.CancelEmbedded();
+            else return;
+            e.Handled = true;
+            return;
+        }
+
         if (ProjectDialogOverlay.Visibility == Visibility.Visible)
         {
             if (e.Key == Key.Escape) CloseProjectDialog();
@@ -1585,6 +1648,8 @@ public partial class MainWindow : Window
         if (InspectionFormOverlay.Visibility == Visibility.Visible)
         {
             if (e.Key == Key.Escape) CloseInspectionForm();
+            else if (e.Key == Key.Enter && NewLocationPanel.Visibility == Visibility.Visible)
+                CreateLocation_Click(sender, e);
             else if (e.Key == Key.Enter && NewSectionPanel.Visibility == Visibility.Visible)
                 CreateSection_Click(sender, e);
             else return;

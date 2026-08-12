@@ -30,6 +30,13 @@ public partial class OccurrenceWindow : Window
     public bool IsEmbedded { get; set; }
     public bool? EmbeddedResult { get; private set; }
     public event EventHandler? EmbeddedCompleted;
+    public Capture? AutomaticCapture { get; set; }
+    private Func<Capture, TimeSpan, Task<Capture?>>? _recaptureAsync;
+    public Func<Capture, TimeSpan, Task<Capture?>>? RecaptureAsync
+    {
+        get => _recaptureAsync;
+        set { _recaptureAsync = value; if (IsInitialized) RefreshEvidencePresentation(); }
+    }
 
     public OccurrenceWindow(Project project, InspectionSection section,
         IReadOnlyList<AnomalyDefinition> catalog, OccurrenceService service,
@@ -42,8 +49,8 @@ public partial class OccurrenceWindow : Window
         _section = section;
         _readOnly = readOnly;
         _draft = service.CreateDraft(section, source, duplicate);
-        WindowTitle.Text = readOnly ? "Consultar anomalia" : duplicate ? "Duplicar anomalia" :
-            source is null ? "Nova anomalia" : "Editar anomalia";
+        WindowTitle.Text = readOnly ? "←  Consultar anomalia" : duplicate ? "←  Duplicar anomalia" :
+            source is null ? "←  Cadastrar anomalia" : "←  Editar anomalia";
         var location = project.Locations.FirstOrDefault(x => x.Sections.Any(y => y.Id == section.Id));
         var route = string.Join(" → ", new[] { section.StartPoint, section.EndPoint }.Where(x => !string.IsNullOrWhiteSpace(x)));
         var routeAlreadyNamed = !string.IsNullOrWhiteSpace(section.StartPoint) && !string.IsNullOrWhiteSpace(section.EndPoint) &&
@@ -93,7 +100,7 @@ public partial class OccurrenceWindow : Window
         LoadFields();
         FormPanel.IsEnabled = !readOnly;
         SaveButton.Visibility = readOnly ? Visibility.Collapsed : Visibility.Visible;
-        SaveAndNextButton.Visibility = readOnly ? Visibility.Collapsed : Visibility.Visible;
+        SaveAndNextButton.Visibility = Visibility.Collapsed;
         LeavePendingButton.Visibility = !readOnly && initialCapture is not null ? Visibility.Visible : Visibility.Collapsed;
         CancelButton.Content = readOnly ? "Fechar" : "Cancelar";
         FooterHintText.Text = initialCapture is null ? "Detalhes opcionais." : "Captura anexada.";
@@ -276,6 +283,10 @@ public partial class OccurrenceWindow : Window
     private void RefreshLivePreview()
     {
         if (ReportPreviewText is null || _anomalyItems is null) return;
+        if (PrimaryMeterageText is not null)
+            PrimaryMeterageText.Text = PointRadio?.IsChecked == true
+                ? ParseOptionalSilently(PointMeasurementBox?.Text) is decimal point ? $"{point:N2} m" : "Metragem não informada"
+                : RangeRadio?.IsChecked == true ? "Intervalo" : "Todo o trecho";
         try
         {
             ApplyFormToDraft();
@@ -385,16 +396,67 @@ public partial class OccurrenceWindow : Window
 
     private void RefreshEvidencePresentation()
     {
+        if (EvidenceItems.Count > 0 && EvidenceItems.All(x => !x.Evidence.IsPrimary))
+            EvidenceItems[0].Evidence.IsPrimary = true;
         for (var index = 0; index < EvidenceItems.Count; index++) EvidenceItems[index].RefreshOrder(index);
         EvidenceList?.Items.Refresh();
+        if (PrimaryImage is not null)
+        {
+            var primary = EvidenceItems.FirstOrDefault(x => x.Evidence.IsPrimary) ?? EvidenceItems.FirstOrDefault();
+            PrimaryImage.Source = primary?.Thumbnail;
+            PrimaryImageEmptyState.Visibility = primary?.Thumbnail is null ? Visibility.Visible : Visibility.Collapsed;
+            PrimaryTimestampText.Text = primary?.Evidence.VideoTimestamp is TimeSpan timestamp
+                ? timestamp.ToString(@"hh\:mm\:ss\.fff") : "Sem timestamp";
+            PrimaryVideoText.Text = primary?.VideoName ?? "Origem não informada";
+            AdditionalEvidenceList.ItemsSource = EvidenceItems.Where(x => x != primary).ToList();
+            RecaptureButton.IsEnabled = !_readOnly && primary?.Evidence.CaptureId is not null && RecaptureAsync is not null;
+        }
         UpdateDraftStatus();
+    }
+
+    private async void RecaptureFrame_Click(object sender, RoutedEventArgs e) => await RecaptureAtOffsetAsync(TimeSpan.Zero);
+    private async void PreviousFrame_Click(object sender, RoutedEventArgs e) => await RecaptureAtOffsetAsync(TimeSpan.FromSeconds(-1));
+    private async void NextFrame_Click(object sender, RoutedEventArgs e) => await RecaptureAtOffsetAsync(TimeSpan.FromSeconds(1));
+
+    private async Task RecaptureAtOffsetAsync(TimeSpan offset)
+    {
+        var primary = EvidenceItems.FirstOrDefault(x => x.Evidence.IsPrimary) ?? EvidenceItems.FirstOrDefault();
+        if (primary?.Evidence.CaptureId is not Guid captureId || RecaptureAsync is null) return;
+        var current = _project.Captures.FirstOrDefault(x => x.Id == captureId);
+        if (current is null) return;
+        var timestamp = (primary.Evidence.VideoTimestamp ?? TimeSpan.Zero) + offset;
+        if (timestamp < TimeSpan.Zero) timestamp = TimeSpan.Zero;
+        RecaptureButton.IsEnabled = false;
+        FrameHelpText.Text = "Extraindo o frame diretamente do vídeo...";
+        try
+        {
+            var replacement = await RecaptureAsync(current, timestamp);
+            if (replacement is null) return;
+            var index = EvidenceItems.IndexOf(primary);
+            EvidenceItems.Remove(primary);
+            var replacementItem = new EvidenceSelectionItem(OccurrenceService.FromCapture(replacement), ResolveVideoName);
+            replacementItem.Evidence.IsPrimary = true;
+            EvidenceItems.Insert(Math.Max(0, index), replacementItem);
+            if (AutomaticCapture?.Id == current.Id) AutomaticCapture = replacement;
+            _draft.VideoReferenceId = replacement.VideoReferenceId;
+            _draft.VideoTimestamp = replacement.VideoTimestamp;
+            FrameHelpText.Text = "Frame atualizado no novo timestamp.";
+            RefreshEvidencePresentation();
+        }
+        catch (Exception ex)
+        {
+            FrameHelpText.Text = "Não foi possível refazer a captura.";
+            MessageBox.Show(ex.Message, "Refazer captura", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally { RecaptureButton.IsEnabled = !_readOnly && RecaptureAsync is not null; }
     }
 
     private void UpdateDraftStatus()
     {
         if (DraftStatusText is null) return;
         var pending = new List<string>();
-        if (_anomalyItems is null || _anomalyItems.All(x => !x.IsSelected)) pending.Add("sem anomalia");
+        if ((_anomalyItems is null || _anomalyItems.All(x => !x.IsSelected)) &&
+            string.IsNullOrWhiteSpace(CustomAnomalyBox?.Text)) pending.Add("sem anomalia");
         if (PointRadio?.IsChecked == true && ParseOptionalSilently(PointMeasurementBox?.Text) is null)
             pending.Add("sem metragem");
         if (RangeRadio?.IsChecked == true &&
@@ -414,6 +476,8 @@ public partial class OccurrenceWindow : Window
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => CompleteEditor(null);
+
+    private void HeaderBack_Click(object sender, MouseButtonEventArgs e) => CompleteEditor(null);
 
     private void LeavePending_Click(object sender, RoutedEventArgs e) => CompleteEditor(false);
 
@@ -499,7 +563,13 @@ public sealed class AnomalySelectionItem : INotifyPropertyChanged
 
 public sealed record PositionChoice(AnomalyPosition Value, string Label)
 {
+    private static readonly HashSet<AnomalyPosition> OperationalPositions =
+    [
+        AnomalyPosition.NotApplicable, AnomalyPosition.UpperGenerator, AnomalyPosition.LowerGenerator,
+        AnomalyPosition.LeftSide, AnomalyPosition.RightSide, AnomalyPosition.Circumferential
+    ];
     public static IReadOnlyList<PositionChoice> All { get; } = OccurrenceRules.SelectablePositions
+        .Where(OperationalPositions.Contains)
         .Select(x => new PositionChoice(x, OccurrenceRules.FormatPosition(x))).ToList();
 }
 

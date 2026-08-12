@@ -385,10 +385,8 @@
         </Grid>
 
         <Grid x:Name="OccurrenceEditorOverlay" Visibility="Collapsed" Background="#E608111B" Panel.ZIndex="30">
-            <Border Margin="28" MaxWidth="980" MaxHeight="820" HorizontalAlignment="Center" VerticalAlignment="Center" Background="{StaticResource WindowBackgroundBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" ClipToBounds="True">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <ContentControl x:Name="OccurrenceEditorHost"/>
-                </ScrollViewer>
+            <Border Margin="18" MaxWidth="1540" MaxHeight="940" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{StaticResource WindowBackgroundBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" ClipToBounds="True">
+                <ContentControl x:Name="OccurrenceEditorHost"/>
             </Border>
         </Grid>
 

@@ -1370,8 +1370,30 @@ public partial class MainWindow : Window
         if (createOccurrence) await OpenOccurrenceEditorAsync(null, capture);
     }
 
-    private async void NewOccurrence_Click(object sender, RoutedEventArgs e) =>
-        await OpenOccurrenceEditorAsync(null, null);
+    private async void NewOccurrence_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null || _currentSection is null || IsReadOnly) return;
+        Capture? automaticCapture = null;
+        try
+        {
+            if (_currentVideo is not null && _currentMedia is not null && File.Exists(_currentVideo.FilePath))
+            {
+                _mediaPlayer.SetPause(true);
+                await Task.Delay(80);
+                var timestamp = TimeSpan.FromMilliseconds(Math.Max(0, _mediaPlayer.Time));
+                var draft = await _frameCaptureService.CaptureCurrentFrameAsync(
+                    _currentProject, _currentSection, _currentVideo, timestamp, IsReadOnly);
+                automaticCapture = _frameCaptureService.Accept(_currentProject, draft, IsReadOnly);
+            }
+            await OpenOccurrenceEditorAsync(null, automaticCapture, automaticCapture);
+        }
+        catch (Exception ex)
+        {
+            if (automaticCapture is not null && automaticCapture.Status == CaptureStatus.Pending)
+                _frameCaptureService.DeletePending(_currentProject, automaticCapture, IsReadOnly);
+            ShowError("Não foi possível iniciar o cadastro no frame atual do vídeo.", ex);
+        }
+    }
 
     private async void CreateOccurrenceFromPending_Click(object sender, RoutedEventArgs e)
     {
@@ -1391,7 +1413,11 @@ public partial class MainWindow : Window
         await OpenOccurrenceEditorAsync(_currentSection.Occurrences.SingleOrDefault(x => x.Id == id), null, true);
     }
 
-    private async Task OpenOccurrenceEditorAsync(Occurrence? occurrence, Capture? initialCapture, bool duplicate = false)
+    private async Task OpenOccurrenceEditorAsync(Occurrence? occurrence, Capture? initialCapture, bool duplicate = false) =>
+        await OpenOccurrenceEditorAsync(occurrence, initialCapture, null, duplicate);
+
+    private async Task OpenOccurrenceEditorAsync(Occurrence? occurrence, Capture? initialCapture,
+        Capture? automaticCapture, bool duplicate = false)
     {
         if (_currentProject is null || _currentSection is null || (occurrence is null && IsReadOnly)) return;
         try
@@ -1399,6 +1425,8 @@ public partial class MainWindow : Window
             var catalog = await _store.ListAnomalyDefinitionsAsync();
             var editor = new OccurrenceWindow(_currentProject, _currentSection, catalog, _occurrenceService,
                 occurrence, initialCapture, IsReadOnly, duplicate) { IsEmbedded = true };
+            editor.AutomaticCapture = automaticCapture;
+            editor.RecaptureAsync = RecaptureOccurrenceFrameAsync;
             _embeddedOccurrenceEditor = editor;
             editor.EmbeddedCompleted += EmbeddedOccurrenceEditor_Completed;
             var content = (UIElement)editor.Content;
@@ -1409,6 +1437,9 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            if (automaticCapture is { Status: CaptureStatus.Pending } && _currentProject is not null &&
+                _currentProject.Captures.Contains(automaticCapture))
+                _frameCaptureService.DeletePending(_currentProject, automaticCapture, IsReadOnly);
             _logger.Error("Falha ao salvar anomalia técnica.", ex);
             ShowError("Não foi possível salvar a anomalia.", ex);
         }
@@ -1429,7 +1460,15 @@ public partial class MainWindow : Window
                 await NavigateToVideoAsync(videoId, editor.RequestedVideoTimestamp.Value);
                 return;
             }
-            if (editor.EmbeddedResult != true || editor.SavedDraft is null || _currentProject is null || _currentSection is null) return;
+            if (editor.EmbeddedResult != true || editor.SavedDraft is null || _currentProject is null || _currentSection is null)
+            {
+                if (editor.EmbeddedResult is null && editor.AutomaticCapture is { Status: CaptureStatus.Pending } automatic &&
+                    _currentProject is not null && _currentProject.Captures.Contains(automatic))
+                    _frameCaptureService.DeletePending(_currentProject, automatic, IsReadOnly);
+                RefreshCaptures();
+                if (editor.EmbeddedResult == false) await SaveInspectionChangesAsync();
+                return;
+            }
             await _occurrenceService.SaveAsync(_currentProject, _currentSection, editor.SavedDraft, IsReadOnly);
             RefreshCaptures();
             RefreshOccurrences();
@@ -1441,6 +1480,22 @@ public partial class MainWindow : Window
             _logger.Error("Falha ao salvar anomalia técnica.", ex);
             ShowError("Não foi possível salvar a anomalia.", ex);
         }
+    }
+
+    private async Task<Capture?> RecaptureOccurrenceFrameAsync(Capture currentCapture, TimeSpan timestamp)
+    {
+        if (_currentProject is null || _currentSection is null || _currentVideo is null || IsReadOnly) return null;
+        var duration = TimeSpan.FromMilliseconds(Math.Max(0, _mediaPlayer.Length));
+        if (duration > TimeSpan.Zero && timestamp > duration) timestamp = duration;
+        if (timestamp < TimeSpan.Zero) timestamp = TimeSpan.Zero;
+        _mediaPlayer.SetPause(true);
+        _mediaPlayer.Time = (long)timestamp.TotalMilliseconds;
+        var draft = await _frameCaptureService.CaptureCurrentFrameAsync(
+            _currentProject, _currentSection, _currentVideo, timestamp, IsReadOnly);
+        var replacement = _frameCaptureService.Accept(_currentProject, draft, IsReadOnly);
+        if (currentCapture.Status == CaptureStatus.Pending && _currentProject.Captures.Contains(currentCapture))
+            _frameCaptureService.DeletePending(_currentProject, currentCapture, IsReadOnly);
+        return replacement;
     }
 
     private async void DeleteOccurrence_Click(object sender, RoutedEventArgs e)

@@ -1106,7 +1106,7 @@ public partial class MainWindow : Window
         NewLocationValidationText.Visibility = Visibility.Collapsed;
         NewSectionPanel.Visibility = Visibility.Collapsed;
         NewLocationPanel.Visibility = Visibility.Visible;
-        VideoView.Visibility = Visibility.Hidden;
+        HideVideoSurfaceForOverlay();
         InspectionFormOverlay.Visibility = Visibility.Visible;
         NewLocationNameBox.Focus();
     }
@@ -1138,7 +1138,7 @@ public partial class MainWindow : Window
         NewSectionValidationText.Foreground = (System.Windows.Media.Brush)FindResource("TextMutedBrush");
         NewLocationPanel.Visibility = Visibility.Collapsed;
         NewSectionPanel.Visibility = Visibility.Visible;
-        VideoView.Visibility = Visibility.Hidden;
+        HideVideoSurfaceForOverlay();
         InspectionFormOverlay.Visibility = Visibility.Visible;
         NewSectionNameBox.Focus();
     }
@@ -1187,7 +1187,7 @@ public partial class MainWindow : Window
         InspectionFormOverlay.Visibility = Visibility.Collapsed;
         NewLocationPanel.Visibility = Visibility.Collapsed;
         NewSectionPanel.Visibility = Visibility.Collapsed;
-        VideoView.Visibility = Visibility.Visible;
+        RestoreVideoSurfaceAfterOverlay();
     }
 
     private void LocationsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1430,7 +1430,7 @@ public partial class MainWindow : Window
             var content = (UIElement)editor.Content;
             editor.Content = null;
             OccurrenceEditorHost.Content = content;
-            VideoView.Visibility = Visibility.Hidden;
+            HideVideoSurfaceForOverlay();
             OccurrenceEditorOverlay.Visibility = Visibility.Visible;
         }
         catch (Exception ex)
@@ -1438,6 +1438,7 @@ public partial class MainWindow : Window
             if (automaticCapture is { Status: CaptureStatus.Pending } && _currentProject is not null &&
                 _currentProject.Captures.Contains(automaticCapture))
                 _frameCaptureService.DeletePending(_currentProject, automaticCapture, IsReadOnly);
+            RestoreVideoSurfaceAfterOverlay();
             _logger.Error("Falha ao salvar anomalia técnica.", ex);
             ShowError("Não foi possível salvar a anomalia.", ex);
         }
@@ -1450,7 +1451,7 @@ public partial class MainWindow : Window
         OccurrenceEditorOverlay.Visibility = Visibility.Collapsed;
         OccurrenceEditorHost.Content = null;
         _embeddedOccurrenceEditor = null;
-        VideoView.Visibility = Visibility.Visible;
+        RestoreVideoSurfaceAfterOverlay();
         try
         {
             if (editor.RequestedVideoReferenceId is Guid videoId && editor.RequestedVideoTimestamp is not null)
@@ -1513,6 +1514,20 @@ public partial class MainWindow : Window
             previous = current;
         }
         await Task.Delay(45);
+    }
+
+    private void HideVideoSurfaceForOverlay()
+    {
+        if (_currentMedia is not null) _mediaPlayer.SetPause(true);
+        VideoView.Visibility = Visibility.Collapsed;
+        VideoView.MediaPlayer = null;
+    }
+
+    private void RestoreVideoSurfaceAfterOverlay()
+    {
+        if (_playerDisposed) return;
+        VideoView.MediaPlayer = _mediaPlayer;
+        VideoView.Visibility = Visibility.Visible;
     }
 
     private async Task WaitForDisplayedFrameAsync(TimeSpan target)

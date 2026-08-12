@@ -360,7 +360,7 @@
             <TextBlock Grid.Row="2" x:Name="SaveStatus" Text="✓ Salvo" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="2,6,0,0"/>
         </Grid>
 
-        <Grid x:Name="InspectionFormOverlay" Visibility="Collapsed" Background="#B5000000" Panel.ZIndex="20">
+        <Grid x:Name="InspectionFormOverlay" Visibility="Collapsed" Background="#FF08111B" Panel.ZIndex="20">
             <Border Width="620" MaxWidth="620" MaxHeight="680" Margin="24" Padding="26,22" CornerRadius="10" Background="{StaticResource WindowBackgroundBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center">
                 <Grid>
                     <Grid x:Name="NewLocationPanel" Visibility="Collapsed">
@@ -384,7 +384,7 @@
             </Border>
         </Grid>
 
-        <Grid x:Name="OccurrenceEditorOverlay" Visibility="Collapsed" Background="#E608111B" Panel.ZIndex="30">
+        <Grid x:Name="OccurrenceEditorOverlay" Visibility="Collapsed" Background="#FF08111B" Panel.ZIndex="30">
             <Border Margin="18" MaxWidth="1540" MaxHeight="940" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{StaticResource WindowBackgroundBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" ClipToBounds="True">
                 <ContentControl x:Name="OccurrenceEditorHost"/>
             </Border>

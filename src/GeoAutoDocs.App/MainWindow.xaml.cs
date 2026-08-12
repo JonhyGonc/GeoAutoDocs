@@ -1378,11 +1378,9 @@ public partial class MainWindow : Window
         {
             if (_currentVideo is not null && _currentMedia is not null && File.Exists(_currentVideo.FilePath))
             {
-                _mediaPlayer.SetPause(true);
-                await Task.Delay(80);
-                var timestamp = TimeSpan.FromMilliseconds(Math.Max(0, _mediaPlayer.Time));
+                await PauseOnDisplayedFrameAsync();
                 var draft = await _frameCaptureService.CaptureCurrentFrameAsync(
-                    _currentProject, _currentSection, _currentVideo, timestamp, IsReadOnly);
+                    _currentProject, _currentSection, _currentVideo, _mediaPlayer, IsReadOnly);
                 automaticCapture = _frameCaptureService.Accept(_currentProject, draft, IsReadOnly);
             }
             await OpenOccurrenceEditorAsync(null, automaticCapture, automaticCapture);
@@ -1488,14 +1486,48 @@ public partial class MainWindow : Window
         var duration = TimeSpan.FromMilliseconds(Math.Max(0, _mediaPlayer.Length));
         if (duration > TimeSpan.Zero && timestamp > duration) timestamp = duration;
         if (timestamp < TimeSpan.Zero) timestamp = TimeSpan.Zero;
-        _mediaPlayer.SetPause(true);
         _mediaPlayer.Time = (long)timestamp.TotalMilliseconds;
+        await WaitForDisplayedFrameAsync(timestamp);
         var draft = await _frameCaptureService.CaptureCurrentFrameAsync(
-            _currentProject, _currentSection, _currentVideo, timestamp, IsReadOnly);
+            _currentProject, _currentSection, _currentVideo, _mediaPlayer, IsReadOnly);
+        if (Math.Abs((draft.VideoTimestamp - timestamp).TotalMilliseconds) > 100)
+        {
+            _frameCaptureService.Discard(draft);
+            throw new InvalidOperationException("O player não estabilizou no timestamp solicitado para refazer o frame.");
+        }
         var replacement = _frameCaptureService.Accept(_currentProject, draft, IsReadOnly);
         if (currentCapture.Status == CaptureStatus.Pending && _currentProject.Captures.Contains(currentCapture))
             _frameCaptureService.DeletePending(_currentProject, currentCapture, IsReadOnly);
         return replacement;
+    }
+
+    private async Task PauseOnDisplayedFrameAsync()
+    {
+        _mediaPlayer.SetPause(true);
+        var previous = _mediaPlayer.Time;
+        for (var attempt = 0; attempt < 8; attempt++)
+        {
+            await Task.Delay(35);
+            var current = _mediaPlayer.Time;
+            if (Math.Abs(current - previous) <= 2) break;
+            previous = current;
+        }
+        await Task.Delay(45);
+    }
+
+    private async Task WaitForDisplayedFrameAsync(TimeSpan target)
+    {
+        _mediaPlayer.SetPause(true);
+        var targetMilliseconds = Math.Max(0, (long)target.TotalMilliseconds);
+        var reachedTarget = false;
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            if (Math.Abs(_mediaPlayer.Time - targetMilliseconds) <= 80) { reachedTarget = true; break; }
+            await Task.Delay(25);
+        }
+        if (!reachedTarget)
+            throw new InvalidOperationException("O player não alcançou o timestamp solicitado.");
+        await Task.Delay(120);
     }
 
     private async void DeleteOccurrence_Click(object sender, RoutedEventArgs e)

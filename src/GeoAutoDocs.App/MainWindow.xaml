@@ -200,27 +200,72 @@
 
             <TabControl x:Name="ReportEditorTabs" Grid.Row="1" Margin="0">
                 <TabItem x:Name="OverviewTab" Header="Visão geral">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,14,8,0">
-                        <StackPanel MaxWidth="940" HorizontalAlignment="Center">
-                            <TextBlock Text="Visão geral" Style="{StaticResource PageTitleTextStyle}" FontSize="22"/>
-                            <TextBlock Text="Acompanhe o projeto e continue de onde parou." Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,20"/>
-                            <Border Style="{StaticResource CardStyle}" Padding="20">
-                                <StackPanel>
-                                    <TextBlock x:Name="OverviewProjectName" Style="{StaticResource SectionTitleTextStyle}" FontSize="19"/>
-                                    <TextBlock x:Name="OverviewClientName" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,18"/>
-                                    <UniformGrid Columns="4">
-                                        <StackPanel Margin="0,0,18,0"><TextBlock x:Name="OverviewReportsCount" FontSize="22" FontWeight="Bold"/><TextBlock Text="Relatórios" Foreground="{StaticResource TextMutedBrush}"/></StackPanel>
-                                        <StackPanel Margin="0,0,18,0"><TextBlock x:Name="OverviewSectionsCount" FontSize="22" FontWeight="Bold"/><TextBlock Text="Trechos" Foreground="{StaticResource TextMutedBrush}"/></StackPanel>
-                                        <StackPanel Margin="0,0,18,0"><TextBlock x:Name="OverviewOccurrencesCount" FontSize="22" FontWeight="Bold"/><TextBlock Text="Anomalias" Foreground="{StaticResource TextMutedBrush}"/></StackPanel>
-                                        <StackPanel><TextBlock x:Name="OverviewUpdatedAt" FontWeight="SemiBold" Margin="0,7,0,3"/><TextBlock Text="Última alteração" Foreground="{StaticResource TextMutedBrush}"/></StackPanel>
-                                    </UniformGrid>
-                                </StackPanel>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,14,8,0">
+                        <Grid x:Name="OverviewWorkspace">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+
+                            <Border Style="{StaticResource CardStyle}" Padding="22,18" Margin="0,0,0,14">
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="300"/></Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock x:Name="OverviewProjectName" Style="{StaticResource SectionTitleTextStyle}" FontSize="19" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock x:Name="OverviewClientName" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,3,0,18" TextTrimming="CharacterEllipsis"/>
+                                        <UniformGrid Columns="4">
+                                            <StackPanel Margin="0,0,12,0"><TextBlock x:Name="OverviewReportsCount" FontSize="22" FontWeight="Bold"/><TextBlock Text="Relatórios" Foreground="{StaticResource TextMutedBrush}"/></StackPanel>
+                                            <StackPanel Margin="0,0,12,0"><TextBlock x:Name="OverviewSectionsCount" FontSize="22" FontWeight="Bold"/><TextBlock Text="Trechos" Foreground="{StaticResource TextMutedBrush}"/></StackPanel>
+                                            <StackPanel Margin="0,0,12,0"><TextBlock x:Name="OverviewOccurrencesCount" FontSize="22" FontWeight="Bold"/><TextBlock Text="Anomalias" Foreground="{StaticResource TextMutedBrush}"/></StackPanel>
+                                            <StackPanel><TextBlock Text="&#xE787;" FontFamily="Segoe MDL2 Assets" Foreground="{StaticResource PrimaryBrush}" FontSize="19"/><TextBlock x:Name="OverviewUpdatedAt" FontWeight="SemiBold" Margin="0,5,0,2"/><TextBlock Text="Última alteração" Foreground="{StaticResource TextMutedBrush}"/></StackPanel>
+                                        </UniformGrid>
+                                    </StackPanel>
+                                    <Border Grid.Column="2" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1,0,0,0" Padding="20,0,0,0">
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Ações rápidas" Style="{StaticResource SectionTitleTextStyle}" Margin="0,0,0,10"/>
+                                            <Button Style="{StaticResource PrimaryButtonStyle}" Click="ContinueInspection_Click" HorizontalContentAlignment="Center" Margin="0,0,0,8"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE768;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/><TextBlock Text="Continuar inspeção"/></StackPanel></Button>
+                                            <Button Click="OverviewNewReport_Click" HorizontalContentAlignment="Center" Margin="0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/><TextBlock Text="Novo relatório"/></StackPanel></Button>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
                             </Border>
-                            <StackPanel Orientation="Horizontal" Margin="0,18,0,0">
-                                <Button Content="Continuar inspeção" Style="{StaticResource PrimaryButtonStyle}" Click="ContinueInspection_Click"/>
-                                <Button Content="Novo relatório" Click="OverviewNewReport_Click"/>
-                            </StackPanel>
-                        </StackPanel>
+
+                            <Grid Grid.Row="1">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="1.08*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <Border Style="{StaticResource CardStyle}" Padding="18">
+                                    <StackPanel>
+                                        <TextBlock Text="Resumo do projeto" Style="{StaticResource SectionTitleTextStyle}" Margin="0,0,0,13"/>
+                                        <TextBlock Text="Cliente" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultClientBox" TextChanged="FieldChanged"/>
+                                        <TextBlock Text="CNPJ" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultCnpjBox" TextChanged="FieldChanged"/>
+                                        <TextBlock Text="Área / localização" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultAreaBox" TextChanged="FieldChanged"/>
+                                        <TextBlock Text="Contrato" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultContractBox" TextChanged="FieldChanged"/>
+                                        <TextBlock Text="Pedido de compra" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultPurchaseOrderBox" TextChanged="FieldChanged"/>
+                                        <TextBlock Text="As alterações são salvas automaticamente e herdadas por novos relatórios." Foreground="{StaticResource TextMutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Grid.Column="2" Style="{StaticResource CardStyle}" Padding="18" MinHeight="390">
+                                    <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                        <TextBlock Text="Atividade recente" Style="{StaticResource SectionTitleTextStyle}"/>
+                                        <Grid Grid.Row="1" Margin="0,12,0,0">
+                                            <StackPanel x:Name="OverviewActivityEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center"><TextBlock Text="&#xE9D5;" FontFamily="Segoe MDL2 Assets" FontSize="44" Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Center"/><TextBlock Text="Nenhuma atividade recente" FontWeight="SemiBold" FontSize="15" HorizontalAlignment="Center" Margin="0,14,0,0"/><TextBlock Text="As atualizações do projeto aparecerão aqui." Foreground="{StaticResource TextSecondaryBrush}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel>
+                                            <ItemsControl x:Name="OverviewActivityList"><ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="7" Padding="12" Margin="0,0,0,8"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="{Binding Icon}" FontFamily="Segoe MDL2 Assets" Foreground="{StaticResource PrimaryBrush}" FontSize="17" VerticalAlignment="Center"/><StackPanel Grid.Column="1"><TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Detail}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding When}" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,3,0,0"/></StackPanel></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+                                        </Grid>
+                                    </Grid>
+                                </Border>
+
+                                <Border Grid.Column="4" Style="{StaticResource CardStyle}" Padding="18" MinHeight="390">
+                                    <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                        <TextBlock Text="Últimos relatórios" Style="{StaticResource SectionTitleTextStyle}"/>
+                                        <Grid Grid.Row="1" Margin="0,12,0,0">
+                                            <StackPanel x:Name="OverviewLatestReportsEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center"><TextBlock Text="&#xE8A5;" FontFamily="Segoe MDL2 Assets" FontSize="44" Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Center"/><TextBlock Text="Nenhum relatório criado" FontWeight="SemiBold" FontSize="15" HorizontalAlignment="Center" Margin="0,14,0,0"/><TextBlock Text="Clique em “Novo relatório” para começar." Foreground="{StaticResource TextSecondaryBrush}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel>
+                                            <ItemsControl x:Name="OverviewLatestReportsList"><ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="7" Padding="12" Margin="0,0,0,8"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Detail}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Status}" Foreground="{Binding StatusColor}" FontSize="10" Margin="0,3,0,0"/></StackPanel><Button Grid.Column="1" Content="Abrir" Tag="{Binding Id}" Click="OpenOverviewReport_Click" VerticalAlignment="Center" Margin="10,0,0,0"/></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+                                        </Grid>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+
+                            <Border Grid.Row="2" Style="{StaticResource CardStyle}" Padding="18" Margin="0,14,0,8">
+                                <StackPanel><TextBlock Text="Logo do cliente" Style="{StaticResource SectionTitleTextStyle}" Margin="0,0,0,10"/><Border Background="{StaticResource SurfaceMutedBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="7" Padding="12"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="88"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Image x:Name="DefaultLogoPreview" Width="78" Height="58" Stretch="Uniform"/><StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="10,0"><TextBlock x:Name="DefaultLogoStatus" Text="Nenhuma imagem selecionada" Foreground="{StaticResource TextSecondaryBrush}"/><TextBlock Text="PNG ou JPG" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,3,0,0"/></StackPanel><Button x:Name="DefaultLogoButton" Grid.Column="2" Content="Selecionar imagem" VerticalAlignment="Center" Click="SelectDefaultLogo_Click"/><TextBox x:Name="DefaultLogoBox" Visibility="Collapsed"/></Grid></Border></StackPanel>
+                            </Border>
+                        </Grid>
                     </ScrollViewer>
                 </TabItem>
                 <TabItem x:Name="InspectionsTab" Header="Inspeção">
@@ -346,16 +391,6 @@
                     </Grid>
                 </TabItem>
 
-                <TabItem x:Name="ProjectDefaultsTab" Header="Dados do projeto">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,14,8,0"><StackPanel MaxWidth="940" HorizontalAlignment="Center"><TextBlock Text="Dados do projeto" Style="{StaticResource PageTitleTextStyle}" FontSize="22"/><TextBlock Text="Estas informações são herdadas automaticamente pelos novos relatórios." Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,20"/>
-                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="22"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                            <StackPanel><TextBlock Text="Cliente" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultClientBox" TextChanged="FieldChanged"/></StackPanel><StackPanel Grid.Column="2"><TextBlock Text="CNPJ" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultCnpjBox" TextChanged="FieldChanged"/></StackPanel>
-                            <StackPanel Grid.Row="1"><TextBlock Text="Área / localização" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultAreaBox" TextChanged="FieldChanged"/></StackPanel><StackPanel Grid.Row="1" Grid.Column="2"><TextBlock Text="Contrato" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultContractBox" TextChanged="FieldChanged"/></StackPanel>
-                            <StackPanel Grid.Row="2"><TextBlock Text="Pedido de compra" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultPurchaseOrderBox" TextChanged="FieldChanged"/></StackPanel>
-                            <StackPanel Grid.Row="2" Grid.Column="2"><TextBlock Text="Logo do cliente" Style="{StaticResource FieldLabelTextStyle}"/><Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="7" Padding="10"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="90"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Image x:Name="DefaultLogoPreview" Width="80" Height="58" Stretch="Uniform"/><TextBlock x:Name="DefaultLogoStatus" Grid.Column="1" Text="Nenhuma imagem selecionada" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" Margin="10,0"/><Button Grid.Column="2" Content="Alterar imagem" VerticalAlignment="Center" Click="SelectDefaultLogo_Click"/><TextBox x:Name="DefaultLogoBox" Visibility="Collapsed"/></Grid></Border></StackPanel>
-                        </Grid>
-                    </StackPanel></ScrollViewer>
-                </TabItem>
             </TabControl>
             <TextBlock Grid.Row="2" x:Name="SaveStatus" Text="✓ Salvo" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="2,6,0,0"/>
         </Grid>

@@ -425,7 +425,6 @@ public partial class MainWindow : Window
         NewReportButton.IsEnabled = _sharedSession?.IsReadOnly != true;
         HeaderNewReportButton.IsEnabled = _sharedSession?.IsReadOnly != true;
         ReportsEmptyState.Visibility = reports.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        ProjectDefaultsTab.IsEnabled = true;
         ReportHeaderTab.IsEnabled = !IsReadOnly && _currentReport is not null;
         WordConfigTab.IsEnabled = true;
         ReadOnlyInspectionText.Visibility = IsReadOnly ? Visibility.Visible : Visibility.Collapsed;
@@ -531,6 +530,21 @@ public partial class MainWindow : Window
     {
         WordConfigTab.IsSelected = true;
         NewReport_Click(sender, e);
+    }
+
+    private void OpenOverviewReport_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null || sender is not Button { Tag: Guid reportId }) return;
+        ApplyFieldsToModel();
+        var report = _currentProject.Reports.FirstOrDefault(x => x.Id == reportId);
+        if (report is null) return;
+        _currentReport = report;
+        _loadingFields = true;
+        ReportsCombo.SelectedItem = report;
+        ReportsList.SelectedItem = report;
+        _loadingFields = false;
+        LoadReport(report);
+        WordConfigTab.IsSelected = true;
     }
 
     private void FieldChanged(object sender, RoutedEventArgs e)
@@ -746,7 +760,9 @@ public partial class MainWindow : Window
     private void RefreshFilePreviews()
     {
         DefaultLogoPreview.Source = LoadBitmap(DefaultLogoBox.Text);
-        DefaultLogoStatus.Text = File.Exists(DefaultLogoBox.Text) ? "Imagem selecionada" : "Nenhuma imagem selecionada";
+        var hasDefaultLogo = File.Exists(DefaultLogoBox.Text);
+        DefaultLogoStatus.Text = hasDefaultLogo ? "Imagem selecionada" : "Nenhuma imagem selecionada";
+        DefaultLogoButton.Content = hasDefaultLogo ? "Alterar imagem" : "Selecionar imagem";
         LocationImagePreview.Source = LoadBitmap(LocationImageBox.Text);
         LocationImageStatus.Text = File.Exists(LocationImageBox.Text) ? "Imagem selecionada" : "Nenhuma imagem selecionada";
     }
@@ -902,6 +918,39 @@ public partial class MainWindow : Window
         OverviewSectionsCount.Text = sections.Count.ToString(CultureInfo.CurrentCulture);
         OverviewOccurrencesCount.Text = sections.Sum(x => x.Occurrences.Count).ToString(CultureInfo.CurrentCulture);
         OverviewUpdatedAt.Text = _currentProject.UpdatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
+
+        var latestReports = _currentProject.Reports.OrderByDescending(x => x.Order).Take(3)
+            .Select(x => new OverviewReportItem(
+                x.Id,
+                x.DisplayCode,
+                $"{(x.ReportDate is null ? "Data não informada" : x.ReportDate.Value.ToString("dd/MM/yyyy"))}  •  {x.SectionLinks.Count} trecho(s)",
+                string.IsNullOrWhiteSpace(x.GeneratedReportPath) ? "Em andamento" : "Finalizado",
+                string.IsNullOrWhiteSpace(x.GeneratedReportPath) ? "#F2B84B" : "#39D17E"))
+            .ToList();
+        OverviewLatestReportsList.ItemsSource = latestReports;
+        OverviewLatestReportsEmptyState.Visibility = latestReports.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        var activities = new List<OverviewActivityItem>();
+        foreach (var section in sections)
+        {
+            activities.AddRange(section.Occurrences
+                .Where(x => x.CreatedAt != default || x.UpdatedAt != default)
+                .Select(x => new OverviewActivityItem(
+                    "\uE7BA",
+                    "Anomalia registrada",
+                    section.Name,
+                    (x.UpdatedAt != default ? x.UpdatedAt : x.CreatedAt).ToLocalTime())));
+            activities.AddRange(section.VideoReferences
+                .Where(x => x.CreatedAt is not null)
+                .Select(x => new OverviewActivityItem(
+                    "\uE714",
+                    "Vídeo adicionado",
+                    string.IsNullOrWhiteSpace(x.DisplayName) ? section.Name : x.DisplayName,
+                    x.CreatedAt!.Value.ToLocalTime())));
+        }
+        var latestActivity = activities.OrderByDescending(x => x.Timestamp).Take(4).ToList();
+        OverviewActivityList.ItemsSource = latestActivity;
+        OverviewActivityEmptyState.Visibility = latestActivity.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void RefreshReportReview(ReportValidationResult? validation = null)
@@ -1883,6 +1932,17 @@ public partial class MainWindow : Window
     }
 
     private sealed record ReportSectionSelectionItem(Guid SectionId, string DisplayName, bool IsSelected);
+
+    private sealed record OverviewReportItem(Guid Id, string Title, string Detail, string Status, string StatusColor);
+
+    private sealed class OverviewActivityItem(string icon, string title, string detail, DateTime timestamp)
+    {
+        public string Icon { get; } = icon;
+        public string Title { get; } = title;
+        public string Detail { get; } = detail;
+        public DateTime Timestamp { get; } = timestamp;
+        public string When { get; } = timestamp.ToString("dd/MM/yyyy HH:mm");
+    }
 
     private void ScheduleSave()
     {

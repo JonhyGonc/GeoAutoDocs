@@ -593,12 +593,6 @@ public partial class MainWindow : Window
         UpdateSidebarNavigation();
     }
 
-    private void SidebarConfig_Click(object sender, RoutedEventArgs e)
-    {
-        MessageBox.Show("As configurações operacionais permanecem vinculadas ao projeto e aos serviços locais.",
-            "Configurações", MessageBoxButton.OK, MessageBoxImage.Information);
-    }
-
     private void UpdateSidebarNavigation()
     {
         if (SidebarProjectsButton is null || SidebarInspectionButton is null || SidebarReportsButton is null ||

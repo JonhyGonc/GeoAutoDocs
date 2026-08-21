@@ -71,7 +71,7 @@ public partial class MainWindow : Window
     private bool _inspectionLayoutReady;
     private bool _inspectionSideVisible = true;
     private bool _videoFocusMode;
-    private double _inspectionSideWidth = 420;
+    private double _inspectionSideWidth = 320;
     private static string InspectionLayoutPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "GeoAutoDocs", "inspection-layout.json");
@@ -153,7 +153,7 @@ public partial class MainWindow : Window
             if (!File.Exists(InspectionLayoutPath)) return;
             var value = JsonSerializer.Deserialize<InspectionLayoutPreferences>(File.ReadAllText(InspectionLayoutPath));
             if (value is null) return;
-            _inspectionSideWidth = Math.Clamp(value.SideWidth, 400, 560);
+            _inspectionSideWidth = Math.Clamp(value.SideWidth, 290, 400);
             _videoFocusMode = value.FocusMode;
             InspectionContextExpander.IsExpanded = value.ContextExpanded;
         }
@@ -181,7 +181,7 @@ public partial class MainWindow : Window
         InspectionSideSplitter.Visibility = showSide ? Visibility.Visible : Visibility.Collapsed;
         InspectionSplitterColumn.Width = showSide ? new GridLength(6) : new GridLength(0);
         var responsiveWidth = ActualWidth > 0 && ActualWidth < 1100
-            ? Math.Min(_inspectionSideWidth, 400) : _inspectionSideWidth;
+            ? Math.Min(_inspectionSideWidth, 300) : _inspectionSideWidth;
         InspectionSideColumn.Width = showSide ? new GridLength(responsiveWidth) : new GridLength(0);
         FocusVideoButton.Content = _videoFocusMode ? "Sair do modo foco" : "Modo foco";
     }
@@ -203,7 +203,8 @@ public partial class MainWindow : Window
 
     private void InspectionSideSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
     {
-        if (InspectionSideColumn.ActualWidth >= 380) _inspectionSideWidth = InspectionSideColumn.ActualWidth;
+        if (InspectionSideColumn.ActualWidth >= 290)
+            _inspectionSideWidth = Math.Clamp(InspectionSideColumn.ActualWidth, 290, 400);
         SaveInspectionLayoutPreferences();
     }
 
@@ -389,17 +390,17 @@ public partial class MainWindow : Window
     {
         var compact = ActualWidth > 0 && ActualWidth < 1100;
         var compactEditor = ActualWidth > 0 && ActualWidth < 1050;
-        EditorView.Margin = compactEditor ? new Thickness(8, 10, 8, 8) : new Thickness(16, 14, 18, 10);
+        EditorView.Margin = compactEditor ? new Thickness(8, 8, 8, 6) : new Thickness(22, 12, 20, 10);
         BackToProjectsText.Visibility = compactEditor ? Visibility.Collapsed : Visibility.Visible;
         ShareProjectText.Visibility = compactEditor ? Visibility.Collapsed : Visibility.Visible;
         StorageStatus.Visibility = compactEditor ? Visibility.Collapsed : Visibility.Visible;
-        var padding = compact ? new Thickness(8, 16, 8, 16) : new Thickness(18, 16, 18, 16);
+        var padding = compact ? new Thickness(8, 14, 8, 14) : new Thickness(16, 14, 16, 14);
         foreach (var card in new[] { TotalProjectsCard, TotalReportsCard, InProgressReportsCard, SharedProjectsCard })
             card.Padding = padding;
         foreach (var column in new[] { TotalProjectsIconColumn, TotalReportsIconColumn, InProgressReportsIconColumn, SharedProjectsIconColumn })
-            column.Width = new GridLength(compact ? 44 : 54);
+            column.Width = new GridLength(compact ? 38 : 42);
         foreach (var label in new[] { TotalProjectsLabel, TotalReportsLabel, InProgressReportsLabel, SharedProjectsLabel })
-            label.FontSize = compact ? 9.5 : 13;
+            label.FontSize = compact ? 9.5 : 11;
         foreach (var detail in new[] { TotalProjectsDetail, TotalReportsDetail, InProgressReportsDetail, SharedProjectsDetail })
             detail.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
         ProjectsHeaderGrid.RowDefinitions[1].Height = compact ? GridLength.Auto : new GridLength(0);
@@ -451,6 +452,7 @@ public partial class MainWindow : Window
             NewProjectView.Visibility = Visibility.Collapsed;
             HomeShell.Visibility = Visibility.Collapsed;
             EditorView.Visibility = Visibility.Visible;
+            UpdateSidebarNavigation();
             SetSharedTimers(_sharedSession is { IsReadOnly: false });
         }
         catch (OperationCanceledException) { }
@@ -566,7 +568,53 @@ public partial class MainWindow : Window
         HomeShell.Visibility = Visibility.Visible;
         NewProjectView.Visibility = Visibility.Collapsed;
         ProjectsView.Visibility = Visibility.Visible;
+        UpdateSidebarNavigation();
         await ReloadProjectsAsync();
+    }
+
+    private void SidebarProjects_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is not null && EditorView.Visibility == Visibility.Visible)
+            OverviewTab.IsSelected = true;
+        UpdateSidebarNavigation();
+    }
+
+    private void SidebarInspection_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null) return;
+        InspectionsTab.IsSelected = true;
+        UpdateSidebarNavigation();
+    }
+
+    private void SidebarReports_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null) return;
+        WordConfigTab.IsSelected = true;
+        UpdateSidebarNavigation();
+    }
+
+    private void SidebarConfig_Click(object sender, RoutedEventArgs e)
+    {
+        MessageBox.Show("As configurações operacionais permanecem vinculadas ao projeto e aos serviços locais.",
+            "Configurações", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void UpdateSidebarNavigation()
+    {
+        if (SidebarProjectsButton is null || SidebarInspectionButton is null || SidebarReportsButton is null ||
+            OverviewTab is null || InspectionsTab is null || WordConfigTab is null)
+            return;
+        var projectOpen = _currentProject is not null && EditorView.Visibility == Visibility.Visible;
+        SidebarInspectionButton.IsEnabled = projectOpen;
+        SidebarReportsButton.IsEnabled = projectOpen;
+
+        var projectsActive = !projectOpen || OverviewTab.IsSelected;
+        SidebarProjectsButton.Style = (Style)FindResource(
+            projectsActive ? "SidebarItemActiveStyle" : "SidebarItemStyle");
+        SidebarInspectionButton.Style = (Style)FindResource(
+            projectOpen && InspectionsTab.IsSelected ? "SidebarItemActiveStyle" : "SidebarItemStyle");
+        SidebarReportsButton.Style = (Style)FindResource(
+            projectOpen && WordConfigTab.IsSelected ? "SidebarItemActiveStyle" : "SidebarItemStyle");
     }
 
     private void LoadProject(Project project)
@@ -603,6 +651,7 @@ public partial class MainWindow : Window
         RefreshFilePreviews();
         RefreshOverview();
         OverviewTab.IsSelected = true;
+        UpdateSidebarNavigation();
         SaveStatus.Text = "✓ Salvo";
         _hasPendingChanges = false;
         _loadingFields = false;
@@ -1959,6 +2008,7 @@ public partial class MainWindow : Window
 
     private async void ReportEditorTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        UpdateSidebarNavigation();
         if (!ReferenceEquals(e.Source, ReportEditorTabs) || ReportEditorTabs.SelectedItem != InspectionsTab ||
             _loadingInspections || _currentVideo is null ||
             _currentMedia is not null || !File.Exists(_currentVideo.FilePath)) return;

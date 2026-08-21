@@ -87,7 +87,7 @@
                     <StackPanel><TextBlock Text="&#xE8A5;" FontFamily="Segoe MDL2 Assets" FontSize="15" HorizontalAlignment="Center"/>
                         <TextBlock Text="Relatórios" FontSize="9" Margin="0,4,0,0" HorizontalAlignment="Center"/></StackPanel>
                 </Button>
-                <Button x:Name="SidebarConfigButton" Style="{StaticResource SidebarItemStyle}" Click="SidebarConfig_Click" ToolTip="Configurações">
+                <Button x:Name="SidebarConfigButton" Style="{StaticResource SidebarItemStyle}" IsEnabled="False" ToolTip="Configurações">
                     <StackPanel><TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="15" HorizontalAlignment="Center"/>
                         <TextBlock Text="Config." FontSize="9" Margin="0,4,0,0" HorizontalAlignment="Center"/></StackPanel>
                 </Button>

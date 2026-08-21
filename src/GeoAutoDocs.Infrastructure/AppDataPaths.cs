@@ -7,8 +7,10 @@ public sealed class AppDataPaths
     public string ProjectsDirectory => Path.Combine(Root, "projects");
     public string LogsDirectory => Path.Combine(Root, "logs");
     public string CacheDirectory => Path.Combine(Root, "Cache");
+    public string BackupsDirectory => Path.Combine(Root, "backups");
     public string DatabasePath => Path.Combine(DatabaseDirectory, "GeoAutoDocs.db");
     public string LogPath => Path.Combine(LogsDirectory, "GeoAutoDocs.log");
+    public string BackupStatusPath => Path.Combine(BackupsDirectory, "status.json");
 
     public AppDataPaths(string? root = null)
     {
@@ -23,5 +25,6 @@ public sealed class AppDataPaths
         Directory.CreateDirectory(ProjectsDirectory);
         Directory.CreateDirectory(LogsDirectory);
         Directory.CreateDirectory(CacheDirectory);
+        Directory.CreateDirectory(BackupsDirectory);
     }
 }

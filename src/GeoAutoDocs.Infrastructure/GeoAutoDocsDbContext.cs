@@ -8,8 +8,10 @@ public sealed class GeoAutoDocsDbContext(DbContextOptions<GeoAutoDocsDbContext> 
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<Report> Reports => Set<Report>();
     public DbSet<ReportSection> ReportSections => Set<ReportSection>();
+    public DbSet<ReportContinuationExport> ReportContinuationExports => Set<ReportContinuationExport>();
     public DbSet<AnomalyDefinition> AnomalyDefinitions => Set<AnomalyDefinition>();
     public DbSet<OccurrenceAnomaly> OccurrenceAnomalies => Set<OccurrenceAnomaly>();
+    public DbSet<OccurrenceMeteragePoint> OccurrenceMeteragePoints => Set<OccurrenceMeteragePoint>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -30,6 +32,9 @@ public sealed class GeoAutoDocsDbContext(DbContextOptions<GeoAutoDocsDbContext> 
         modelBuilder.Entity<DevelopmentImage>().ToTable("DevelopmentImage");
         modelBuilder.Entity<Report>().HasMany(x => x.SectionLinks).WithOne()
             .HasForeignKey(x => x.ReportId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<Report>().HasMany(x => x.ContinuationExports).WithOne()
+            .HasForeignKey(x => x.ReportId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<ReportContinuationExport>().ToTable("ReportContinuationExport");
         modelBuilder.Entity<ReportSection>().ToTable("ReportSection");
         modelBuilder.Entity<ReportSection>().HasKey(x => new { x.ReportId, x.SectionId });
         modelBuilder.Entity<ReportSection>().HasOne(x => x.Section).WithMany()
@@ -52,6 +57,10 @@ public sealed class GeoAutoDocsDbContext(DbContextOptions<GeoAutoDocsDbContext> 
             .HasForeignKey(x => x.VideoReferenceId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<Occurrence>().HasMany(x => x.Evidence).WithOne()
             .HasForeignKey(x => x.OccurrenceId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<Occurrence>().HasMany(x => x.MeteragePoints).WithOne()
+            .HasForeignKey(x => x.OccurrenceId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<OccurrenceMeteragePoint>().ToTable("OccurrenceMeteragePoint");
+        modelBuilder.Entity<OccurrenceMeteragePoint>().HasIndex(x => new { x.OccurrenceId, x.Meterage }).IsUnique();
         modelBuilder.Entity<Occurrence>().HasOne<VideoReference>().WithMany()
             .HasForeignKey(x => x.VideoReferenceId).OnDelete(DeleteBehavior.SetNull);
         modelBuilder.Entity<Occurrence>().HasMany(x => x.Anomalies).WithOne()
@@ -65,6 +74,7 @@ public sealed class GeoAutoDocsDbContext(DbContextOptions<GeoAutoDocsDbContext> 
             entity.HasOne(x => x.AnomalyType).WithMany()
                 .HasForeignKey(x => x.AnomalyTypeId).OnDelete(DeleteBehavior.Restrict);
         });
+        modelBuilder.Entity<AnomalyDefinition>().Property(x => x.Name).HasMaxLength(200).IsRequired();
         modelBuilder.Entity<Evidence>().HasOne<Capture>().WithMany()
             .HasForeignKey(x => x.CaptureId).OnDelete(DeleteBehavior.Restrict);
         modelBuilder.Entity<Evidence>().HasIndex(x => x.CaptureId).IsUnique();
@@ -74,6 +84,7 @@ public sealed class GeoAutoDocsDbContext(DbContextOptions<GeoAutoDocsDbContext> 
         modelBuilder.Entity<InspectionSection>().Property(x => x.InvestigatedMeters).HasPrecision(12, 3);
         modelBuilder.Entity<Occurrence>().Property(x => x.Meterage).HasPrecision(12, 3);
         modelBuilder.Entity<Occurrence>().Property(x => x.EndMeterage).HasPrecision(12, 3);
+        modelBuilder.Entity<OccurrenceMeteragePoint>().Property(x => x.Meterage).HasPrecision(12, 3);
         modelBuilder.Entity<OccurrenceAnomaly>().Property(x => x.ApproximateExtension).HasPrecision(12, 3);
         modelBuilder.Entity<OccurrenceAnomaly>().Property(x => x.EstimatedPercentage).HasPrecision(5, 2);
     }

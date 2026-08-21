@@ -34,6 +34,9 @@ public static class ReportValidation
             errors.Add("Template Word não encontrado.");
         if (selected.Count == 0) errors.Add("Selecione ao menos um trecho para o relatório.");
 
+        ValidateOptionalImage(report.LogoPath, "Logo do cliente", errors);
+        ValidateOptionalImage(report.LocationImagePath, "Imagem de localização", errors);
+
         foreach (var image in report.DevelopmentImages)
         {
             if (string.IsNullOrWhiteSpace(image.FilePath) || !File.Exists(image.FilePath))
@@ -41,6 +44,9 @@ public static class ReportValidation
             else if (!IsSupportedImage(image.FilePath))
                 errors.Add($"Formato de imagem da Seção 3 não suportado: {FriendlyFileName(image.FilePath)}.");
         }
+
+        foreach (var image in report.CustomSections.SelectMany(x => x.Images))
+            ValidateOptionalImage(image.FilePath, "Imagem de seção adicional", errors, required: true);
 
         var occurrences = selected.SelectMany(x => x.Section.Occurrences).ToList();
         var evidences = occurrences.SelectMany(x => x.Evidence).ToList();
@@ -91,4 +97,15 @@ public static class ReportValidation
 
     private static bool IsSupportedImage(string path) => Path.GetExtension(path).ToLowerInvariant() is
         ".png" or ".jpg" or ".jpeg";
+
+    private static void ValidateOptionalImage(string? path, string label, ICollection<string> errors, bool required = false)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            if (required) errors.Add($"{label} não informada.");
+            return;
+        }
+        if (!File.Exists(path)) errors.Add($"{label} não encontrada: {FriendlyFileName(path)}.");
+        else if (!IsSupportedImage(path)) errors.Add($"Formato de {label.ToLowerInvariant()} não suportado: {FriendlyFileName(path)}.");
+    }
 }

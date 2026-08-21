@@ -1,6 +1,7 @@
 using GeoAutoDocs.Core;
 using GeoAutoDocs.Infrastructure;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace GeoAutoDocs.Tests;
@@ -70,6 +71,76 @@ public sealed class ProjectStoreTests : IAsyncLifetime
         var recovered = await _store.GetAsync(project.Id);
         Assert.Single(recovered!.Locations[0].Sections);
         Assert.All(recovered.Reports, x => Assert.Equal(section.Id, Assert.Single(x.SectionLinks).SectionId));
+    }
+
+    [Fact]
+    public async Task EditingSectionFieldsPreservesItsIdentityAndReportLink()
+    {
+        var project = await _store.CreateAsync("Edição");
+        var location = new Location { ProjectId = project.Id, Name = "Local" };
+        var section = new InspectionSection { LocationId = location.Id, Name = "Trecho" };
+        location.Sections.Add(section);
+        project.Locations.Add(location);
+        project.CreateReport().SelectSection(section);
+        await _store.SaveAsync(project);
+
+        section.Name = "Trecho editado";
+        section.StartPoint = "PV 01";
+        section.EndPoint = null;
+        section.Diameter = 9.5m;
+        section.Reference = "REF";
+        section.Description = "Descrição";
+        section.InvestigatedMeters = 9.25m;
+        await _store.SaveAsync(project);
+
+        var recovered = await _store.GetAsync(project.Id);
+        var edited = Assert.Single(Assert.Single(recovered!.Locations).Sections);
+        Assert.Equal(section.Id, edited.Id);
+        Assert.Equal((9.5m, 9.25m), (edited.Diameter, edited.InvestigatedMeters));
+        Assert.Equal(section.Id, Assert.Single(Assert.Single(recovered.Reports).SectionLinks).SectionId);
+    }
+
+    [Fact]
+    public async Task RemovingLocationDeletesItsCompleteInspectionAggregate()
+    {
+        var project = await _store.CreateAsync("Exclusão");
+        var captureDirectory = Path.Combine(project.ProjectPath!, "captures");
+        Directory.CreateDirectory(captureDirectory);
+        var capturePath = Path.Combine(captureDirectory, "capture.png");
+        await File.WriteAllTextAsync(capturePath, "managed");
+        var location = new Location { ProjectId = project.Id, Name = "Local" };
+        var section = new InspectionSection { LocationId = location.Id, Name = "Trecho" };
+        var video = new VideoReference { InspectionSectionId = section.Id, FilePath = @"C:\video.mp4" };
+        var capture = new Capture
+        {
+            ProjectId = project.Id, SectionId = section.Id, VideoReferenceId = video.Id,
+            FilePath = capturePath, Status = CaptureStatus.Assigned, ManagedByGeoAutoDocs = true
+        };
+        var occurrence = new Occurrence { InspectionSectionId = section.Id, VideoReferenceId = video.Id };
+        occurrence.Evidence.Add(new Evidence
+        {
+            OccurrenceId = occurrence.Id, CaptureId = capture.Id, FilePath = capture.FilePath,
+            SourceType = EvidenceSourceType.VideoCapture
+        });
+        section.VideoReferences.Add(video);
+        section.Occurrences.Add(occurrence);
+        location.Sections.Add(section);
+        project.Locations.Add(location);
+        project.Captures.Add(capture);
+        project.CreateReport().SelectSection(section);
+        await _store.SaveAsync(project);
+
+        var reopened = (await _store.GetAsync(project.Id))!;
+        reopened.Reports[0].SectionLinks.Clear();
+        reopened.Captures.Clear();
+        reopened.Locations.Clear();
+        await _store.SaveAsync(reopened);
+
+        var saved = (await _store.GetAsync(project.Id))!;
+        Assert.Empty(saved.Locations);
+        Assert.Empty(saved.Captures);
+        Assert.Empty(saved.Reports[0].SectionLinks);
+        Assert.False(File.Exists(capturePath));
     }
 
     [Fact]
@@ -151,10 +222,43 @@ public sealed class ProjectStoreTests : IAsyncLifetime
     public async Task DeletesProjectAndAssociatedData()
     {
         var project = await _store.CreateAsync("Excluir");
+        var projectPath = project.ProjectPath!;
+        var externalFile = Path.Combine(projectPath, "video-externo.mp4");
+        await File.WriteAllTextAsync(externalFile, "external");
+        var location = new Location { ProjectId = project.Id, Name = "Local" };
+        var section = new InspectionSection { LocationId = location.Id, Name = "Trecho" };
+        var video = new VideoReference { InspectionSectionId = section.Id, FilePath = externalFile };
+        var captureDirectory = Path.Combine(projectPath, "captures");
+        Directory.CreateDirectory(captureDirectory);
+        var capturePath = Path.Combine(captureDirectory, "managed.png");
+        await File.WriteAllTextAsync(capturePath, "managed");
+        section.VideoReferences.Add(video); location.Sections.Add(section); project.Locations.Add(location);
+        project.Captures.Add(new Capture { ProjectId = project.Id, SectionId = section.Id,
+            VideoReferenceId = video.Id, FilePath = capturePath, ManagedByGeoAutoDocs = true });
         project.CreateReport();
         await _store.SaveAsync(project);
         await _store.DeleteAsync(project.Id);
         Assert.Null(await _store.GetAsync(project.Id));
         Assert.Empty(await _store.ListAsync());
+        Assert.False(File.Exists(capturePath));
+        Assert.True(File.Exists(externalFile));
+    }
+
+    [Fact]
+    public async Task FailedAggregateSaveRollsBackPriorDeletions()
+    {
+        var project = await _store.CreateAsync("Transacional");
+        var first = project.CreateReport();
+        var second = project.CreateReport();
+        second.Client = "Cliente preservado";
+        await _store.SaveAsync(project);
+
+        project.Reports.Remove(first);
+        second.Client = null!;
+        await Assert.ThrowsAsync<DbUpdateException>(() => _store.SaveAsync(project));
+
+        var recovered = await _store.GetAsync(project.Id);
+        Assert.Equal(2, recovered!.Reports.Count);
+        Assert.Equal("Cliente preservado", recovered.Reports.Single(x => x.Id == second.Id).Client);
     }
 }

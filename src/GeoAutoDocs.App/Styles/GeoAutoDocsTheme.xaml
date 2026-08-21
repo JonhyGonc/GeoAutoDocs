@@ -302,6 +302,31 @@
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
         <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
         <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CalendarItem">
+                    <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" Padding="8">
+                        <Grid x:Name="PART_Root">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                            <Grid Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
+                                <Button x:Name="PART_PreviousButton" Content="&#xE76B;" FontFamily="Segoe MDL2 Assets" Style="{StaticResource IconButtonStyle}" Width="30" Height="30" MinWidth="30" MinHeight="30" Padding="4" Margin="0"/>
+                                <Button x:Name="PART_HeaderButton" Grid.Column="1" Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextPrimaryBrush}" Margin="4,0"/>
+                                <Button x:Name="PART_NextButton" Grid.Column="2" Content="&#xE76C;" FontFamily="Segoe MDL2 Assets" Style="{StaticResource IconButtonStyle}" Width="30" Height="30" MinWidth="30" MinHeight="30" Padding="4" Margin="0"/>
+                            </Grid>
+                            <Grid x:Name="PART_MonthView" Grid.Row="1">
+                                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                            </Grid>
+                            <Grid x:Name="PART_YearView" Grid.Row="1" Visibility="Collapsed">
+                                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <Style TargetType="CalendarDayButton">
@@ -321,6 +346,20 @@
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderBrush" Value="Transparent"/>
         <Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#24445B"/></Trigger></Style.Triggers>
+    </Style>
+
+    <Style x:Key="ThemedCalendarItemStyle" TargetType="CalendarItem" BasedOn="{StaticResource {x:Type CalendarItem}}"/>
+    <Style x:Key="ThemedCalendarDayButtonStyle" TargetType="CalendarDayButton" BasedOn="{StaticResource {x:Type CalendarDayButton}}"/>
+    <Style x:Key="ThemedCalendarButtonStyle" TargetType="CalendarButton" BasedOn="{StaticResource {x:Type CalendarButton}}"/>
+    <Style x:Key="ThemedCalendarStyle" TargetType="Calendar">
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+        <Style.Resources>
+            <Style TargetType="CalendarItem" BasedOn="{StaticResource ThemedCalendarItemStyle}"/>
+            <Style TargetType="CalendarDayButton" BasedOn="{StaticResource ThemedCalendarDayButtonStyle}"/>
+            <Style TargetType="CalendarButton" BasedOn="{StaticResource ThemedCalendarButtonStyle}"/>
+        </Style.Resources>
     </Style>
 
     <Style TargetType="CheckBox">

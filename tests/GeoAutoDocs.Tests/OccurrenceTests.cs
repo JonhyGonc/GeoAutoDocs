@@ -28,6 +28,18 @@ public sealed class OccurrenceTests : IAsyncLifetime
         return Task.CompletedTask;
     }
 
+    [Theory]
+    [InlineData("9", "9")]
+    [InlineData("9,5", "9,5")]
+    [InlineData("9,25", "9,25")]
+    [InlineData("9,00", "9")]
+    [InlineData("9.00", "9")]
+    public void MeasurementRoundTripDoesNotChangeValue(string input, string expected)
+    {
+        Assert.True(MeasurementText.TryParse(input, out var value));
+        Assert.Equal(expected, MeasurementText.Format(value));
+    }
+
     [Fact]
     public void PointAtZeroIsValid()
     {
@@ -75,6 +87,72 @@ public sealed class OccurrenceTests : IAsyncLifetime
         var saved = await _service.SaveAsync(project, section, occurrence, false);
         Assert.Null(saved.Meterage);
         Assert.Null(saved.EndMeterage);
+    }
+
+    [Fact]
+    public async Task MultiPointWithTwoValuesIsSortedFormattedAndPersisted()
+    {
+        var (project, section) = await CreateProjectAsync();
+        var occurrence = NewOccurrence(OccurrenceLocationMode.MultiPoint, null, "Trinca");
+        occurrence.MeteragePoints.AddRange([
+            new OccurrenceMeteragePoint { OccurrenceId = occurrence.Id, Meterage = 13m },
+            new OccurrenceMeteragePoint { OccurrenceId = occurrence.Id, Meterage = 12m }
+        ]);
+
+        var saved = await _service.SaveAsync(project, section, occurrence, false);
+        Assert.Equal("Trinca a 12 e 13 metros do início da filmagem.", saved.GeneratedDescription);
+        await _store.SaveAsync(project);
+
+        var reopened = (await _store.GetAsync(project.Id))!.Locations[0].Sections[0].Occurrences.Single();
+        Assert.Equal([12m, 13m], reopened.MeteragePoints.OrderBy(x => x.Order).Select(x => x.Meterage).ToArray());
+        Assert.Equal(12m, reopened.Meterage);
+        Assert.Null(reopened.EndMeterage);
+    }
+
+    [Fact]
+    public void MultiPointWithSeveralValuesUsesNaturalPortugueseList()
+    {
+        var occurrence = NewOccurrence(OccurrenceLocationMode.MultiPoint, 2m, "Infiltração");
+        occurrence.MeteragePoints.AddRange(new[] { 2m, 3m, 4m, 5m }.Select((value, index) =>
+            new OccurrenceMeteragePoint { OccurrenceId = occurrence.Id, Meterage = value, Order = index }));
+
+        OccurrenceRules.Validate(occurrence);
+
+        Assert.Equal("Infiltração a 2, 3, 4 e 5 metros do início da filmagem.",
+            OccurrenceRules.GenerateDescription(occurrence));
+    }
+
+    [Fact]
+    public void InvalidMultiPointIsRejectedWithoutSilentlyDiscardingDuplicates()
+    {
+        var tooShort = NewOccurrence(OccurrenceLocationMode.MultiPoint, null, "Trinca");
+        tooShort.MeteragePoints.Add(new OccurrenceMeteragePoint { OccurrenceId = tooShort.Id, Meterage = 2m });
+        Assert.Throws<InvalidOperationException>(() => OccurrenceRules.Validate(tooShort));
+
+        var duplicate = NewOccurrence(OccurrenceLocationMode.MultiPoint, 2m, "Trinca");
+        duplicate.MeteragePoints.AddRange([
+            new OccurrenceMeteragePoint { OccurrenceId = duplicate.Id, Meterage = 2m, Order = 0 },
+            new OccurrenceMeteragePoint { OccurrenceId = duplicate.Id, Meterage = 2m, Order = 1 }
+        ]);
+        Assert.Throws<InvalidOperationException>(() => OccurrenceRules.Validate(duplicate));
+    }
+
+    [Fact]
+    public async Task FromUsesOnlyInitialMeterageAndPersists()
+    {
+        var (project, section) = await CreateProjectAsync();
+        var occurrence = NewOccurrence(OccurrenceLocationMode.From, 50m, "Infiltração");
+        occurrence.EndMeterage = 80m;
+
+        var saved = await _service.SaveAsync(project, section, occurrence, false);
+        Assert.Equal("Infiltração a partir de 50 metros do início da filmagem.", saved.GeneratedDescription);
+        Assert.Null(saved.EndMeterage);
+        await _store.SaveAsync(project);
+
+        var reopened = (await _store.GetAsync(project.Id))!.Locations[0].Sections[0].Occurrences.Single();
+        Assert.Equal(OccurrenceLocationMode.From, reopened.LocationMode);
+        Assert.Equal(50m, reopened.Meterage);
+        Assert.Null(reopened.EndMeterage);
     }
 
     [Fact]
@@ -260,6 +338,15 @@ public sealed class OccurrenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public void FormatterAddsSevereMarkerAfterTheDescription()
+    {
+        var occurrence = NewOccurrence(OccurrenceLocationMode.Point, 25m, "Assoreamento");
+        occurrence.IsSevere = true;
+
+        Assert.EndsWith(" (grave).", OccurrenceRules.GenerateDescription(occurrence));
+    }
+
+    [Fact]
     public async Task InterruptedRecordingPersistsWithoutChangingOlderDefaults()
     {
         var (project, section) = await CreateProjectAsync();
@@ -272,6 +359,21 @@ public sealed class OccurrenceTests : IAsyncLifetime
         Assert.True(saved.InterruptedRecording);
         Assert.Contains("interrompendo a gravação", saved.GeneratedDescription);
         Assert.False(new Occurrence().InterruptedRecording);
+    }
+
+    [Fact]
+    public async Task SevereClassificationPersistsAndIsCopiedToTheEditDraft()
+    {
+        var (project, section) = await CreateProjectAsync();
+        var occurrence = NewOccurrence(OccurrenceLocationMode.Point, 25m, "Obstrução");
+        occurrence.IsSevere = true;
+        await _service.SaveAsync(project, section, occurrence, false);
+        await _store.SaveAsync(project);
+
+        var reopened = (await _store.GetAsync(project.Id))!.Locations[0].Sections[0];
+        var saved = Assert.Single(reopened.Occurrences);
+        Assert.True(saved.IsSevere);
+        Assert.True(_service.CreateDraft(reopened, saved).IsSevere);
     }
 
     [Fact]
@@ -536,6 +638,35 @@ public sealed class OccurrenceTests : IAsyncLifetime
         var reopened = (await _store.GetAsync(project.Id))!;
         var ordered = reopened.Locations.Single().Sections.Single().Occurrences.OrderBy(x => x.Order).ToList();
         Assert.Equal([second.Id, first.Id], ordered.Select(x => x.Id).ToArray());
+    }
+
+    [Fact]
+    public async Task CompletedSectionPersistsWithoutDuplicatingOccurrences()
+    {
+        var (project, section) = await CreateProjectAsync();
+        await _service.SaveAsync(project, section, NewOccurrence(OccurrenceLocationMode.Point, 9m, "Trinca"), false);
+        section.AnomalyReviewStatus = SectionAnomalyReviewStatus.Completed;
+        section.AnomalyReviewUpdatedAt = DateTime.UtcNow;
+        await _store.SaveAsync(project);
+        await _store.SaveAsync(project);
+
+        var reopened = (await _store.GetAsync(project.Id))!.Locations.Single().Sections.Single();
+        Assert.Equal(SectionAnomalyReviewStatus.Completed, reopened.AnomalyReviewStatus);
+        Assert.NotNull(reopened.AnomalyReviewUpdatedAt);
+        Assert.Single(reopened.Occurrences);
+    }
+
+    [Fact]
+    public async Task SectionReviewReportsIncompleteOccurrencesAndPendingCaptures()
+    {
+        var (project, section) = await CreateProjectAsync();
+        await _service.SaveAsync(project, section, NewOccurrence(OccurrenceLocationMode.Point, 9m, "Trinca"), false);
+        AddCapture(project, section, 1000);
+
+        var pending = SectionReviewRules.GetPending(project, section);
+        Assert.True(pending.HasPending);
+        Assert.Equal(1, pending.IncompleteOccurrences);
+        Assert.Equal(1, pending.PendingCaptures);
     }
 
     private async Task<(Project Project, InspectionSection Section)> CreateProjectAsync()

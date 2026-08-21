@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.Globalization;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows;
@@ -22,7 +21,10 @@ public partial class OccurrenceWindow : Window
     private readonly ObservableCollection<AnomalySelectionItem> _anomalyItems;
     private readonly AnomalyDefinition _customAnomalyDefinition;
     private readonly IReadOnlyList<OccurrenceAnomaly> _preservedLegacyAnomalies;
+    private readonly string _originalGeneratedDescription;
+    private bool _loadingFields = true;
     public ObservableCollection<EvidenceSelectionItem> EvidenceItems { get; } = [];
+    public ObservableCollection<MultiPointMeterageItem> MultiPointItems { get; } = [];
     public Occurrence? SavedDraft { get; private set; }
     public bool ResumeVideoAfterSave { get; private set; }
     public Guid? RequestedVideoReferenceId { get; private set; }
@@ -49,6 +51,7 @@ public partial class OccurrenceWindow : Window
         _section = section;
         _readOnly = readOnly;
         _draft = service.CreateDraft(section, source, duplicate);
+        _originalGeneratedDescription = duplicate ? string.Empty : source?.GeneratedDescription ?? string.Empty;
         WindowTitle.Text = readOnly ? "←  Consultar anomalia" : duplicate ? "←  Duplicar anomalia" :
             source is null ? "←  Cadastrar anomalia" : "←  Editar anomalia";
         var location = project.Locations.FirstOrDefault(x => x.Sections.Any(y => y.Id == section.Id));
@@ -64,9 +67,9 @@ public partial class OccurrenceWindow : Window
             .GroupBy(x => x.Id).Select(x => x.First()).OrderBy(x => x.Order).ToList();
         _customAnomalyDefinition = allDefinitions.FirstOrDefault(x => x.Id == AnomalyCatalog.OtherId)
             ?? AnomalyCatalog.Defaults.Single(x => x.Id == AnomalyCatalog.OtherId);
-        var definitions = allDefinitions.Where(x => AnomalyCatalog.PrimaryIds.Contains(x.Id)).ToList();
+        var definitions = allDefinitions.Where(x => x.Id != AnomalyCatalog.OtherId).ToList();
         _preservedLegacyAnomalies = _draft.Anomalies
-            .Where(x => !AnomalyCatalog.PrimaryIds.Contains(x.AnomalyTypeId) && x.AnomalyTypeId != AnomalyCatalog.OtherId)
+            .Where(x => definitions.All(y => y.Id != x.AnomalyTypeId) && x.AnomalyTypeId != AnomalyCatalog.OtherId)
             .OrderBy(x => x.Order).ToList();
         _anomalyItems = new ObservableCollection<AnomalySelectionItem>(definitions.Select(definition =>
         {
@@ -113,22 +116,33 @@ public partial class OccurrenceWindow : Window
 
     private void LoadFields()
     {
-        PointRadio.IsChecked = _draft.LocationMode == OccurrenceLocationMode.Point;
-        RangeRadio.IsChecked = _draft.LocationMode == OccurrenceLocationMode.Range;
-        EntireSectionRadio.IsChecked = _draft.LocationMode == OccurrenceLocationMode.EntireSection;
-        PointMeasurementBox.Text = FormatDecimal(_draft.Meterage);
-        RangeStartBox.Text = FormatDecimal(_draft.Meterage);
-        RangeEndBox.Text = FormatDecimal(_draft.EndMeterage);
-        ReferencePointBox.Text = _draft.ReferencePoint ?? "";
-        NotesBox.Text = _draft.Notes ?? "";
-        GeneratedDescriptionBox.Text = _draft.GeneratedDescription;
-        ManualDescriptionBox.Text = _draft.ManualDescriptionOverride ?? "";
-        InterruptedRecordingCheck.IsChecked = _draft.InterruptedRecording;
-        CustomAnomalyBox.Text = _draft.Anomalies.FirstOrDefault(x => x.AnomalyTypeId == AnomalyCatalog.OtherId)?.CustomText ?? "";
-        UpdateLocationPanels();
-        UpdateSelectedAnomalies();
-        RefreshEvidencePresentation();
-        UpdateDraftStatus();
+        try
+        {
+            PointRadio.IsChecked = _draft.LocationMode == OccurrenceLocationMode.Point;
+            RangeRadio.IsChecked = _draft.LocationMode == OccurrenceLocationMode.Range;
+            MultiPointRadio.IsChecked = _draft.LocationMode == OccurrenceLocationMode.MultiPoint;
+            FromRadio.IsChecked = _draft.LocationMode == OccurrenceLocationMode.From;
+            EntireSectionRadio.IsChecked = _draft.LocationMode == OccurrenceLocationMode.EntireSection;
+            PointMeasurementBox.Text = FormatDecimal(_draft.Meterage);
+            RangeStartBox.Text = FormatDecimal(_draft.Meterage);
+            RangeEndBox.Text = FormatDecimal(_draft.EndMeterage);
+            FromMeasurementBox.Text = FormatDecimal(_draft.Meterage);
+            MultiPointItems.Clear();
+            foreach (var point in _draft.MeteragePoints.OrderBy(x => x.Meterage))
+                MultiPointItems.Add(new MultiPointMeterageItem(point.Id, point.Meterage));
+            ReferencePointBox.Text = _draft.ReferencePoint ?? "";
+            NotesBox.Text = _draft.Notes ?? "";
+            GeneratedDescriptionBox.Text = _draft.GeneratedDescription;
+            ManualDescriptionBox.Text = _draft.ManualDescriptionOverride ?? "";
+            InterruptedRecordingCheck.IsChecked = _draft.InterruptedRecording;
+            SevereAnomalyCheck.IsChecked = _draft.IsSevere;
+            CustomAnomalyBox.Text = _draft.Anomalies.FirstOrDefault(x => x.AnomalyTypeId == AnomalyCatalog.OtherId)?.CustomText ?? "";
+            UpdateLocationPanels();
+            UpdateSelectedAnomalies();
+            RefreshEvidencePresentation();
+            UpdateDraftStatus();
+        }
+        finally { _loadingFields = false; }
         RefreshLivePreview();
     }
 
@@ -141,7 +155,12 @@ public partial class OccurrenceWindow : Window
         {
             ApplyFormToDraft();
             OccurrenceRules.Validate(_draft);
-            _draft.GeneratedDescription = OccurrenceRules.GenerateDescription(_draft);
+            var generated = OccurrenceRules.GenerateDescription(_draft);
+            if (string.IsNullOrWhiteSpace(_originalGeneratedDescription) || generated == _originalGeneratedDescription ||
+                MessageBox.Show("Os dados técnicos alteraram a descrição. Deseja regenerá-la?", "Descrição técnica",
+                    MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+                _draft.GeneratedDescription = generated;
+            else _draft.GeneratedDescription = _originalGeneratedDescription;
             SavedDraft = _draft;
             ResumeVideoAfterSave = resumeVideo;
             CompleteEditor(true);
@@ -172,23 +191,35 @@ public partial class OccurrenceWindow : Window
     {
         _draft.LocationMode = PointRadio.IsChecked == true ? OccurrenceLocationMode.Point
             : RangeRadio.IsChecked == true ? OccurrenceLocationMode.Range
+            : MultiPointRadio.IsChecked == true ? OccurrenceLocationMode.MultiPoint
+            : FromRadio.IsChecked == true ? OccurrenceLocationMode.From
             : EntireSectionRadio.IsChecked == true ? OccurrenceLocationMode.EntireSection
             : OccurrenceLocationMode.NotApplicable;
         _draft.Meterage = _draft.LocationMode switch
         {
             OccurrenceLocationMode.Point => ParseRequired(PointMeasurementBox.Text, "metragem"),
             OccurrenceLocationMode.Range => ParseRequired(RangeStartBox.Text, "início do intervalo"),
+            OccurrenceLocationMode.MultiPoint => MultiPointItems.FirstOrDefault()?.Value,
+            OccurrenceLocationMode.From => ParseRequired(FromMeasurementBox.Text, "metragem inicial"),
             _ => null
         };
         _draft.EndMeterage = _draft.LocationMode == OccurrenceLocationMode.Range
             ? ParseRequired(RangeEndBox.Text, "fim do intervalo") : null;
+        _draft.MeteragePoints = _draft.LocationMode == OccurrenceLocationMode.MultiPoint
+            ? MultiPointItems.Select((x, index) => new OccurrenceMeteragePoint
+            {
+                Id = x.Id, OccurrenceId = _draft.Id, Meterage = x.Value, Order = index
+            }).ToList()
+            : [];
         _draft.ReferencePoint = ReferencePointBox.Text;
         _draft.Notes = NotesBox.Text;
         _draft.ManualDescriptionOverride = ManualDescriptionBox.Text;
         _draft.InterruptedRecording = InterruptedRecordingCheck.IsChecked == true;
+        _draft.IsSevere = SevereAnomalyCheck.IsChecked == true;
         var anomalies = _anomalyItems.Where(x => x.IsSelected).Select((x, index) => new OccurrenceAnomaly
         {
             OccurrenceId = _draft.Id, AnomalyTypeId = x.Definition.Id, AnomalyType = x.Definition,
+            AnomalyName = x.Definition.Name,
             Position = x.Position, Orientation = x.Orientation,
             ApproximateExtension = ParseOptional(x.ExtensionText, $"extensão de {x.Definition.Name}"),
             Dimension = x.Dimension, Condition = x.Condition,
@@ -209,6 +240,7 @@ public partial class OccurrenceWindow : Window
                 OccurrenceId = _draft.Id,
                 AnomalyTypeId = _customAnomalyDefinition.Id,
                 AnomalyType = _customAnomalyDefinition,
+                AnomalyName = _customAnomalyDefinition.Name,
                 CustomText = CustomAnomalyBox.Text.Trim(),
                 Position = AnomalyPosition.NotApplicable,
                 Order = anomalies.Count
@@ -239,6 +271,8 @@ public partial class OccurrenceWindow : Window
     {
         PointPanel.Visibility = PointRadio.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         RangePanel.Visibility = RangeRadio.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        MultiPointPanel.Visibility = MultiPointRadio.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        FromPanel.Visibility = FromRadio.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         UpdateDraftStatus();
     }
 
@@ -258,6 +292,49 @@ public partial class OccurrenceWindow : Window
         if (e.Key != Key.Enter) return;
         PointMeasurementBox.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
         e.Handled = true;
+    }
+
+    private void MultiPointInputBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter) return;
+        AddMultiPoint();
+        e.Handled = true;
+    }
+
+    private void AddMultiPoint_Click(object sender, RoutedEventArgs e) => AddMultiPoint();
+
+    private void AddMultiPoint()
+    {
+        if (!MeasurementText.TryParse(MultiPointInputBox.Text, out var value) || value < 0)
+        {
+            MessageBox.Show("Informe uma metragem válida e não negativa.", "Múltiplos pontos",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            MultiPointInputBox.Focus();
+            return;
+        }
+        if (MultiPointItems.Any(x => x.Value == value))
+        {
+            MessageBox.Show("Essa metragem já foi adicionada.", "Múltiplos pontos",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            MultiPointInputBox.Focus();
+            return;
+        }
+        var values = MultiPointItems.Append(new MultiPointMeterageItem(Guid.NewGuid(), value))
+            .OrderBy(x => x.Value).ToList();
+        MultiPointItems.Clear();
+        foreach (var item in values) MultiPointItems.Add(item);
+        MultiPointInputBox.Clear();
+        MultiPointInputBox.Focus();
+        UpdateDraftStatus();
+        RefreshLivePreview();
+    }
+
+    private void RemoveMultiPoint_Click(object sender, RoutedEventArgs e)
+    {
+        if (((Button)sender).Tag is Guid id && MultiPointItems.FirstOrDefault(x => x.Id == id) is { } item)
+            MultiPointItems.Remove(item);
+        UpdateDraftStatus();
+        RefreshLivePreview();
     }
 
     private void AnomalySelection_Changed(object sender, RoutedEventArgs e) => UpdateSelectedAnomalies();
@@ -282,11 +359,14 @@ public partial class OccurrenceWindow : Window
 
     private void RefreshLivePreview()
     {
-        if (ReportPreviewText is null || _anomalyItems is null) return;
+        if (_loadingFields || ReportPreviewText is null || _anomalyItems is null) return;
         if (PrimaryMeterageText is not null)
             PrimaryMeterageText.Text = PointRadio?.IsChecked == true
-                ? ParseOptionalSilently(PointMeasurementBox?.Text) is decimal point ? $"{point:N2} m" : "Metragem não informada"
-                : RangeRadio?.IsChecked == true ? "Intervalo" : "Todo o trecho";
+                ? ParseOptionalSilently(PointMeasurementBox?.Text) is decimal point ? $"{MeasurementText.Format(point)} m" : "Metragem não informada"
+                : RangeRadio?.IsChecked == true ? "Intervalo"
+                : MultiPointRadio?.IsChecked == true ? (MultiPointItems.Count == 0 ? "Múltiplos pontos" : string.Join(" • ", MultiPointItems.Select(x => $"{MeasurementText.Format(x.Value)} m")))
+                : FromRadio?.IsChecked == true ? ParseOptionalSilently(FromMeasurementBox?.Text) is decimal start ? $"A partir de {MeasurementText.Format(start)} m" : "Metragem não informada"
+                : "Todo o trecho";
         try
         {
             ApplyFormToDraft();
@@ -403,8 +483,9 @@ public partial class OccurrenceWindow : Window
         if (PrimaryImage is not null)
         {
             var primary = EvidenceItems.FirstOrDefault(x => x.Evidence.IsPrimary) ?? EvidenceItems.FirstOrDefault();
-            PrimaryImage.Source = primary?.Thumbnail;
-            PrimaryImageEmptyState.Visibility = primary?.Thumbnail is null ? Visibility.Visible : Visibility.Collapsed;
+            PrimaryImage.Source = primary?.OriginalImage;
+            PrimaryImageEmptyState.Visibility = primary?.OriginalImage is null ? Visibility.Visible : Visibility.Collapsed;
+            ViewOriginalButton.IsEnabled = primary?.OriginalImage is not null;
             PrimaryTimestampText.Text = primary?.Evidence.VideoTimestamp is TimeSpan timestamp
                 ? timestamp.ToString(@"hh\:mm\:ss\.fff") : "Sem timestamp";
             PrimaryVideoText.Text = primary?.VideoName ?? "Origem não informada";
@@ -412,6 +493,41 @@ public partial class OccurrenceWindow : Window
             RecaptureButton.IsEnabled = !_readOnly && primary?.Evidence.CaptureId is not null && RecaptureAsync is not null;
         }
         UpdateDraftStatus();
+    }
+
+    private void ViewOriginal_Click(object sender, RoutedEventArgs e)
+    {
+        if (PrimaryImage.Source is not BitmapImage original) return;
+        var image = new Image
+        {
+            Source = original,
+            Stretch = System.Windows.Media.Stretch.None,
+            StretchDirection = StretchDirection.DownOnly,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        System.Windows.Media.RenderOptions.SetBitmapScalingMode(image,
+            System.Windows.Media.BitmapScalingMode.HighQuality);
+        var viewer = new Window
+        {
+            Title = "Imagem original — 100%",
+            Owner = Window.GetWindow(PrimaryImage),
+            Width = 1200,
+            Height = 800,
+            MinWidth = 640,
+            MinHeight = 480,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = (System.Windows.Media.Brush)FindResource("WindowBackgroundBrush"),
+            Content = new ScrollViewer
+            {
+                Content = image,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Padding = new Thickness(12)
+            }
+        };
+        WindowLayout.KeepInsideWorkArea(viewer, 1200, 800);
+        viewer.ShowDialog();
     }
 
     private async void RecaptureFrame_Click(object sender, RoutedEventArgs e) => await RecaptureAtOffsetAsync(TimeSpan.Zero);
@@ -462,6 +578,10 @@ public partial class OccurrenceWindow : Window
         if (RangeRadio?.IsChecked == true &&
             (ParseOptionalSilently(RangeStartBox?.Text) is null || ParseOptionalSilently(RangeEndBox?.Text) is null))
             pending.Add("intervalo incompleto");
+        if (MultiPointRadio?.IsChecked == true && MultiPointItems.Count < 2)
+            pending.Add("adicione dois pontos");
+        if (FromRadio?.IsChecked == true && ParseOptionalSilently(FromMeasurementBox?.Text) is null)
+            pending.Add("sem metragem inicial");
         if (EvidenceItems.Count == 0) pending.Add("sem evidência");
         DraftStatusText.Text = pending.Count == 0 ? "Completa" : "Incompleta • " + string.Join(" • ", pending);
         DraftStatusText.Foreground = (System.Windows.Media.Brush)FindResource(pending.Count == 0 ? "SuccessBrush" : "WarningBrush");
@@ -470,9 +590,7 @@ public partial class OccurrenceWindow : Window
     private static decimal? ParseOptionalSilently(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return null;
-        return decimal.TryParse(text, NumberStyles.Number, CultureInfo.CurrentCulture, out var value) ||
-               decimal.TryParse(text, NumberStyles.Number, CultureInfo.GetCultureInfo("pt-BR"), out value) ||
-               decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out value) ? value : null;
+        return MeasurementText.TryParse(text, out var value) ? value : null;
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => CompleteEditor(null);
@@ -501,14 +619,11 @@ public partial class OccurrenceWindow : Window
     private static decimal? ParseOptional(string? text, string field)
     {
         if (string.IsNullOrWhiteSpace(text)) return null;
-        if (decimal.TryParse(text, NumberStyles.Number, CultureInfo.CurrentCulture, out var value) ||
-            decimal.TryParse(text, NumberStyles.Number, CultureInfo.GetCultureInfo("pt-BR"), out value) ||
-            decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out value)) return value;
+        if (MeasurementText.TryParse(text, out var value)) return value;
         throw new InvalidOperationException($"Informe um valor válido para {field}.");
     }
 
-    internal static string FormatDecimal(decimal? value) =>
-        value?.ToString("N2", CultureInfo.GetCultureInfo("pt-BR")) ?? "";
+    internal static string FormatDecimal(decimal? value) => MeasurementText.Format(value);
 
     internal sealed class CaptureChoice
     {
@@ -561,6 +676,11 @@ public sealed class AnomalySelectionItem : INotifyPropertyChanged
     private void OnPropertyChanged([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }
 
+public sealed record MultiPointMeterageItem(Guid Id, decimal Value)
+{
+    public string Label => $"{MeasurementText.Format(Value)} m";
+}
+
 public sealed record PositionChoice(AnomalyPosition Value, string Label)
 {
     private static readonly HashSet<AnomalyPosition> OperationalPositions =
@@ -593,9 +713,20 @@ public sealed record InfiltrationChoice(InfiltrationCondition Value, string Labe
 
 public sealed class EvidenceSelectionItem : INotifyPropertyChanged
 {
+    private BitmapImage? _originalImage;
+    private bool _originalImageLoaded;
     public Evidence Evidence { get; }
     public Guid Id => Evidence.Id;
     public BitmapImage? Thumbnail { get; }
+    public BitmapImage? OriginalImage
+    {
+        get
+        {
+            if (_originalImageLoaded) return _originalImage;
+            _originalImageLoaded = true;
+            return _originalImage = LoadOriginal(Evidence.FilePath);
+        }
+    }
     public string Label => Evidence.SourceType == EvidenceSourceType.VideoCapture ? "Captura do vídeo" : Path.GetFileName(Evidence.FilePath);
     public string VideoName { get; }
     public string TimestampText => Evidence.VideoTimestamp is null ? "Sem timestamp" : $"Timestamp: {Evidence.VideoTimestamp:hh\\:mm\\:ss\\.fff}";
@@ -624,5 +755,14 @@ public sealed class EvidenceSelectionItem : INotifyPropertyChanged
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad;
         image.DecodePixelWidth = 320; image.StreamSource = stream; image.EndInit(); image.Freeze(); return image;
+    }
+
+    private static BitmapImage? LoadOriginal(string path)
+    {
+        if (!File.Exists(path)) return null;
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad;
+        image.CreateOptions = BitmapCreateOptions.PreservePixelFormat;
+        image.StreamSource = stream; image.EndInit(); image.Freeze(); return image;
     }
 }

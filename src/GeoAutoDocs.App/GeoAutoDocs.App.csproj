@@ -5,7 +5,8 @@
     <UseWPF>true</UseWPF>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <ApplicationIcon />
+    <ApplicationIcon>Assets\GeoAutoDocs.ico</ApplicationIcon>
+    <Version>1.0.4</Version>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\GeoAutoDocs.Core\GeoAutoDocs.Core.csproj" />
@@ -14,5 +15,9 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="..\..\MODELO DE RELATORIO.docx" Link="Templates\MODELO DE RELATORIO.docx" CopyToOutputDirectory="PreserveNewest" />
+    <Resource Include="Assets\GeoAutoDocs.ico" />
   </ItemGroup>
+  <Target Name="RemoveUnusedLibVlcArchitectures" AfterTargets="Publish" Condition="'$(RuntimeIdentifier)' == 'win-x64'">
+    <RemoveDir Directories="$(PublishDir)libvlc\win-x86;$(PublishDir)libvlc\win-arm64" />
+  </Target>
 </Project>

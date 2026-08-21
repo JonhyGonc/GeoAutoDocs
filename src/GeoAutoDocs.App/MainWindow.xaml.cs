@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -19,12 +20,18 @@ namespace GeoAutoDocs.App;
 
 public partial class MainWindow : Window
 {
+    private enum VideoSurfaceState { Empty, Loading, Missing, Error }
+
     private readonly IProjectStore _store;
     private readonly WordReportService _wordReportService;
     private readonly SharedProjectService _sharedProjects;
     private readonly LocalLogger _logger;
     private readonly FrameCaptureService _frameCaptureService;
     private readonly OccurrenceService _occurrenceService;
+    private readonly IAnomalyCatalogService _anomalyCatalogService;
+    private readonly InspectionExchangeService _inspectionExchangeService;
+    private readonly IInspectionTransport _geoAutoEngineTransport;
+    private BackupStatus _backupStatus;
     private readonly LibVLC _libVlc;
     private readonly MediaPlayer _mediaPlayer;
     private readonly DispatcherTimer _saveTimer;
@@ -46,16 +53,34 @@ public partial class MainWindow : Window
     private bool _closingAfterSave;
     private bool _saveErrorNotified;
     private bool _seeking;
+    private bool _playerOperationInProgress;
+    private bool _videoLoadInProgress;
+    private bool _updatingSpeedSelection;
+    private float _selectedPlaybackRate = 1f;
+    private long _lastKnownPlayerTime;
+    private readonly SemaphoreSlim _videoLoadLock = new(1, 1);
     private bool _playerErrorNotified;
     private bool _playerDisposed;
+    private bool _captureInProgress;
     private bool _loadingInspections;
+    private bool _sectionReviewInProgress;
     private Point _occurrenceDragStart;
+    private Guid? _occurrenceDragId;
     private Guid? _projectDialogProjectId;
     private OccurrenceWindow? _embeddedOccurrenceEditor;
+    private bool _inspectionLayoutReady;
+    private bool _inspectionSideVisible = true;
+    private bool _videoFocusMode;
+    private double _inspectionSideWidth = 420;
+    private static string InspectionLayoutPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "GeoAutoDocs", "inspection-layout.json");
 
     public MainWindow(IProjectStore store, WordReportService wordReportService,
         SharedProjectService sharedProjects, LocalLogger logger, FrameCaptureService frameCaptureService,
-        OccurrenceService occurrenceService)
+        OccurrenceService occurrenceService, IAnomalyCatalogService anomalyCatalogService,
+        InspectionExchangeService inspectionExchangeService, IInspectionTransport geoAutoEngineTransport,
+        BackupStatus backupStatus)
     {
         InitializeComponent();
         WindowLayout.KeepInsideWorkArea(this, 1480, 900);
@@ -65,21 +90,43 @@ public partial class MainWindow : Window
         _logger = logger;
         _frameCaptureService = frameCaptureService;
         _occurrenceService = occurrenceService;
+        _anomalyCatalogService = anomalyCatalogService;
+        _inspectionExchangeService = inspectionExchangeService;
+        _geoAutoEngineTransport = geoAutoEngineTransport;
+        _backupStatus = backupStatus;
         LibVLCSharp.Shared.Core.Initialize();
         _libVlc = new LibVLC("--no-video-title-show", "--quiet", "--no-audio");
         _mediaPlayer = new MediaPlayer(_libVlc);
         VideoView.MediaPlayer = _mediaPlayer;
-        var version = typeof(App).Assembly.GetName().Version;
-        SidebarVersionText.Text = version is null ? "Versão local" : $"Versão {version.Major}.{version.Minor}";
+        CaptureFrameOverlayButton.Visibility = Visibility.Collapsed;
+        CaptureFrameButton.Visibility = Visibility.Visible;
+        CaptureFrameButton.Content = "Capturar evidência";
+        RefreshBackupStatus();
         _mediaPlayer.EncounteredError += (_, _) => Dispatcher.BeginInvoke(() => HandlePlayerError());
         _mediaPlayer.Playing += (_, _) => Dispatcher.BeginInvoke(() =>
         {
             VideoEmptyState.Visibility = Visibility.Collapsed;
             VideoLoadedBadge.Visibility = Visibility.Visible;
+            UpdatePlayerControlState();
+            if (!TryApplyPlaybackRate(_selectedPlaybackRate))
+            {
+                var rejectedRate = _selectedPlaybackRate;
+                _selectedPlaybackRate = 1f;
+                TryApplyPlaybackRate(1f);
+                SelectSpeed(1f);
+                MessageBox.Show($"O formato deste vídeo não aceita {rejectedRate:0.##}x. A velocidade voltou para 1,0x.",
+                    "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
             PlayPauseButton.Content = "❚❚";
         });
         _mediaPlayer.Paused += (_, _) => Dispatcher.BeginInvoke(() => PlayPauseButton.Content = "▶");
         _mediaPlayer.Stopped += (_, _) => Dispatcher.BeginInvoke(() => PlayPauseButton.Content = "▶");
+        _mediaPlayer.EndReached += (_, _) => Dispatcher.BeginInvoke(() =>
+        {
+            _lastKnownPlayerTime = Math.Max(_lastKnownPlayerTime, Math.Max(0, _mediaPlayer.Length));
+            PlayPauseButton.Content = "▶";
+            RefreshPlayerPosition();
+        });
         ProjectsList.ItemsSource = _projects;
         _saveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
         _saveTimer.Tick += async (_, _) => { _saveTimer.Stop(); await SavePendingAsync(); };
@@ -90,10 +137,78 @@ public partial class MainWindow : Window
         _playerTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         _playerTimer.Tick += (_, _) => RefreshPlayerPosition();
         _playerTimer.Start();
-        SizeChanged += (_, _) => ApplyDashboardDensity();
+        SizeChanged += (_, _) => { ApplyDashboardDensity(); ApplyInspectionLayout(); };
         Loaded += async (_, _) => await ReloadProjectsAsync();
+        ContentRendered += (_, _) => _logger.Info("Janela principal exibida.");
         Closing += OnClosing;
+        LoadInspectionLayoutPreferences();
+        _inspectionLayoutReady = true;
+        ApplyInspectionLayout();
     }
+
+    private void LoadInspectionLayoutPreferences()
+    {
+        try
+        {
+            if (!File.Exists(InspectionLayoutPath)) return;
+            var value = JsonSerializer.Deserialize<InspectionLayoutPreferences>(File.ReadAllText(InspectionLayoutPath));
+            if (value is null) return;
+            _inspectionSideWidth = Math.Clamp(value.SideWidth, 400, 560);
+            _videoFocusMode = value.FocusMode;
+            InspectionContextExpander.IsExpanded = value.ContextExpanded;
+        }
+        catch (Exception ex) { _logger.Info($"Preferências do player ignoradas: {ex.Message}"); }
+    }
+
+    private void SaveInspectionLayoutPreferences()
+    {
+        if (!_inspectionLayoutReady) return;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(InspectionLayoutPath)!);
+            File.WriteAllText(InspectionLayoutPath, JsonSerializer.Serialize(new InspectionLayoutPreferences(
+                _inspectionSideWidth, _inspectionSideVisible, InspectionContextExpander.IsExpanded, _videoFocusMode)));
+        }
+        catch (Exception ex) { _logger.Info($"Não foi possível salvar o layout do player: {ex.Message}"); }
+    }
+
+    private void ApplyInspectionLayout()
+    {
+        var showSide = !_videoFocusMode;
+        EditorHeaderGrid.Visibility = _videoFocusMode ? Visibility.Collapsed : Visibility.Visible;
+        InspectionContextExpander.Visibility = _videoFocusMode ? Visibility.Collapsed : Visibility.Visible;
+        InspectionSidePanel.Visibility = showSide ? Visibility.Visible : Visibility.Collapsed;
+        InspectionSideSplitter.Visibility = showSide ? Visibility.Visible : Visibility.Collapsed;
+        InspectionSplitterColumn.Width = showSide ? new GridLength(6) : new GridLength(0);
+        var responsiveWidth = ActualWidth > 0 && ActualWidth < 1100
+            ? Math.Min(_inspectionSideWidth, 400) : _inspectionSideWidth;
+        InspectionSideColumn.Width = showSide ? new GridLength(responsiveWidth) : new GridLength(0);
+        FocusVideoButton.Content = _videoFocusMode ? "Sair do modo foco" : "Modo foco";
+    }
+
+    private void FocusVideo_Click(object sender, RoutedEventArgs e) => ToggleVideoFocus();
+
+    private void VideoView_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        ToggleVideoFocus();
+        e.Handled = true;
+    }
+
+    private void ToggleVideoFocus()
+    {
+        _videoFocusMode = !_videoFocusMode;
+        ApplyInspectionLayout();
+        SaveInspectionLayoutPreferences();
+    }
+
+    private void InspectionSideSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        if (InspectionSideColumn.ActualWidth >= 380) _inspectionSideWidth = InspectionSideColumn.ActualWidth;
+        SaveInspectionLayoutPreferences();
+    }
+
+    private void InspectionLayoutPreferenceChanged(object sender, RoutedEventArgs e) =>
+        SaveInspectionLayoutPreferences();
 
     private async Task ReloadProjectsAsync()
     {
@@ -103,6 +218,7 @@ public partial class MainWindow : Window
             foreach (var project in await _store.ListAsync()) _projects.Add(project);
             CollectionViewSource.GetDefaultView(_projects).Refresh();
             RefreshDashboardMetrics();
+            RefreshHomeStatus();
             RefreshProjectsEmptyState();
         }
         catch (Exception ex) { ShowError("Não foi possível carregar os projetos.", ex); }
@@ -173,9 +289,7 @@ public partial class MainWindow : Window
         var query = ProjectsSearchBox.Text.Trim();
         ProjectsSearchHint.Visibility = query.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         var view = CollectionViewSource.GetDefaultView(_projects);
-        view.Filter = item => item is Project project &&
-            (query.Length == 0 || project.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
-             project.DefaultClient?.Contains(query, StringComparison.CurrentCultureIgnoreCase) == true);
+        view.Filter = item => item is Project project && ProjectDashboard.Matches(project, query);
         view.Refresh();
         RefreshProjectsEmptyState();
     }
@@ -191,17 +305,16 @@ public partial class MainWindow : Window
             ? "Crie seu primeiro projeto para começar."
             : "Tente buscar por outro nome de projeto ou cliente.";
         ProjectsEmptyAction.Visibility = query.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-        NewProjectTopButton.Visibility = _projects.Count == 0 && query.Length == 0
-            ? Visibility.Collapsed : Visibility.Visible;
+        NewProjectTopButton.Visibility = Visibility.Visible;
     }
 
     private void RefreshDashboardMetrics()
     {
-        var projectCount = _projects.Count;
-        var reportCount = _projects.Sum(project => project.Reports.Count);
-        var inProgressCount = _projects.Sum(project =>
-            project.Reports.Count(report => string.IsNullOrWhiteSpace(report.GeneratedReportPath)));
-        var sharedCount = _projects.Count(project => project.StorageKind == ProjectStorageKind.Shared);
+        var summary = ProjectDashboard.Summarize(_projects);
+        var projectCount = summary.Projects;
+        var reportCount = summary.Reports;
+        var inProgressCount = summary.InProgressReports;
+        var sharedCount = summary.SharedProjects;
 
         TotalProjectsMetric.Text = projectCount.ToString(CultureInfo.CurrentCulture);
         TotalProjectsDetail.Text = projectCount switch
@@ -233,9 +346,53 @@ public partial class MainWindow : Window
         };
     }
 
+    private void RefreshHomeStatus()
+    {
+        var sharedCount = _projects.Count(x => x.StorageKind == ProjectStorageKind.Shared);
+        StorageValueText.Text = sharedCount == 0 ? "Local" : sharedCount == _projects.Count ? "Compartilhado" : "Misto";
+        StorageDetailText.Text = sharedCount == 0
+            ? "Projetos salvos neste computador"
+            : $"{sharedCount} projeto(s) com dados compartilhados";
+        SecurityValueText.Text = _saveErrorNotified ? "Falha no último salvamento" : "Salvamento automático ativo";
+        SecurityValueText.Foreground = (System.Windows.Media.Brush)FindResource(
+            _saveErrorNotified ? "DangerBrush" : "TextPrimaryBrush");
+        SecurityDetailText.Text = _saveErrorNotified
+            ? "Consulte o log antes de continuar"
+            : "Alterações são persistidas automaticamente";
+    }
+
+    private void RefreshBackupStatus()
+    {
+        if (_backupStatus.HasSuccessfulBackup)
+        {
+            BackupValueText.Text = _backupStatus.LastSuccessfulAt!.Value.LocalDateTime.ToString("dd/MM/yyyy HH:mm");
+            BackupDetailText.Text = _backupStatus.LastError is null
+                ? "Backup automático concluído"
+                : "Última tentativa falhou; backup anterior preservado";
+            BackupDetailText.Foreground = (System.Windows.Media.Brush)FindResource(
+                _backupStatus.LastError is null ? "TextMutedBrush" : "WarningBrush");
+            return;
+        }
+        BackupValueText.Text = "Nunca realizado";
+        BackupDetailText.Text = _backupStatus.LastError is null ? "Nenhum backup disponível" : "Falha ao criar backup";
+        BackupDetailText.Foreground = (System.Windows.Media.Brush)FindResource(
+            _backupStatus.LastError is null ? "TextMutedBrush" : "DangerBrush");
+    }
+
+    public void UpdateBackupStatus(BackupStatus status)
+    {
+        _backupStatus = status;
+        RefreshBackupStatus();
+    }
+
     private void ApplyDashboardDensity()
     {
         var compact = ActualWidth > 0 && ActualWidth < 1100;
+        var compactEditor = ActualWidth > 0 && ActualWidth < 1050;
+        EditorView.Margin = compactEditor ? new Thickness(8, 10, 8, 8) : new Thickness(16, 14, 18, 10);
+        BackToProjectsText.Visibility = compactEditor ? Visibility.Collapsed : Visibility.Visible;
+        ShareProjectText.Visibility = compactEditor ? Visibility.Collapsed : Visibility.Visible;
+        StorageStatus.Visibility = compactEditor ? Visibility.Collapsed : Visibility.Visible;
         var padding = compact ? new Thickness(8, 16, 8, 16) : new Thickness(18, 16, 18, 16);
         foreach (var card in new[] { TotalProjectsCard, TotalReportsCard, InProgressReportsCard, SharedProjectsCard })
             card.Padding = padding;
@@ -245,6 +402,15 @@ public partial class MainWindow : Window
             label.FontSize = compact ? 9.5 : 13;
         foreach (var detail in new[] { TotalProjectsDetail, TotalReportsDetail, InProgressReportsDetail, SharedProjectsDetail })
             detail.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        ProjectsHeaderGrid.RowDefinitions[1].Height = compact ? GridLength.Auto : new GridLength(0);
+        Grid.SetColumnSpan(ProjectsHeaderTitlePanel, compact ? 3 : 1);
+        Grid.SetRow(ProjectsHeaderSearchPanel, compact ? 1 : 0);
+        Grid.SetColumn(ProjectsHeaderSearchPanel, compact ? 0 : 1);
+        Grid.SetColumnSpan(ProjectsHeaderSearchPanel, compact ? 2 : 1);
+        ProjectsHeaderSearchPanel.Margin = compact ? new Thickness(0, 18, 12, 0) : new Thickness(18, 0, 18, 0);
+        ProjectsSearchColumn.Width = compact ? new GridLength(1, GridUnitType.Star) : new GridLength(390);
+        Grid.SetRow(NewProjectTopButton, compact ? 1 : 0);
+        NewProjectTopButton.Margin = compact ? new Thickness(0, 18, 0, 0) : new Thickness(0);
     }
 
     private async void OpenProject_Click(object sender, RoutedEventArgs e)
@@ -423,11 +589,14 @@ public partial class MainWindow : Window
             : "Local";
         ShareProjectButton.IsEnabled = project.StorageKind == ProjectStorageKind.Local;
         NewReportButton.IsEnabled = _sharedSession?.IsReadOnly != true;
+        ContinueReportButton.IsEnabled = !IsReadOnly && _currentProject is not null;
         HeaderNewReportButton.IsEnabled = _sharedSession?.IsReadOnly != true;
+        GenerateReportButton.IsEnabled = !IsReadOnly && _currentReport is not null;
         ReportsEmptyState.Visibility = reports.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         ReportHeaderTab.IsEnabled = !IsReadOnly && _currentReport is not null;
         WordConfigTab.IsEnabled = true;
         ReadOnlyInspectionText.Visibility = IsReadOnly ? Visibility.Visible : Visibility.Collapsed;
+        ReadOnlyInspectionBanner.Visibility = IsReadOnly ? Visibility.Visible : Visibility.Collapsed;
         RefreshInspectionTree();
         UpdateInspectionWriteState();
         LoadReport(_currentReport);
@@ -476,6 +645,16 @@ public partial class MainWindow : Window
             ? $"✓ Relatório gerado\n{Path.GetFileName(report!.GeneratedReportPath)}" : "";
         OpenReportButton.IsEnabled = File.Exists(report?.GeneratedReportPath);
         OpenReportFolderButton.IsEnabled = File.Exists(report?.GeneratedReportPath);
+        DeleteReportButton.IsEnabled = report is not null && !IsReadOnly;
+        GenerateReportButton.IsEnabled = report is not null && !IsReadOnly;
+        ContinueReportButton.IsEnabled = _currentProject is not null && !IsReadOnly;
+        SendToGeoAutoEngineButton.IsEnabled = report is not null;
+        ExportInspectionButton.IsEnabled = report is not null;
+        GeoAutoEngineStatusText.Text = "";
+        ContinueReportButton.ToolTip = IsReadOnly
+            ? "Projeto aberto somente para leitura."
+            : "Selecione um DOCX existente para analisar e continuar.";
+        ReadOnlyReportBanner.Visibility = IsReadOnly ? Visibility.Visible : Visibility.Collapsed;
         RefreshFilePreviews();
         _loadingFields = false;
         RefreshReportReview();
@@ -522,6 +701,26 @@ public partial class MainWindow : Window
         await SavePendingAsync();
         ReportCodeBox.Focus();
         ReportCodeBox.SelectAll();
+    }
+
+    private async void DeleteReport_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null || _currentReport is null || IsReadOnly) return;
+        var report = _currentReport;
+        if (MessageBox.Show($"Excluir o relatório '{report.DisplayCode}'? O arquivo DOCX já gerado será preservado.",
+                "Excluir relatório", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        _currentProject.Reports.Remove(report);
+        _currentReport = _currentProject.Reports.OrderBy(x => x.Order).FirstOrDefault();
+        _loadingFields = true;
+        var reports = _currentProject.Reports.OrderBy(x => x.Order).ToList();
+        ReportsCombo.ItemsSource = reports;
+        ReportsList.ItemsSource = reports;
+        ReportsCombo.SelectedItem = _currentReport;
+        ReportsList.SelectedItem = _currentReport;
+        ReportsEmptyState.Visibility = reports.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        _loadingFields = false;
+        LoadReport(_currentReport);
+        await SaveInspectionChangesAsync();
     }
 
     private void ContinueInspection_Click(object sender, RoutedEventArgs e) => InspectionsTab.IsSelected = true;
@@ -588,10 +787,11 @@ public partial class MainWindow : Window
         report.CustomDiameters = CustomDiametersBox.Text.Trim(); report.IncludeInspectionOpening = OpeningCheck.IsChecked == true; report.IncludeGpr = GprCheck.IsChecked == true;
     }
 
-    private async Task SavePendingAsync()
+    private async Task<bool> SavePendingAsync()
     {
         _saveTimer.Stop();
-        if (!_hasPendingChanges || _currentProject is null || _sharedSession?.IsReadOnly == true) return;
+        if (!_hasPendingChanges || _currentProject is null || _sharedSession?.IsReadOnly == true)
+            return !_saveErrorNotified;
         try
         {
             ApplyFieldsToModel();
@@ -599,6 +799,7 @@ public partial class MainWindow : Window
             if (_sharedSession is not null) { await _sharedSession.SaveLocalAsync(); _sharedDirty = true; }
             _hasPendingChanges = false;
             _saveErrorNotified = false;
+            RefreshHomeStatus();
             ProjectClientSummary.Text = string.IsNullOrWhiteSpace(_currentProject.DefaultClient)
                 ? "Dados do cliente ainda não informados" : _currentProject.DefaultClient;
             ActiveReportTitle.Text = _currentReport?.DisplayCode ?? "Selecione um relatório";
@@ -606,15 +807,20 @@ public partial class MainWindow : Window
             RefreshOverview();
             RefreshReportReview();
             SaveStatus.Text = "✓ Salvo";
+            UpdateSectionReviewState();
+            return true;
         }
         catch (Exception ex)
         {
             SaveStatus.Text = "Falha ao salvar — consulte o log";
+            UpdateSectionReviewState();
             _logger.Error("Não foi possível salvar as alterações.", ex);
-            if (_saveErrorNotified) return;
+            if (_saveErrorNotified) return false;
             _saveErrorNotified = true;
+            RefreshHomeStatus();
             MessageBox.Show("Não foi possível salvar as alterações. Consulte o log.",
                 "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
+            return false;
         }
     }
 
@@ -660,6 +866,7 @@ public partial class MainWindow : Window
 
     private async void OnClosing(object? sender, CancelEventArgs e)
     {
+        SaveInspectionLayoutPreferences();
         if (_closingAfterSave || (_currentProject is null && !_hasPendingChanges))
         {
             DisposePlayer();
@@ -824,7 +1031,169 @@ public partial class MainWindow : Window
             RefreshOverview();
             RefreshReportReview();
         }
+        catch (InspectionExchangeExportException ex)
+        {
+            if (_sharedSession?.IsReadOnly != true) { _hasPendingChanges = true; await SavePendingAsync(); }
+            GeneratedReportText.Text = $"⚠ DOCX gerado; falha no arquivo de intercâmbio\n{Path.GetFileName(ex.DocxPath)}";
+            OpenReportButton.IsEnabled = true;
+            OpenReportFolderButton.IsEnabled = true;
+            ReportsList.Items.Refresh();
+            RefreshOverview();
+            ShowError(ex.Message, ex);
+        }
         catch (Exception ex) { GeneratedReportText.Text = "Falha ao gerar relatório."; ShowError(ex.Message, ex); }
+    }
+
+    private async void ExportInspection_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null || _currentReport is null) return;
+        try
+        {
+            if (!IsReadOnly)
+            {
+                ApplyFieldsToModel();
+                await SavePendingAsync();
+            }
+            var document = _inspectionExchangeService.Build(_currentProject, _currentReport);
+            var reportsDirectory = Path.Combine(_currentProject.ProjectPath ?? "", "reports");
+            var dialog = new SaveFileDialog
+            {
+                Title = "Exportar inspeção estruturada",
+                Filter = "Intercâmbio GeoAutoDocs (*.geoadocs.json)|*.geoadocs.json",
+                AddExtension = true,
+                DefaultExt = ".geoadocs.json",
+                FileName = SanitizeSuggestedFileName($"{_currentReport.DisplayCode}.geoadocs.json"),
+                InitialDirectory = Directory.Exists(reportsDirectory) ? reportsDirectory : null,
+                OverwritePrompt = true
+            };
+            if (dialog.ShowDialog(this) != true) return;
+            var transport = new FileInspectionTransport(dialog.FileName, _inspectionExchangeService.Serializer);
+            var result = await transport.SendAsync(document);
+            GeoAutoEngineStatusText.Text = result.Success
+                ? $"✓ Arquivo exportado: {Path.GetFileName(result.Destination)}"
+                : result.Message;
+            GeoAutoEngineStatusText.Foreground = (System.Windows.Media.Brush)FindResource(
+                result.Success ? "SuccessBrush" : "WarningBrush");
+            if (!result.Success) ShowError(result.Message, new IOException(result.Message));
+        }
+        catch (Exception ex)
+        {
+            GeoAutoEngineStatusText.Text = "Não foi possível exportar a inspeção.";
+            ShowError(ex.Message, ex);
+        }
+    }
+
+    private async void SendToGeoAutoEngine_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null || _currentReport is null) return;
+        SendToGeoAutoEngineButton.IsEnabled = false;
+        GeoAutoEngineStatusText.Foreground = (System.Windows.Media.Brush)FindResource("TextSecondaryBrush");
+        GeoAutoEngineStatusText.Text = "Procurando GeoAutoEngine e verificando compatibilidade...";
+        try
+        {
+            if (!IsReadOnly)
+            {
+                ApplyFieldsToModel();
+                await SavePendingAsync();
+            }
+            var document = _inspectionExchangeService.Build(_currentProject, _currentReport);
+            var result = await _geoAutoEngineTransport.SendAsync(document);
+            GeoAutoEngineStatusText.Text = result.Message;
+            GeoAutoEngineStatusText.Foreground = (System.Windows.Media.Brush)FindResource(
+                result.Success ? "SuccessBrush" : "WarningBrush");
+            if (result.Success)
+            {
+                var occurrences = document.Sections.Sum(x => x.Occurrences.Count);
+                MessageBox.Show($"GeoAutoEngine encontrado\n\n{document.Report.ReportCode}\nenviado com sucesso.\n\n" +
+                                $"{document.Sections.Count} trecho(s)\n{occurrences} ocorrência(s)",
+                    "Enviar ao GeoAutoEngine", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            var fallback = result.Status == InspectionTransportStatus.DestinationUnavailable
+                ? "\n\nAbra o Civil 3D com o GeoAutoEngine carregado ou use “Exportar .geoadocs.json”."
+                : string.Empty;
+            MessageBox.Show(result.Message + fallback, "Enviar ao GeoAutoEngine",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        catch (Exception ex)
+        {
+            GeoAutoEngineStatusText.Text = "Não foi possível preparar o envio ao GeoAutoEngine.";
+            ShowError(ex.Message, ex);
+        }
+        finally
+        {
+            SendToGeoAutoEngineButton.IsEnabled = _currentReport is not null;
+        }
+    }
+
+    private async void ContinueReport_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null || IsReadOnly) return;
+
+        var report = _currentReport;
+        var createdForContinuation = false;
+        if (report is null)
+        {
+            var sections = _currentProject.Locations.OrderBy(x => x.Order).ThenBy(x => x.Name)
+                .SelectMany(x => x.Sections.OrderBy(section => section.Order).ThenBy(section => section.Name))
+                .ToList();
+            if (sections.Count == 0)
+            {
+                MessageBox.Show("Cadastre ao menos um trecho antes de continuar um relatório.", "GeoAutoDocs",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            report = _currentProject.CreateReport("Continuação de relatório");
+            report.TemplatePath = _wordReportService.DefaultTemplatePath;
+            foreach (var section in sections) report.SelectSection(section);
+            createdForContinuation = true;
+        }
+        else
+        {
+            ApplyFieldsToModel();
+            await SavePendingAsync();
+        }
+
+        var window = new ContinueReportWindow(_currentProject, report, _wordReportService) { Owner = this };
+        if (window.ShowDialog() != true || window.Result is null)
+        {
+            if (createdForContinuation) _currentProject.Reports.Remove(report);
+            return;
+        }
+
+        var result = window.Result;
+        if (createdForContinuation)
+        {
+            report.Name = Path.GetFileNameWithoutExtension(result.BaseFilePath);
+            _currentReport = report;
+            _loadingFields = true;
+            var reports = _currentProject.Reports.OrderBy(x => x.Order).ToList();
+            ReportsCombo.ItemsSource = reports;
+            ReportsList.ItemsSource = reports;
+            ReportsCombo.SelectedItem = report;
+            ReportsList.SelectedItem = report;
+            ReportsEmptyState.Visibility = Visibility.Collapsed;
+            _loadingFields = false;
+        }
+
+        report.GeneratedReportPath = result.OutputPath;
+        report.ContinuationExports.Add(new ReportContinuationExport
+        {
+            ReportId = report.Id,
+            BaseFilePath = result.BaseFilePath,
+            BaseFileHash = result.BaseFileHash,
+            GeneratedFilePath = result.OutputPath,
+            Version = result.Version,
+            GeneratedAt = DateTime.UtcNow,
+            ManifestJson = result.ManifestJson,
+            Status = "Concluído",
+            Message = $"{result.AddedOccurrences} anomalia(s), {result.AddedEvidences} evidência(s)"
+        });
+        _hasPendingChanges = true;
+        await SavePendingAsync();
+        LoadReport(report);
+        ReportsList.Items.Refresh();
     }
 
     private void OpenReport_Click(object sender, RoutedEventArgs e)
@@ -906,6 +1275,9 @@ public partial class MainWindow : Window
     }
 
     private bool IsReadOnly => _sharedSession?.IsReadOnly == true;
+
+    private void AnomalyCatalog_Click(object sender, RoutedEventArgs e) =>
+        new AnomalyCatalogWindow(_anomalyCatalogService, IsReadOnly) { Owner = this }.ShowDialog();
 
     private void RefreshOverview()
     {
@@ -1023,11 +1395,13 @@ public partial class MainWindow : Window
         VideosList.SelectedItem = selected;
         _currentVideo = selected?.Video;
         if (_currentSection is null)
-            ShowVideoState("Crie ou selecione um trecho para iniciar.", false);
+            ShowVideoState("Escolha um local e um trecho para continuar.", false);
         else if (items.Count == 0)
-            ShowVideoState("Nenhum vídeo neste trecho", !IsReadOnly);
+            ShowVideoState("Este trecho ainda não possui vídeos vinculados.", !IsReadOnly);
         else if (selected is null)
-            ShowVideoState("Selecione um vídeo para iniciar.", false);
+            ShowVideoState("Escolha um dos vídeos vinculados ao trecho.", false);
+        else if (_currentMedia is null && File.Exists(selected.Video.FilePath))
+            ShowVideoState("O vídeo já está vinculado. Clique em “Recarregar vídeo” para exibi-lo.", false);
         UpdateInspectionWriteState();
     }
 
@@ -1056,11 +1430,15 @@ public partial class MainWindow : Window
             OccurrencesEmptyTitle.Text = "Selecione um trecho";
             OccurrencesEmptyDescription.Text = "As anomalias registradas aparecerão aqui.";
             OccurrencesEmptyState.Visibility = Visibility.Visible;
+            UpdateSectionReviewState();
             return;
         }
+        var canModify = !IsReadOnly && _currentSection.AnomalyReviewStatus != SectionAnomalyReviewStatus.Completed;
+        var modifyToolTip = IsReadOnly ? "Projeto aberto somente para leitura."
+            : IsSectionReviewLocked ? "Reabra o trecho para editar" : "Arraste para reordenar";
         var all = _currentSection.Occurrences
             .OrderBy(x => x.Order).ThenBy(x => x.CreatedAt)
-            .Select(x => new OccurrenceListItem(x, !IsReadOnly)).ToList();
+            .Select(x => new OccurrenceListItem(x, canModify, modifyToolTip)).ToList();
         var unfilteredCount = all.Count;
         var incomplete = all.Count(x => !x.IsComplete);
         AnomalySummaryText.Text = $"{all.Count} apontamento(s) • {all.Sum(x => x.EvidenceCount)} imagem(ns) • {incomplete} pendência(s)";
@@ -1080,39 +1458,143 @@ public partial class MainWindow : Window
             ? "Durante a inspeção, capture um frame para começar."
             : "Ajuste a pesquisa ou o filtro para ver outros registros.";
         OccurrencesEmptyState.Visibility = all.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        UpdateSectionReviewState();
         RefreshOverview();
     }
 
-    private void OccurrencesList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e) =>
+    private bool IsSectionReviewLocked =>
+        _currentSection?.AnomalyReviewStatus == SectionAnomalyReviewStatus.Completed;
+
+    private void UpdateSectionReviewState()
+    {
+        if (_currentSection is null)
+        {
+            SectionReviewStatusText.Text = "Selecione um trecho";
+            SectionPersistenceStatusText.Text = string.Empty;
+            CompleteSectionAnomaliesButton.Content = "Concluir anomalias do trecho";
+            CompleteSectionAnomaliesButton.IsEnabled = false;
+            return;
+        }
+        SectionReviewStatusText.Text = _currentSection.AnomalyReviewStatus switch
+        {
+            SectionAnomalyReviewStatus.Completed => "Concluído",
+            SectionAnomalyReviewStatus.Reviewed => "Revisado • edição aberta",
+            _ => "Em edição"
+        };
+        SectionPersistenceStatusText.Text = _saveErrorNotified ? "Falha no salvamento"
+            : _hasPendingChanges ? "Salvamento pendente"
+            : _currentSection.AnomalyReviewUpdatedAt is DateTime updated
+                ? $"Persistido em {updated.ToLocalTime():dd/MM/yyyy HH:mm}" : "Alterações salvas automaticamente";
+        CompleteSectionAnomaliesButton.Content = IsSectionReviewLocked
+            ? "Reabrir para edição" : "Concluir anomalias do trecho";
+        CompleteSectionAnomaliesButton.IsEnabled = !IsReadOnly && !_sectionReviewInProgress;
+    }
+
+    private async void CompleteSectionAnomalies_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null || _currentSection is null || IsReadOnly || _sectionReviewInProgress) return;
+        _sectionReviewInProgress = true;
+        UpdateSectionReviewState();
+        try
+        {
+            if (_hasPendingChanges && !await SavePendingAsync()) return;
+            if (IsSectionReviewLocked)
+            {
+                if (MessageBox.Show("Reabrir as anomalias deste trecho para edição?", "Reabrir trecho",
+                        MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+                if (await PersistSectionReviewStateAsync(SectionAnomalyReviewStatus.Reviewed))
+                    MessageBox.Show("Trecho reaberto para edição.", "GeoAutoDocs", MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                return;
+            }
+
+            var pending = SectionReviewRules.GetPending(_currentProject, _currentSection);
+            if (pending.HasPending)
+            {
+                var details = new List<string>();
+                if (pending.IncompleteOccurrences > 0)
+                    details.Add($"{pending.IncompleteOccurrences} anomalia(s) incompleta(s)");
+                if (pending.PendingCaptures > 0)
+                    details.Add($"{pending.PendingCaptures} captura(s) pendente(s)");
+                if (MessageBox.Show($"Existem {string.Join(" e ", details)}. Concluir mesmo assim?",
+                        "Pendências do trecho", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                    return;
+            }
+            if (await PersistSectionReviewStateAsync(SectionAnomalyReviewStatus.Completed))
+                MessageBox.Show("Anomalias do trecho concluídas e persistidas.", "GeoAutoDocs",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        finally
+        {
+            _sectionReviewInProgress = false;
+            RefreshOccurrences();
+            UpdateInspectionWriteState();
+        }
+    }
+
+    private async Task<bool> PersistSectionReviewStateAsync(SectionAnomalyReviewStatus status)
+    {
+        if (_currentSection is null) return false;
+        var previousStatus = _currentSection.AnomalyReviewStatus;
+        var previousUpdatedAt = _currentSection.AnomalyReviewUpdatedAt;
+        _currentSection.AnomalyReviewStatus = status;
+        _currentSection.AnomalyReviewUpdatedAt = DateTime.UtcNow;
+        _hasPendingChanges = true;
+        SectionPersistenceStatusText.Text = "Salvando...";
+        if (await SavePendingAsync()) return true;
+        _currentSection.AnomalyReviewStatus = previousStatus;
+        _currentSection.AnomalyReviewUpdatedAt = previousUpdatedAt;
+        SectionPersistenceStatusText.Text = "Falha no salvamento • conclusão não aplicada";
+        return false;
+    }
+
+    private void OccurrencesList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: OccurrenceListItem { CanModify: true } item }) return;
         _occurrenceDragStart = e.GetPosition(OccurrencesList);
+        _occurrenceDragId = item.Id;
+    }
 
     private void OccurrencesList_PreviewMouseMove(object sender, MouseEventArgs e)
     {
-        if (e.LeftButton != MouseButtonState.Pressed || IsReadOnly) return;
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            _occurrenceDragId = null;
+            return;
+        }
+        if (_occurrenceDragId is not Guid id || IsReadOnly || IsSectionReviewLocked) return;
         var position = e.GetPosition(OccurrencesList);
         if (Math.Abs(position.X - _occurrenceDragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
             Math.Abs(position.Y - _occurrenceDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
-        var container = FindVisualParent<ListBoxItem>(e.OriginalSource as DependencyObject);
-        if (container?.DataContext is OccurrenceListItem item)
-            DragDrop.DoDragDrop(container, item.Id, DragDropEffects.Move);
+        _occurrenceDragId = null;
+        DragDrop.DoDragDrop(OccurrencesList, id, DragDropEffects.Move);
     }
 
     private async void OccurrencesList_Drop(object sender, DragEventArgs e)
     {
-        if (_currentSection is null || IsReadOnly || !e.Data.GetDataPresent(typeof(Guid))) return;
+        if (_currentSection is null || IsReadOnly || IsSectionReviewLocked || !e.Data.GetDataPresent(typeof(Guid))) return;
         var sourceId = (Guid)e.Data.GetData(typeof(Guid));
-        var targetContainer = FindVisualParent<ListBoxItem>(e.OriginalSource as DependencyObject);
-        if (targetContainer?.DataContext is not OccurrenceListItem target || target.Id == sourceId) return;
         var ordered = _currentSection.Occurrences.OrderBy(x => x.Order).ThenBy(x => x.CreatedAt).ToList();
         var source = ordered.FirstOrDefault(x => x.Id == sourceId);
         if (source is null) return;
+        var previousOrders = ordered.ToDictionary(x => x.Id, x => x.Order);
+        var targetContainer = FindVisualParent<ListBoxItem>(e.OriginalSource as DependencyObject);
+        var target = targetContainer?.DataContext as OccurrenceListItem;
+        if (target?.Id == sourceId) return;
         ordered.Remove(source);
-        var targetIndex = ordered.FindIndex(x => x.Id == target.Id);
+        var targetIndex = target is null ? ordered.Count : ordered.FindIndex(x => x.Id == target.Id);
         if (targetIndex < 0) return;
+        if (targetContainer is not null && e.GetPosition(targetContainer).Y > targetContainer.ActualHeight / 2)
+            targetIndex++;
         ordered.Insert(targetIndex, source);
         for (var index = 0; index < ordered.Count; index++) ordered[index].Order = index;
-        await SaveInspectionChangesAsync();
+        _hasPendingChanges = true;
+        UpdateSectionReviewState();
+        if (!await SavePendingAsync())
+            foreach (var occurrence in ordered) occurrence.Order = previousOrders[occurrence.Id];
+        else if (_sharedSession is not null) _sharedDirty = true;
         RefreshOccurrences();
+        e.Handled = true;
     }
 
     private static T? FindVisualParent<T>(DependencyObject? child) where T : DependencyObject
@@ -1127,37 +1609,114 @@ public partial class MainWindow : Window
 
     private void AnomalyListFilterChanged(object sender, RoutedEventArgs e)
     {
+        if (AnomalySearchPlaceholder is not null)
+            AnomalySearchPlaceholder.Visibility = string.IsNullOrEmpty(AnomalyListSearchBox?.Text)
+                ? Visibility.Visible : Visibility.Collapsed;
         if (IsInitialized) RefreshOccurrences();
+    }
+
+    private void OccurrenceActions_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: Guid id, DataContext: OccurrenceListItem item } button) return;
+        var menuStyle = (Style)FindResource("CleanContextMenuStyle");
+        var itemStyle = (Style)FindResource("CleanContextMenuItemStyle");
+        var separatorStyle = (Style)FindResource("CleanContextMenuSeparatorStyle");
+        var menu = new ContextMenu { PlacementTarget = button, Style = menuStyle };
+        var goToVideo = new MenuItem
+        {
+            Header = "Ir ao vídeo", Tag = id, IsEnabled = item.CanGoToVideo, Style = itemStyle,
+            ToolTip = item.CanGoToVideo ? "Abrir o vídeo no instante da evidência" : "Nenhuma evidência vinculada a vídeo."
+        };
+        ToolTipService.SetShowOnDisabled(goToVideo, true);
+        goToVideo.Click += GoToOccurrenceVideo_Click;
+        var duplicate = new MenuItem
+        {
+            Header = "Duplicar", Tag = id, IsEnabled = item.CanModify, Style = itemStyle,
+            ToolTip = item.CanModify ? "Criar uma cópia editável" : item.ModifyToolTip
+        };
+        ToolTipService.SetShowOnDisabled(duplicate, true);
+        duplicate.Click += DuplicateOccurrence_Click;
+        var delete = new MenuItem
+        {
+            Header = "Excluir", Tag = id, IsEnabled = item.CanModify, Style = itemStyle,
+            Foreground = (System.Windows.Media.Brush)FindResource("DangerBrush"),
+            ToolTip = item.CanModify ? "Excluir a anomalia" : item.ModifyToolTip
+        };
+        ToolTipService.SetShowOnDisabled(delete, true);
+        delete.Click += DeleteOccurrence_Click;
+        menu.Items.Add(goToVideo);
+        menu.Items.Add(duplicate);
+        menu.Items.Add(new Separator { Style = separatorStyle });
+        menu.Items.Add(delete);
+        if (IsSectionReviewLocked)
+        {
+            var reopen = new MenuItem
+            {
+                Header = "Reabrir para edição", IsEnabled = !IsReadOnly, Style = itemStyle,
+                ToolTip = IsReadOnly ? "Projeto aberto somente para leitura." : "Reabrir o trecho e habilitar as ações"
+            };
+            ToolTipService.SetShowOnDisabled(reopen, true);
+            reopen.Click += CompleteSectionAnomalies_Click;
+            menu.Items.Add(new Separator { Style = separatorStyle });
+            menu.Items.Add(reopen);
+        }
+        menu.IsOpen = true;
     }
 
     private void UpdateInspectionWriteState()
     {
-        AddLocationButton.IsEnabled = !IsReadOnly && _currentProject is not null;
-        AddSectionButton.IsEnabled = !IsReadOnly && _currentLocation is not null;
-        AddVideoButton.IsEnabled = !IsReadOnly && _currentSection is not null;
+        LocationsList.IsEnabled = _currentProject is not null && !_captureInProgress && !_videoLoadInProgress;
+        SectionsList.IsEnabled = _currentLocation is not null && !_captureInProgress && !_videoLoadInProgress;
+        VideosList.IsEnabled = _currentSection is not null && !_captureInProgress && !_videoLoadInProgress;
+        AddLocationButton.IsEnabled = !IsReadOnly && !_captureInProgress && _currentProject is not null;
+        AddSectionButton.IsEnabled = !IsReadOnly && !_captureInProgress && _currentLocation is not null;
+        RenameLocationButton.IsEnabled = !IsReadOnly && !_captureInProgress && _currentLocation is not null;
+        DeleteLocationButton.IsEnabled = !IsReadOnly && !_captureInProgress && _currentLocation is not null;
+        EditSectionButton.IsEnabled = !IsReadOnly && !IsSectionReviewLocked && !_captureInProgress && _currentSection is not null;
+        EditSectionButton.ToolTip = IsReadOnly ? "Projeto aberto somente para leitura."
+            : IsSectionReviewLocked ? "Reabra o trecho para editar"
+            : _currentSection is null ? "Selecione um trecho para editar." : "Editar trecho";
+        DeleteSectionButton.IsEnabled = !IsReadOnly && !_captureInProgress && _currentSection is not null;
+        AddVideoButton.IsEnabled = !IsReadOnly && !_captureInProgress && !_videoLoadInProgress && _currentSection is not null;
         AddVideoButton.ToolTip = IsReadOnly ? "Projeto aberto somente para leitura."
             : _currentSection is null ? "Selecione ou crie um trecho antes de adicionar um vídeo."
             : "Adicionar vídeo ao trecho selecionado";
         EmptyVideoButton.IsEnabled = AddVideoButton.IsEnabled;
-        CaptureFrameButton.IsEnabled = !IsReadOnly && _currentVideo is not null && File.Exists(_currentVideo.FilePath);
+        ReloadVideoButton.IsEnabled = !_captureInProgress && !_playerOperationInProgress && !_videoLoadInProgress &&
+                                      _currentVideo is not null && File.Exists(_currentVideo.FilePath);
+        CaptureFrameButton.IsEnabled = !_captureInProgress && !IsReadOnly && !IsSectionReviewLocked &&
+                                       _currentVideo is not null && File.Exists(_currentVideo.FilePath);
         CaptureFrameOverlayButton.IsEnabled = CaptureFrameButton.IsEnabled;
-        RelocateVideoButton.IsEnabled = !IsReadOnly && _currentVideo is not null && !File.Exists(_currentVideo.FilePath);
+        RelocateVideoButton.IsEnabled = !IsReadOnly && !_captureInProgress && _currentVideo is not null && !File.Exists(_currentVideo.FilePath);
         RelocateVideoButton.Visibility = _currentVideo is not null && !File.Exists(_currentVideo.FilePath)
             ? Visibility.Visible : Visibility.Collapsed;
-        RemoveVideoButton.IsEnabled = !IsReadOnly && _currentVideo is not null;
-        NewOccurrenceButton.IsEnabled = !IsReadOnly && _currentSection is not null;
+        RemoveVideoButton.IsEnabled = !IsReadOnly && !_captureInProgress && _currentVideo is not null;
+        NewOccurrenceButton.IsEnabled = !IsReadOnly && !IsSectionReviewLocked && !_captureInProgress && _currentSection is not null;
+        NewOccurrenceButton.ToolTip = IsReadOnly ? "Projeto aberto somente para leitura."
+            : IsSectionReviewLocked ? "Reabra o trecho para editar"
+            : _currentSection is null ? "Selecione um trecho para cadastrar uma anomalia." : "Cadastrar anomalia";
+        UpdateSectionReviewState();
     }
 
-    private void AddLocation_Click(object sender, RoutedEventArgs e)
+    private async void AddLocation_Click(object sender, RoutedEventArgs e)
     {
         if (_currentProject is null || IsReadOnly) return;
-        NewLocationNameBox.Clear();
-        NewLocationValidationText.Visibility = Visibility.Collapsed;
-        NewSectionPanel.Visibility = Visibility.Collapsed;
-        NewLocationPanel.Visibility = Visibility.Visible;
         HideVideoSurfaceForOverlay();
-        InspectionFormOverlay.Visibility = Visibility.Visible;
-        NewLocationNameBox.Focus();
+        string? name;
+        try { name = NewLocationWindow.Show(this); }
+        finally { RestoreVideoSurfaceAfterOverlay(); }
+        if (name is null) return;
+
+        var location = new Location
+        {
+            ProjectId = _currentProject.Id,
+            Name = name,
+            Order = _currentProject.Locations.Count
+        };
+        _currentProject.Locations.Add(location);
+        _currentLocation = location;
+        RefreshInspectionTree();
+        await SaveInspectionChangesAsync();
     }
 
     private async void CreateLocation_Click(object sender, RoutedEventArgs e)
@@ -1178,18 +1737,106 @@ public partial class MainWindow : Window
         await SaveInspectionChangesAsync();
     }
 
-    private void AddSection_Click(object sender, RoutedEventArgs e)
+    private async void AddSection_Click(object sender, RoutedEventArgs e)
     {
         if (_currentProject is null || _currentLocation is null || IsReadOnly) return;
-        NewSectionNameBox.Clear(); NewSectionStartBox.Clear(); NewSectionEndBox.Clear();
-        NewSectionDiameterBox.Clear(); NewSectionReferenceBox.Clear(); NewSectionDescriptionBox.Clear();
-        NewSectionValidationText.Text = "Campos opcionais podem permanecer vazios.";
-        NewSectionValidationText.Foreground = (System.Windows.Media.Brush)FindResource("TextMutedBrush");
-        NewLocationPanel.Visibility = Visibility.Collapsed;
-        NewSectionPanel.Visibility = Visibility.Visible;
         HideVideoSurfaceForOverlay();
-        InspectionFormOverlay.Visibility = Visibility.Visible;
-        NewSectionNameBox.Focus();
+        NewSectionDraft? draft;
+        try { draft = NewSectionWindow.Show(this); }
+        finally { RestoreVideoSurfaceAfterOverlay(); }
+        if (draft is null) return;
+
+        var section = new InspectionSection
+        {
+            LocationId = _currentLocation.Id,
+            Name = draft.Name,
+            Description = draft.Description,
+            Diameter = draft.Diameter,
+            StartPoint = draft.StartPoint,
+            EndPoint = draft.EndPoint,
+            Reference = draft.Reference,
+            InvestigatedMeters = draft.InvestigatedMeters,
+            Order = _currentLocation.Sections.Count
+        };
+        _currentLocation.Sections.Add(section);
+        _currentSection = section;
+        RefreshSections();
+        await SaveInspectionChangesAsync();
+    }
+
+    private async void RenameLocation_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentLocation is null || IsReadOnly) return;
+        var name = TextPromptWindow.Ask(this, "Renomear local", "Nome do local", _currentLocation.Name);
+        if (string.IsNullOrWhiteSpace(name) || name == _currentLocation.Name) return;
+        _currentLocation.Name = name;
+        RefreshInspectionTree();
+        await SaveInspectionChangesAsync();
+    }
+
+    private async void DeleteLocation_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null || _currentLocation is null || IsReadOnly) return;
+        var location = _currentLocation;
+        if (MessageBox.Show($"Excluir o local '{location.Name}' e todos os seus trechos, ocorrências e capturas?",
+                "Excluir local", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+
+        StopAndReleaseCurrentMedia();
+        var sectionIds = location.Sections.Select(x => x.Id).ToHashSet();
+        _currentProject.Captures.RemoveAll(x => sectionIds.Contains(x.SectionId));
+        foreach (var report in _currentProject.Reports)
+            report.SectionLinks.RemoveAll(x => sectionIds.Contains(x.SectionId));
+        _currentProject.Locations.Remove(location);
+        _currentLocation = null;
+        _currentSection = null;
+        _currentVideo = null;
+        RefreshInspectionTree();
+        await SaveInspectionChangesAsync();
+    }
+
+    private async void EditSection_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentSection is null || IsReadOnly) return;
+        if (IsSectionReviewLocked)
+        {
+            MessageBox.Show("Reabra o trecho para editar.", "Trecho concluído", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        HideVideoSurfaceForOverlay();
+        NewSectionDraft? draft;
+        try { draft = NewSectionWindow.Show(this, _currentSection); }
+        finally { RestoreVideoSurfaceAfterOverlay(); }
+        if (draft is null) return;
+
+        _currentSection.Name = draft.Name;
+        _currentSection.Description = draft.Description;
+        _currentSection.Diameter = draft.Diameter;
+        _currentSection.StartPoint = draft.StartPoint;
+        _currentSection.EndPoint = draft.EndPoint;
+        _currentSection.Reference = draft.Reference;
+        _currentSection.InvestigatedMeters = draft.InvestigatedMeters;
+        RefreshSections();
+        RefreshReportSectionSelection();
+        await SaveInspectionChangesAsync();
+    }
+
+    private async void DeleteSection_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null || _currentLocation is null || _currentSection is null || IsReadOnly) return;
+        var section = _currentSection;
+        if (MessageBox.Show($"Excluir o trecho '{section.Name}' e todas as suas ocorrências e capturas?",
+                "Excluir trecho", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+
+        StopAndReleaseCurrentMedia();
+        _currentProject.Captures.RemoveAll(x => x.SectionId == section.Id);
+        foreach (var report in _currentProject.Reports)
+            report.SectionLinks.RemoveAll(x => x.SectionId == section.Id);
+        _currentLocation.Sections.Remove(section);
+        _currentSection = null;
+        _currentVideo = null;
+        RefreshSections();
+        RefreshReportSectionSelection();
+        await SaveInspectionChangesAsync();
     }
 
     private async void CreateSection_Click(object sender, RoutedEventArgs e)
@@ -1242,6 +1889,7 @@ public partial class MainWindow : Window
     private void LocationsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_loadingInspections) return;
+        DiscardCaptureDraft();
         StopAndReleaseCurrentMedia();
         _currentLocation = LocationsList.SelectedItem as Location;
         _currentSection = null;
@@ -1254,6 +1902,7 @@ public partial class MainWindow : Window
     private void SectionsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_loadingInspections) return;
+        DiscardCaptureDraft();
         StopAndReleaseCurrentMedia();
         _currentSection = SectionsList.SelectedItem as InspectionSection;
         _currentVideo = null;
@@ -1308,36 +1957,71 @@ public partial class MainWindow : Window
         await LoadVideoAsync(_currentVideo);
     }
 
+    private async void ReportEditorTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!ReferenceEquals(e.Source, ReportEditorTabs) || ReportEditorTabs.SelectedItem != InspectionsTab ||
+            _loadingInspections || _currentVideo is null ||
+            _currentMedia is not null || !File.Exists(_currentVideo.FilePath)) return;
+        await LoadVideoAsync(_currentVideo);
+    }
+
     private async Task LoadVideoAsync(VideoReference video, TimeSpan? seekTo = null)
     {
-        StopAndReleaseCurrentMedia();
         _currentVideo = video;
         _playerErrorNotified = false;
         if (!File.Exists(video.FilePath))
         {
-            ShowVideoState("Vídeo não encontrado. Use ‘Localizar arquivo’.", false);
+            ShowVideoState("O arquivo foi movido, renomeado ou está indisponível.", false,
+                VideoSurfaceState.Missing);
             RefreshVideos();
             return;
         }
+        await _videoLoadLock.WaitAsync();
+        Media? pendingMedia = null;
         try
         {
-            ShowVideoState("Carregando vídeo...", false);
-            _currentMedia = new Media(_libVlc, video.FilePath, FromType.FromPath);
-            if (!_mediaPlayer.Play(_currentMedia)) throw new InvalidOperationException("O player não conseguiu iniciar o vídeo.");
+            if (_currentVideo?.Id != video.Id) return;
+            _videoLoadInProgress = true;
+            UpdateInspectionWriteState();
+            ShowVideoState("Preparando reprodução e controles de navegação.", false,
+                VideoSurfaceState.Loading);
+            pendingMedia = new Media(_libVlc, video.FilePath, FromType.FromPath);
+            if (!_mediaPlayer.Play(pendingMedia)) throw new InvalidOperationException("O player não conseguiu iniciar o vídeo.");
+            var previousMedia = _currentMedia;
+            _currentMedia = pendingMedia;
+            pendingMedia = null;
+            _lastKnownPlayerTime = 0;
+            previousMedia?.Dispose();
             _logger.Info($"Vídeo aberto: {video.FilePath}");
             if (seekTo is not null)
             {
-                await WaitForMediaReadyAsync();
-                _mediaPlayer.Time = Math.Max(0, (long)seekTo.Value.TotalMilliseconds);
-                await Task.Delay(180);
-                _mediaPlayer.SetPause(true);
+                SetPlayerOperationState(true);
+                try
+                {
+                    await WaitForMediaReadyAsync();
+                    await SeekToDisplayedFrameAsync((long)seekTo.Value.TotalMilliseconds);
+                }
+                finally { SetPlayerOperationState(false); }
             }
         }
         catch (Exception ex)
         {
-            ShowVideoState("Não foi possível abrir este vídeo.", false);
+            pendingMedia?.Dispose();
+            ShowVideoState("Verifique o arquivo, codec ou acesso ao local de armazenamento.", false,
+                VideoSurfaceState.Error);
             _logger.Error($"Falha ao abrir vídeo. Caminho='{video.FilePath}', extensão='{Path.GetExtension(video.FilePath)}', backend='LibVLC'.", ex);
         }
+        finally
+        {
+            _videoLoadInProgress = false;
+            _videoLoadLock.Release();
+            UpdateInspectionWriteState();
+        }
+    }
+
+    private async void RetryVideo_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentVideo is not null && !_playerOperationInProgress) await LoadVideoAsync(_currentVideo);
     }
 
     private async Task WaitForMediaReadyAsync()
@@ -1354,48 +2038,216 @@ public partial class MainWindow : Window
         else _mediaPlayer.Play();
     }
 
-    private void Back5_Click(object sender, RoutedEventArgs e) => SeekRelative(-5);
-    private void Back1_Click(object sender, RoutedEventArgs e) => SeekRelative(-1);
-    private void Forward1_Click(object sender, RoutedEventArgs e) => SeekRelative(1);
-    private void Forward5_Click(object sender, RoutedEventArgs e) => SeekRelative(5);
+    private async void Back5_Click(object sender, RoutedEventArgs e) => await SeekRelativeAsync(-5, false);
+    private async void Back1_Click(object sender, RoutedEventArgs e) => await SeekRelativeAsync(-1, false);
+    private async void Forward1_Click(object sender, RoutedEventArgs e) => await SeekRelativeAsync(1, true);
+    private async void Forward5_Click(object sender, RoutedEventArgs e) => await SeekRelativeAsync(5, true);
 
-    private void SeekRelative(int seconds)
+    private async Task SeekRelativeAsync(int seconds, bool restorePlayback)
     {
-        if (_currentMedia is null) return;
-        var maximum = Math.Max(0, _mediaPlayer.Length);
-        _mediaPlayer.Time = Math.Clamp(_mediaPlayer.Time + seconds * 1000L, 0, maximum);
+        if (_currentMedia is null || _playerOperationInProgress) return;
+        var media = _currentMedia;
+        var wasPlaying = _mediaPlayer.IsPlaying;
+        SetPlayerOperationState(true);
+        try
+        {
+            await WaitForMediaReadyAsync();
+            var duration = Math.Max(0, _mediaPlayer.Length);
+            var ended = _mediaPlayer.State == VLCState.Ended ||
+                        (duration > 0 && _lastKnownPlayerTime >= duration - 500 && _mediaPlayer.Time <= 0);
+            await PauseOnDisplayedFrameAsync();
+            var initial = ended ? Math.Max(0, duration - 1) : Math.Max(0, _mediaPlayer.Time);
+            var maximum = Math.Max(0, _mediaPlayer.Length - 1);
+            var requested = Math.Clamp(initial + seconds * 1000L, 0, maximum);
+            var reached = await SeekToDisplayedFrameAsync(requested);
+            if (seconds < 0 && reached > initial)
+                throw new InvalidOperationException("O retrocesso terminou depois da posição inicial.");
+            _logger.Info($"Seek {seconds:+#;-#;0}s: inicial={initial} ms, solicitado={requested} ms, alcançado={reached} ms.");
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"Falha no seek relativo de {seconds} segundo(s).", ex);
+            ShowError("Não foi possível posicionar o vídeo no instante solicitado.", ex);
+        }
+        finally
+        {
+            if (ReferenceEquals(_currentMedia, media) && wasPlaying && restorePlayback) _mediaPlayer.Play();
+            SetPlayerOperationState(false);
+        }
     }
 
     private void ProgressSlider_DragStarted(object sender, MouseButtonEventArgs e) => _seeking = true;
 
-    private void ProgressSlider_DragCompleted(object sender, MouseButtonEventArgs e)
+    private async void ProgressSlider_DragCompleted(object sender, MouseButtonEventArgs e)
     {
-        if (_currentMedia is not null) _mediaPlayer.Time = (long)ProgressSlider.Value;
-        _seeking = false;
+        try
+        {
+            if (_currentMedia is not null) await SeekAbsoluteAsync((long)ProgressSlider.Value);
+        }
+        finally { _seeking = false; }
     }
 
     private void SpeedCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (SpeedCombo.SelectedItem is ComboBoxItem { Tag: string value } &&
-            float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var rate) && _currentMedia is not null)
-            _mediaPlayer.SetRate(rate);
+        if (_updatingSpeedSelection) return;
+        if (SpeedCombo.SelectedItem is not ComboBoxItem { Tag: string value } ||
+            !float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var rate)) return;
+        var previousRate = _selectedPlaybackRate;
+        if (_currentMedia is null)
+        {
+            _selectedPlaybackRate = rate;
+            return;
+        }
+        if (TryApplyPlaybackRate(rate))
+        {
+            _selectedPlaybackRate = rate;
+            return;
+        }
+        SelectSpeed(previousRate);
+        MessageBox.Show($"O formato deste vídeo não aceita {rate:0.##}x. A velocidade anterior foi mantida.",
+            "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+
+    private bool TryApplyPlaybackRate(float rate) =>
+        _mediaPlayer.SetRate(rate) == 0 && Math.Abs(_mediaPlayer.Rate - rate) <= 0.05f;
+
+    private void SelectSpeed(float rate)
+    {
+        _updatingSpeedSelection = true;
+        try
+        {
+            SpeedCombo.SelectedItem = SpeedCombo.Items.OfType<ComboBoxItem>().FirstOrDefault(item =>
+                item.Tag is string value && float.TryParse(value, NumberStyles.Float,
+                    CultureInfo.InvariantCulture, out var itemRate) && Math.Abs(itemRate - rate) <= 0.01f);
+        }
+        finally { _updatingSpeedSelection = false; }
+    }
+
+    private async Task SeekAbsoluteAsync(long requestedMilliseconds)
+    {
+        if (_currentMedia is null || _playerOperationInProgress) return;
+        var media = _currentMedia;
+        var resumePlayback = _mediaPlayer.IsPlaying;
+        SetPlayerOperationState(true);
+        try
+        {
+            await WaitForMediaReadyAsync();
+            await PauseOnDisplayedFrameAsync();
+            var initial = Math.Max(0, _mediaPlayer.Time);
+            var reached = await SeekToDisplayedFrameAsync(requestedMilliseconds);
+            _logger.Info($"Seek absoluto: inicial={initial} ms, solicitado={requestedMilliseconds} ms, alcançado={reached} ms.");
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Falha ao sincronizar a posição do vídeo.", ex);
+            ShowError("Não foi possível posicionar o vídeo no instante solicitado.", ex);
+        }
+        finally
+        {
+            if (ReferenceEquals(_currentMedia, media) && resumePlayback) _mediaPlayer.Play();
+            SetPlayerOperationState(false);
+        }
+    }
+
+    private async Task<long> SeekToDisplayedFrameAsync(long requestedMilliseconds)
+    {
+        if (!_mediaPlayer.IsSeekable)
+            throw new InvalidOperationException("Este formato de vídeo não permite navegação precisa.");
+        var maximum = Math.Max(0, _mediaPlayer.Length - 1);
+        var target = Math.Clamp(requestedMilliseconds, 0, maximum);
+        try
+        {
+            var restartDecoder = _mediaPlayer.State is VLCState.Ended or VLCState.Stopped;
+            if (restartDecoder)
+            {
+                _mediaPlayer.Stop();
+                await Task.Delay(80);
+            }
+            else
+            {
+                _mediaPlayer.SetPause(true);
+                await Task.Delay(45);
+            }
+            var started = restartDecoder && _currentMedia is not null
+                ? _mediaPlayer.Play(_currentMedia)
+                : _mediaPlayer.Play();
+            if (!started)
+                throw new InvalidOperationException("O LibVLC não conseguiu ativar o decodificador para navegar no vídeo.");
+            for (var attempt = 0; attempt < 200 && !_mediaPlayer.IsPlaying; attempt++) await Task.Delay(25);
+            if (!_mediaPlayer.IsPlaying)
+                throw new InvalidOperationException("O decodificador do vídeo não iniciou para realizar o seek.");
+            _mediaPlayer.SetRate(1f);
+            _mediaPlayer.Time = target;
+            var reachedTarget = false;
+            for (var attempt = 0; attempt < 60; attempt++)
+            {
+                if (Math.Abs(_mediaPlayer.Time - target) <= 120) { reachedTarget = true; break; }
+                await Task.Delay(25);
+            }
+            if (!reachedTarget)
+                throw new InvalidOperationException("O player não alcançou o timestamp solicitado.");
+            await Task.Delay(35);
+            _mediaPlayer.SetPause(true);
+            await PauseOnDisplayedFrameAsync();
+            var decoded = Math.Max(0, _mediaPlayer.Time);
+            if (Math.Abs(decoded - target) > 180)
+                throw new InvalidOperationException("O LibVLC não apresentou o quadro correspondente ao timestamp solicitado.");
+
+            _mediaPlayer.Time = target;
+            await Task.Delay(30);
+            var reached = Math.Max(0, _mediaPlayer.Time);
+            if (Math.Abs(reached - target) > 80)
+                throw new InvalidOperationException("O timestamp final não corresponde ao destino solicitado.");
+            RefreshPlayerPosition();
+            return reached;
+        }
+        finally { _mediaPlayer.SetRate(_selectedPlaybackRate); }
+    }
+
+    private void SetPlayerOperationState(bool inProgress)
+    {
+        _playerOperationInProgress = inProgress;
+        _seeking = inProgress;
+        UpdatePlayerControlState();
+    }
+
+    private void UpdatePlayerControlState()
+    {
+        var enabled = _currentMedia is not null && !_playerOperationInProgress && !_captureInProgress &&
+                      !_videoLoadInProgress;
+        PlaybackControlsPanel.IsEnabled = enabled;
+        ProgressSlider.IsEnabled = enabled;
     }
 
     private async void CaptureFrame_Click(object sender, RoutedEventArgs e)
     {
-        if (_currentProject is null || _currentSection is null || _currentVideo is null || IsReadOnly) return;
+        if (_captureInProgress || _currentProject is null || _currentSection is null || _currentVideo is null || IsReadOnly) return;
+        _captureInProgress = true;
+        CaptureFrameOverlayText.Text = "Capturando...";
+        UpdateInspectionWriteState();
         try
         {
-            _mediaPlayer.SetPause(true);
-            await Task.Delay(120);
+            SetPlayerOperationState(true);
+            await PauseOnDisplayedFrameAsync();
+            await WaitForDisplayedFrameAsync(TimeSpan.FromMilliseconds(Math.Max(0, _mediaPlayer.Time)));
             _captureDraft = await _frameCaptureService.CaptureCurrentFrameAsync(
                 _currentProject, _currentSection, _currentVideo, _mediaPlayer, IsReadOnly);
             await AcceptCaptureDraftAsync(true);
         }
         catch (Exception ex) { ShowError("Não foi possível capturar o frame diretamente do vídeo.", ex); }
+        finally
+        {
+            _captureInProgress = false;
+            SetPlayerOperationState(false);
+            CaptureFrameOverlayText.Text = "Capturar evidência";
+            UpdateInspectionWriteState();
+        }
     }
 
     private void RetakeCapture_Click(object sender, RoutedEventArgs e)
+        => DiscardCaptureDraft();
+
+    private void DiscardCaptureDraft()
     {
         _frameCaptureService.Discard(_captureDraft);
         _captureDraft = null;
@@ -1410,6 +2262,13 @@ public partial class MainWindow : Window
     private async Task AcceptCaptureDraftAsync(bool createOccurrence)
     {
         if (_currentProject is null || _captureDraft is null || IsReadOnly) return;
+        if (_currentSection is null || _captureDraft.SectionId != _currentSection.Id)
+        {
+            DiscardCaptureDraft();
+            ShowError("A captura foi cancelada porque o trecho selecionado mudou.",
+                new InvalidOperationException("Contexto da captura alterado."));
+            return;
+        }
         var capture = _frameCaptureService.Accept(_currentProject, _captureDraft, IsReadOnly);
         _captureDraft = null;
         CapturePreviewPanel.Visibility = Visibility.Collapsed;
@@ -1421,7 +2280,7 @@ public partial class MainWindow : Window
 
     private async void NewOccurrence_Click(object sender, RoutedEventArgs e)
     {
-        if (_currentProject is null || _currentSection is null || IsReadOnly) return;
+        if (_currentProject is null || _currentSection is null || IsReadOnly || IsSectionReviewLocked) return;
         Capture? automaticCapture = null;
         try
         {
@@ -1444,19 +2303,19 @@ public partial class MainWindow : Window
 
     private async void CreateOccurrenceFromPending_Click(object sender, RoutedEventArgs e)
     {
-        if (_currentProject is null || ((Button)sender).Tag is not Guid id || IsReadOnly) return;
+        if (_currentProject is null || ((Button)sender).Tag is not Guid id || IsReadOnly || IsSectionReviewLocked) return;
         await OpenOccurrenceEditorAsync(null, _currentProject.Captures.SingleOrDefault(x => x.Id == id));
     }
 
     private async void EditOccurrence_Click(object sender, RoutedEventArgs e)
     {
-        if (_currentSection is null || ((Button)sender).Tag is not Guid id) return;
+        if (_currentSection is null || sender is not FrameworkElement { Tag: Guid id }) return;
         await OpenOccurrenceEditorAsync(_currentSection.Occurrences.SingleOrDefault(x => x.Id == id), null);
     }
 
     private async void DuplicateOccurrence_Click(object sender, RoutedEventArgs e)
     {
-        if (_currentSection is null || IsReadOnly || ((Button)sender).Tag is not Guid id) return;
+        if (_currentSection is null || IsReadOnly || IsSectionReviewLocked || sender is not FrameworkElement { Tag: Guid id }) return;
         await OpenOccurrenceEditorAsync(_currentSection.Occurrences.SingleOrDefault(x => x.Id == id), null, true);
     }
 
@@ -1466,12 +2325,13 @@ public partial class MainWindow : Window
     private async Task OpenOccurrenceEditorAsync(Occurrence? occurrence, Capture? initialCapture,
         Capture? automaticCapture, bool duplicate = false)
     {
-        if (_currentProject is null || _currentSection is null || (occurrence is null && IsReadOnly)) return;
+        var editorReadOnly = IsReadOnly || IsSectionReviewLocked;
+        if (_currentProject is null || _currentSection is null || (occurrence is null && editorReadOnly)) return;
         try
         {
             var catalog = await _store.ListAnomalyDefinitionsAsync();
             var editor = new OccurrenceWindow(_currentProject, _currentSection, catalog, _occurrenceService,
-                occurrence, initialCapture, IsReadOnly, duplicate) { IsEmbedded = true };
+                occurrence, initialCapture, editorReadOnly, duplicate) { IsEmbedded = true };
             editor.AutomaticCapture = automaticCapture;
             editor.RecaptureAsync = RecaptureOccurrenceFrameAsync;
             _embeddedOccurrenceEditor = editor;
@@ -1568,8 +2428,12 @@ public partial class MainWindow : Window
     private void HideVideoSurfaceForOverlay()
     {
         if (_currentMedia is not null) _mediaPlayer.SetPause(true);
+        VideoOverlayLayer.Visibility = Visibility.Collapsed;
+        PlayerControlsLayer.Visibility = Visibility.Collapsed;
+        VideoOverlayLayer.UpdateLayout();
         VideoView.Visibility = Visibility.Collapsed;
         VideoView.MediaPlayer = null;
+        VideoView.UpdateLayout();
     }
 
     private void RestoreVideoSurfaceAfterOverlay()
@@ -1577,26 +2441,36 @@ public partial class MainWindow : Window
         if (_playerDisposed) return;
         VideoView.MediaPlayer = _mediaPlayer;
         VideoView.Visibility = Visibility.Visible;
+        VideoOverlayLayer.Visibility = Visibility.Visible;
+        PlayerControlsLayer.Visibility = Visibility.Visible;
+        VideoView.UpdateLayout();
     }
 
-    private async Task WaitForDisplayedFrameAsync(TimeSpan target)
+    private async Task<long> WaitForDisplayedFrameAsync(TimeSpan target)
     {
+        if (!_mediaPlayer.IsSeekable)
+            throw new InvalidOperationException("Este formato de vídeo não permite confirmar o quadro solicitado.");
         _mediaPlayer.SetPause(true);
         var targetMilliseconds = Math.Max(0, (long)target.TotalMilliseconds);
         var reachedTarget = false;
-        for (var attempt = 0; attempt < 20; attempt++)
+        for (var attempt = 0; attempt < 60; attempt++)
         {
-            if (Math.Abs(_mediaPlayer.Time - targetMilliseconds) <= 80) { reachedTarget = true; break; }
+            if (Math.Abs(_mediaPlayer.Time - targetMilliseconds) <= 120) { reachedTarget = true; break; }
             await Task.Delay(25);
         }
         if (!reachedTarget)
             throw new InvalidOperationException("O player não alcançou o timestamp solicitado.");
-        await Task.Delay(120);
+        await Task.Delay(160);
+        var reached = Math.Max(0, _mediaPlayer.Time);
+        if (Math.Abs(reached - targetMilliseconds) > 120)
+            throw new InvalidOperationException("O quadro exibido não permaneceu estável no timestamp solicitado.");
+        return reached;
     }
 
     private async void DeleteOccurrence_Click(object sender, RoutedEventArgs e)
     {
-        if (_currentProject is null || _currentSection is null || ((Button)sender).Tag is not Guid id || IsReadOnly) return;
+        if (_currentProject is null || _currentSection is null || sender is not FrameworkElement { Tag: Guid id } ||
+            IsReadOnly || IsSectionReviewLocked) return;
         var occurrence = _currentSection.Occurrences.SingleOrDefault(x => x.Id == id);
         if (occurrence is null || MessageBox.Show("Excluir esta anomalia? As capturas vinculadas voltarão para Pendentes.",
                 "Confirmar exclusão", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
@@ -1608,7 +2482,7 @@ public partial class MainWindow : Window
 
     private async void GoToOccurrenceVideo_Click(object sender, RoutedEventArgs e)
     {
-        if (_currentProject is null || _currentSection is null || ((Button)sender).Tag is not Guid id) return;
+        if (_currentProject is null || _currentSection is null || sender is not FrameworkElement { Tag: Guid id }) return;
         var occurrence = _currentSection.Occurrences.SingleOrDefault(x => x.Id == id);
         var evidence = occurrence?.Evidence.OrderByDescending(x => x.IsPrimary).ThenBy(x => x.Order)
             .FirstOrDefault(x => x.VideoReferenceId is not null && x.VideoTimestamp is not null);
@@ -1705,6 +2579,7 @@ public partial class MainWindow : Window
     {
         if (_currentProject is null || IsReadOnly) return;
         _hasPendingChanges = true;
+        UpdateSectionReviewState();
         await SavePendingAsync();
         if (_sharedSession is not null) _sharedDirty = true;
     }
@@ -1712,8 +2587,10 @@ public partial class MainWindow : Window
     private void RefreshPlayerPosition()
     {
         if (_playerDisposed) return;
-        var current = Math.Max(0, _mediaPlayer.Time);
         var duration = Math.Max(0, _mediaPlayer.Length);
+        var current = _mediaPlayer.State == VLCState.Ended && duration > 0
+            ? duration : Math.Max(0, _mediaPlayer.Time);
+        if (current > 0) _lastKnownPlayerTime = current;
         if (!_seeking)
         {
             ProgressSlider.Maximum = Math.Max(1, duration);
@@ -1726,7 +2603,8 @@ public partial class MainWindow : Window
     {
         if (_playerErrorNotified) return;
         _playerErrorNotified = true;
-        ShowVideoState("Não foi possível abrir este vídeo.", false);
+        ShowVideoState("Verifique o arquivo, codec ou acesso ao local de armazenamento.", false,
+            VideoSurfaceState.Error);
         _logger.Error($"Erro de codec, rede ou leitura. Caminho='{_currentVideo?.FilePath}', extensão='{Path.GetExtension(_currentVideo?.FilePath)}', backend='LibVLC'.",
             new IOException("O LibVLC informou falha durante a reprodução."));
     }
@@ -1737,20 +2615,51 @@ public partial class MainWindow : Window
         try { _mediaPlayer.Stop(); } catch (Exception ex) { _logger.Error("Falha ao interromper o player.", ex); }
         _currentMedia?.Dispose();
         _currentMedia = null;
+        _lastKnownPlayerTime = 0;
         if (_currentSection is null)
-            ShowVideoState("Crie ou selecione um trecho para iniciar.", false);
+            ShowVideoState("Escolha um local e um trecho para continuar.", false);
         else if (_currentSection.VideoReferences.Count == 0)
-            ShowVideoState("Nenhum vídeo neste trecho", !IsReadOnly);
+            ShowVideoState("Este trecho ainda não possui vídeos vinculados.", !IsReadOnly);
         else
-            ShowVideoState("Selecione um vídeo para iniciar.", false);
+            ShowVideoState("Escolha um dos vídeos vinculados ao trecho.", false);
         PlayPauseButton.Content = "▶";
     }
 
-    private void ShowVideoState(string message, bool showAddVideo)
+    private void ShowVideoState(string message, bool showAddVideo,
+        VideoSurfaceState state = VideoSurfaceState.Empty)
     {
         VideoLoadedBadge.Visibility = Visibility.Collapsed;
+        PlaybackControlsPanel.IsEnabled = false;
+        ProgressSlider.IsEnabled = false;
+        VideoStateTitle.Text = state switch
+        {
+            VideoSurfaceState.Loading => "Carregando vídeo",
+            VideoSurfaceState.Missing => "Arquivo de vídeo não encontrado",
+            VideoSurfaceState.Error => "Não foi possível reproduzir o vídeo",
+            _ when _currentSection is null => "Selecione o contexto da inspeção",
+            _ when showAddVideo => "Adicione o primeiro vídeo",
+            _ when _currentVideo is not null => "Vídeo pronto para carregar",
+            _ => "Selecione um vídeo"
+        };
+        VideoStateIcon.Text = state switch
+        {
+            VideoSurfaceState.Loading => "\uE895",
+            VideoSurfaceState.Missing => "\uE783",
+            VideoSurfaceState.Error => "\uEA39",
+            _ => "\uE714"
+        };
+        VideoStateIcon.Foreground = (System.Windows.Media.Brush)FindResource(
+            state is VideoSurfaceState.Missing or VideoSurfaceState.Error ? "DangerBrush" :
+            state == VideoSurfaceState.Loading ? "PrimaryBrush" : "TextMutedBrush");
         VideoMessage.Text = message;
         EmptyVideoButton.Visibility = showAddVideo ? Visibility.Visible : Visibility.Collapsed;
+        EmptyRelocateVideoButton.Visibility = state == VideoSurfaceState.Missing && !IsReadOnly
+            ? Visibility.Visible : Visibility.Collapsed;
+        var canReload = _currentVideo is not null && File.Exists(_currentVideo.FilePath) &&
+                        state != VideoSurfaceState.Loading;
+        RetryVideoButton.Content = state == VideoSurfaceState.Error ? "Tentar novamente" : "Recarregar vídeo";
+        RetryVideoButton.Visibility = state == VideoSurfaceState.Error || canReload
+            ? Visibility.Visible : Visibility.Collapsed;
         VideoEmptyState.Visibility = Visibility.Visible;
     }
 
@@ -1804,6 +2713,13 @@ public partial class MainWindow : Window
             else if (e.Key == Key.Enter && NewSectionPanel.Visibility == Visibility.Visible)
                 CreateSection_Click(sender, e);
             else return;
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Escape && _videoFocusMode)
+        {
+            ToggleVideoFocus();
             e.Handled = true;
             return;
         }
@@ -1896,16 +2812,19 @@ public partial class MainWindow : Window
         public string CompletenessColor { get; }
         public bool CanGoToVideo { get; }
         public bool CanModify { get; }
+        public string ModifyToolTip { get; }
+        public string EditToolTip => CanModify ? "Editar" : ModifyToolTip;
         public bool IsComplete { get; }
 
-        public OccurrenceListItem(Occurrence occurrence, bool canModify)
+        public OccurrenceListItem(Occurrence occurrence, bool canModify, string modifyToolTip)
         {
             Id = occurrence.Id;
             CanModify = canModify;
+            ModifyToolTip = modifyToolTip;
             Location = OccurrenceRules.FormatLocation(occurrence);
             Anomalies = string.Join(" + ", occurrence.Anomalies.OrderBy(x => x.Order).Select(x =>
                 x.AnomalyType.AllowsCustomText && !string.IsNullOrWhiteSpace(x.CustomText)
-                    ? $"Outro: {x.CustomText}" : x.AnomalyType.Name));
+                    ? $"Outro: {x.CustomText}" : x.DisplayName)) + (occurrence.IsSevere ? " (grave)" : "");
             EvidenceCount = occurrence.Evidence.Count;
             EvidenceSummary = $"{EvidenceCount} imagem(ns)";
             PositionSummary = string.Join(" • ", occurrence.Anomalies.Select(x => OccurrenceRules.FormatPosition(x.Position))
@@ -1918,7 +2837,7 @@ public partial class MainWindow : Window
                 if (x.ApproximateExtension is not null) values.Add($"ext. {x.ApproximateExtension:N2} m");
                 if (!string.IsNullOrWhiteSpace(x.Dimension)) values.Add(x.Dimension);
                 if (x.EstimatedPercentage is not null) values.Add($"{x.EstimatedPercentage:N2}%");
-                return values.Count == 0 ? "" : $"{x.AnomalyType.Name}: {string.Join(", ", values)}";
+                return values.Count == 0 ? "" : $"{x.DisplayName}: {string.Join(", ", values)}";
             }).Where(x => x.Length > 0));
             var first = occurrence.Evidence.OrderByDescending(x => x.IsPrimary).ThenBy(x => x.Order)
                 .FirstOrDefault(x => File.Exists(x.FilePath));
@@ -1935,6 +2854,9 @@ public partial class MainWindow : Window
 
     private sealed record OverviewReportItem(Guid Id, string Title, string Detail, string Status, string StatusColor);
 
+    private sealed record InspectionLayoutPreferences(double SideWidth, bool SideVisible, bool ContextExpanded,
+        bool FocusMode = false);
+
     private sealed class OverviewActivityItem(string icon, string title, string detail, DateTime timestamp)
     {
         public string Icon { get; } = icon;
@@ -1947,7 +2869,8 @@ public partial class MainWindow : Window
     private void ScheduleSave()
     {
         if (_loadingFields || _currentProject is null || _sharedSession?.IsReadOnly == true) return;
-        _hasPendingChanges = true; SaveStatus.Text = "Salvando..."; _saveTimer.Stop(); _saveTimer.Start();
+        _hasPendingChanges = true; SaveStatus.Text = "Salvando..."; UpdateSectionReviewState();
+        _saveTimer.Stop(); _saveTimer.Start();
     }
 
     private void ShowError(string message, Exception ex)

@@ -6,3 +6,6 @@ obj/
 TestResults/
 .tmp/
 .codex-tmp/
+
+artifacts/
+*.zip

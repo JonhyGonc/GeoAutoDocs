@@ -2,6 +2,7 @@ namespace GeoAutoDocs.Infrastructure;
 
 public sealed class LocalLogger
 {
+    private const long MaxLogBytes = 5 * 1024 * 1024;
     private readonly string _path;
     private readonly object _sync = new();
 
@@ -17,6 +18,7 @@ public sealed class LocalLogger
             lock (_sync)
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+                RotateIfNeeded();
                 File.AppendAllText(_path,
                     $"{DateTimeOffset.Now:O} [{level}] {message}{(exception is null ? "" : Environment.NewLine + exception)}{Environment.NewLine}");
             }
@@ -26,5 +28,10 @@ public sealed class LocalLogger
             // Logging must never terminate the desktop application.
         }
     }
-}
 
+    private void RotateIfNeeded()
+    {
+        if (!File.Exists(_path) || new FileInfo(_path).Length < MaxLogBytes) return;
+        File.Move(_path, _path + ".1", true);
+    }
+}

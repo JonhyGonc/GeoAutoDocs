@@ -4,6 +4,7 @@ using DocumentFormat.OpenXml.Wordprocessing;
 using GeoAutoDocs.Core;
 using GeoAutoDocs.Infrastructure;
 using Xunit;
+using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
 
 namespace GeoAutoDocs.Tests;
 
@@ -44,6 +45,7 @@ public sealed class Stage5ReportTests : IDisposable
         report.SelectSection(section);
         var occurrence = AddOccurrence(section, OccurrenceLocationMode.Point, 18m, null, ["Trinca"]);
         occurrence.Evidence.Add(new Evidence { OccurrenceId = occurrence.Id, FilePath = Path.Combine(_root, "missing.png") });
+        report.LocationImagePath = Path.Combine(_root, "localizacao-ausente.png");
         project.Captures.Add(new GeoAutoDocs.Core.Capture
         {
             ProjectId = project.Id, SectionId = section.Id, Status = CaptureStatus.Pending,
@@ -53,6 +55,7 @@ public sealed class Stage5ReportTests : IDisposable
         var result = service.Validate(project, report);
         Assert.False(result.CanGenerate);
         Assert.Contains(result.Errors, x => x.Contains("evidência não encontrada"));
+        Assert.Contains(result.Errors, x => x.Contains("Imagem de localização não encontrada"));
         Assert.Contains(result.Warnings, x => x.Contains("captura(s) pendente(s)"));
     }
 
@@ -72,6 +75,8 @@ public sealed class Stage5ReportTests : IDisposable
             StartPoint = index == 4 ? "PV-04" : null, EndPoint = index == 4 ? "PV-05" : null,
             Diameter = 600 + index * 100
         }).ToList();
+        sections[3].Reference = "Subindo para esquerda";
+        sections[3].Description = "GI: 1.86";
         localA.Sections.AddRange(sections.Take(3)); localB.Sections.AddRange(sections.Skip(3));
 
         var multi = AddOccurrence(sections[1], OccurrenceLocationMode.Point, 18m, null, ["Trinca", "Infiltração"]);
@@ -89,11 +94,17 @@ public sealed class Stage5ReportTests : IDisposable
 
         Assert.Contains("LOCAL A", text);
         Assert.Contains("LOCAL B", text);
-        Assert.Contains("Trecho 02", text);
+        Assert.Contains("TRECHO 02", text);
         Assert.Contains("PV-04 → PV-05", text);
-        Assert.DoesNotContain("Trecho 01", text);
-        Assert.DoesNotContain("Trecho 03", text);
-        Assert.DoesNotContain("Trecho 05", text);
+        Assert.Contains("TRECHO 04 - PV-04 → PV-05 – REDE 1000 mm (Subindo para esquerda)", text);
+        Assert.Contains("TRECHO 02 - REDE 800 mm", text);
+        Assert.Contains("GI: 1.86", text);
+        var paragraphs = ReadParagraphs(output);
+        Assert.True(IndexOf(paragraphs, "LOCAL B") < IndexOf(paragraphs, "TRECHO 04 - PV-04 → PV-05 – REDE 1000 mm (Subindo para esquerda)"));
+        Assert.True(IndexOf(paragraphs, "TRECHO 04 - PV-04 → PV-05 – REDE 1000 mm (Subindo para esquerda)") < IndexOf(paragraphs, "GI: 1.86"));
+        Assert.DoesNotContain("TRECHO 01", text);
+        Assert.DoesNotContain("TRECHO 03", text);
+        Assert.DoesNotContain("TRECHO 05", text);
         Assert.Contains("Trinca e infiltração a 18 metros do início da filmagem", text);
         Assert.Contains("Assoreamento entre 18 e 24,5 metros do início da filmagem", text);
         Assert.Contains("Descrição manual revisada para todo o trecho", text);
@@ -106,6 +117,23 @@ public sealed class Stage5ReportTests : IDisposable
         Assert.DoesNotContain("Figura 4.8", text);
         Assert.True(text.IndexOf("Através dos serviços executados", StringComparison.Ordinal) < text.IndexOf("LOCAL A", StringComparison.Ordinal));
         Assert.True(text.IndexOf("LOCAL B", StringComparison.Ordinal) < text.IndexOf("Felipe França", StringComparison.Ordinal));
+
+        using var generated = WordprocessingDocument.Open(output, false);
+        var evidenceCaptions = generated.MainDocumentPart!.Document.Body!.Elements<Paragraph>()
+            .Where(x => string.Concat(x.Descendants<Text>().Select(t => t.Text)).StartsWith("Figura 4.", StringComparison.Ordinal))
+            .ToList();
+        Assert.Equal(7, evidenceCaptions.Count);
+        foreach (var caption in evidenceCaptions)
+        {
+            var imageParagraph = caption.PreviousSibling<Paragraph>();
+            var extent = Assert.Single(imageParagraph!.Descendants<DW.Extent>());
+            Assert.True(extent.Cx!.Value <= 12L * 360000L);
+            Assert.True(extent.Cy!.Value <= 9L * 360000L);
+            Assert.True(extent.Cx.Value == 12L * 360000L || extent.Cy.Value == 9L * 360000L);
+            Assert.True(imageParagraph.ParagraphProperties!.KeepNext!.Val!.Value);
+            Assert.True(imageParagraph.ParagraphProperties.KeepLines!.Val!.Value);
+            Assert.True(caption.ParagraphProperties!.KeepLines!.Val!.Value);
+        }
     }
 
     [Fact]
@@ -128,8 +156,8 @@ public sealed class Stage5ReportTests : IDisposable
         var secondOutput = await service.GenerateAsync(project, second);
         var firstText = ReadBody(firstOutput); var secondText = ReadBody(secondOutput);
 
-        Assert.Contains("Trecho A", firstText); Assert.DoesNotContain("Trecho B", firstText);
-        Assert.Contains("Trecho B", secondText); Assert.DoesNotContain("Trecho A", secondText);
+        Assert.Contains("TRECHO A", firstText); Assert.DoesNotContain("TRECHO B", firstText);
+        Assert.Contains("TRECHO B", secondText); Assert.DoesNotContain("TRECHO A", secondText);
         Assert.Contains("Figura 4.1", firstText); Assert.Contains("Figura 4.1", secondText);
         Assert.DoesNotContain("Figura 4.2", firstText); Assert.DoesNotContain("Figura 4.2", secondText);
     }
@@ -216,7 +244,7 @@ public sealed class Stage5ReportTests : IDisposable
 
         Assert.True(File.Exists(output));
         Assert.Contains("GF-RL-STAGE6-001", text);
-        Assert.Contains("Trecho operacional", text);
+        Assert.Contains("TRECHO operacional", text);
         Assert.Contains("a 1 metro do início da filmagem", text);
         Assert.Contains("a 10 metros do início da filmagem", text);
         Assert.Contains("Figuras 3.7 a 3.9", text);
@@ -277,6 +305,20 @@ public sealed class Stage5ReportTests : IDisposable
         report.Contract = "CT-05"; report.PurchaseOrder = "PC-05"; report.ReportCode = code;
         report.ReportDate = new DateTime(2026, 8, 11); report.LocationDescription = "Localização técnica";
         report.TotalInvestigatedMeters = 150m; report.Diameters = StandardDiameterSelection.Mm600;
+    }
+
+    private static IReadOnlyList<string> ReadParagraphs(string path)
+    {
+        using var document = WordprocessingDocument.Open(path, false);
+        return document.MainDocumentPart!.Document.Body!.Descendants<Paragraph>()
+            .Select(x => string.Concat(x.Descendants<Text>().Select(t => t.Text))).ToList();
+    }
+
+    private static int IndexOf(IReadOnlyList<string> values, string expected)
+    {
+        var index = values.ToList().FindIndex(x => x == expected);
+        Assert.True(index >= 0, $"Parágrafo não encontrado: {expected}");
+        return index;
     }
 
     private static (Location Location, InspectionSection Section) AddSection(Project project, string locationName,

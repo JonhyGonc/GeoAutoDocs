@@ -23,13 +23,9 @@
                 <Run Text="*" Foreground="{StaticResource DangerBrush}"/>
             </TextBlock>
             <TextBox x:Name="NameBox" MaxLength="180"/>
-            <TextBlock x:Name="ValidationText" Text="O nome do local é obrigatório."
-                       Foreground="{StaticResource TextMutedBrush}" Margin="0,3,0,0"/>
         </StackPanel>
 
         <Grid Grid.Row="2">
-            <TextBlock Text="O local será adicionado ao projeto atual."
-                       Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button Content="Cancelar" IsCancel="True" Width="100" Height="40"/>
                 <Button Content="Adicionar local" IsDefault="True" Width="140" Height="40"

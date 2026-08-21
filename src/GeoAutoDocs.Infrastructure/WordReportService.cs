@@ -11,16 +11,20 @@ using PIC = DocumentFormat.OpenXml.Drawing.Pictures;
 
 namespace GeoAutoDocs.Infrastructure;
 
-public sealed class WordReportService
+public sealed partial class WordReportService
 {
     private const long EmusPerInch = 914400;
+    private const long EvidenceMaxWidthEmus = 12L * 360000L;
+    private const long EvidenceMaxHeightEmus = 9L * 360000L;
     private readonly AppDataPaths _paths;
     private readonly LocalLogger _logger;
+    private readonly InspectionExchangeService _inspectionExchangeService;
 
-    public WordReportService(AppDataPaths paths)
+    public WordReportService(AppDataPaths paths, InspectionExchangeService? inspectionExchangeService = null)
     {
         _paths = paths;
         _logger = new LocalLogger(paths.LogPath);
+        _inspectionExchangeService = inspectionExchangeService ?? new InspectionExchangeService();
         DefaultTemplatePath = Path.Combine(AppContext.BaseDirectory, "Templates", "MODELO DE RELATORIO.docx");
     }
 
@@ -54,7 +58,7 @@ public sealed class WordReportService
         CancellationToken cancellationToken = default)
         => GenerateInternalAsync(project, report, destinationPath, cancellationToken);
 
-    private Task<string> GenerateInternalAsync(Project project, Report report, string? destinationPath,
+    private async Task<string> GenerateInternalAsync(Project project, Report report, string? destinationPath,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -78,6 +82,7 @@ public sealed class WordReportService
             requestedPath += ".docx";
         Directory.CreateDirectory(Path.GetDirectoryName(requestedPath)!);
         var outputPath = GetUniqueOutputPath(requestedPath);
+        var exchangeDocument = _inspectionExchangeService.Build(project, report);
 
         if (Path.GetFullPath(templatePath).Equals(Path.GetFullPath(outputPath), StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("O relatório de saída não pode sobrescrever o template.");
@@ -101,6 +106,9 @@ public sealed class WordReportService
                 ApplyOptionalModules(body, report);
                 ApplyDynamicDevelopmentImages(mainPart, body, report);
                 InsertDynamicResults(mainPart, body, project, report);
+                EnsureContinuationBookmark(body);
+                WriteContinuationManifest(mainPart, BuildGeneratedManifest(project, report));
+                _inspectionExchangeService.WriteInspectionManifest(mainPart, exchangeDocument);
                 MarkFieldsForUpdate(mainPart);
                 mainPart.Document.Save();
             }
@@ -114,8 +122,23 @@ public sealed class WordReportService
 
             File.Move(temporaryPath, outputPath, false);
             report.GeneratedReportPath = outputPath;
+            try
+            {
+                var sidecar = new FileInspectionTransport(FileInspectionTransport.GetSidecarPath(outputPath),
+                    _inspectionExchangeService.Serializer);
+                var result = await sidecar.SendAsync(exchangeDocument, cancellationToken);
+                if (result.Status == InspectionTransportStatus.Cancelled)
+                    throw new OperationCanceledException(cancellationToken);
+                if (!result.Success)
+                    throw new IOException(result.Message);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                throw new InspectionExchangeExportException(outputPath, ex);
+            }
             _logger.Info($"Geração do relatório {report.Id} concluída: {outputPath}");
-            return Task.FromResult(outputPath);
+            return outputPath;
         }
         catch (Exception ex)
         {
@@ -374,16 +397,26 @@ public sealed class WordReportService
             SetParagraphText(location, string.IsNullOrWhiteSpace(locationName)
                 ? EffectiveLocation(report).Trim().ToUpperInvariant()
                 : locationName.Trim().ToUpperInvariant());
+            ConfigureParagraph(location, keepNext: true, before: 240);
             newElements.Add(location);
 
             foreach (var (_, inspection) in locationGroup)
             {
+                var orderedOccurrences = inspection.Occurrences.OrderBy(x => x.Order).ThenBy(x => x.CreatedAt).ToList();
                 var section = (Paragraph)sectionTemplate.CloneNode(true);
-                SetParagraphText(section, FormatSectionTitle(inspection));
+                SetParagraphText(section, FormatSectionHeading(inspection));
+                ConfigureParagraph(section, keepNext: true, before: 240, after: 120);
                 newElements.Add(section);
+                if (!string.IsNullOrWhiteSpace(inspection.Description))
+                {
+                    var description = (Paragraph)bodyTemplate.CloneNode(true);
+                    SetParagraphText(description, inspection.Description);
+                    ConfigureParagraph(description, keepNext: orderedOccurrences.Count > 0, after: 120);
+                    newElements.Add(description);
+                }
 
                 var imageElements = new List<OpenXmlElement>();
-                foreach (var occurrenceData in inspection.Occurrences.OrderBy(x => x.Order).ThenBy(x => x.CreatedAt))
+                foreach (var occurrenceData in orderedOccurrences)
                 {
                     var description = FormatOccurrenceForReport(occurrenceData);
                     var evidences = occurrenceData.Evidence.OrderBy(x => x.Order)
@@ -398,15 +431,17 @@ public sealed class WordReportService
                     };
 
                     var occurrence = (Paragraph)occurrenceTemplate.CloneNode(true);
-                    SetParagraphText(occurrence, $"- {description.TrimEnd('.', ';')}{reference}.");
+                    SetOccurrenceParagraphText(occurrence, description, reference, occurrenceData.IsSevere);
+                    ConfigureParagraph(occurrence, keepLines: true, after: 80);
                     newElements.Add(occurrence);
 
                     foreach (var evidence in evidences)
                     {
                         imageElements.Add(CloneImageParagraph(mainPart, imageTemplate, evidence.FilePath));
                         var caption = (Paragraph)captionTemplate.CloneNode(true);
-                        var captionText = OccurrenceRules.GenerateCaptionSummary(occurrenceData);
+                        var captionText = NormalizeReportDescription(OccurrenceRules.GenerateCaptionSummary(occurrenceData));
                         SetParagraphText(caption, $"Figura 4.{figureNumber} – {captionText.TrimEnd('.', ';')}.");
+                        ConfigureParagraph(caption, keepLines: true, center: true, after: 240);
                         imageElements.Add(caption);
                         figureNumber++;
                     }
@@ -421,12 +456,14 @@ public sealed class WordReportService
             {
                 var heading = (Paragraph)first.CloneNode(true);
                 SetParagraphText(heading, custom.Title.Trim().ToUpperInvariant());
+                ConfigureParagraph(heading, keepNext: true, before: 240);
                 newElements.Add(heading);
             }
             if (!string.IsNullOrWhiteSpace(custom.Text))
             {
                 var paragraph = (Paragraph)bodyTemplate.CloneNode(true);
                 SetParagraphText(paragraph, custom.Text.Trim());
+                ConfigureParagraph(paragraph, keepNext: custom.Images.Count > 0, after: 120);
                 newElements.Add(paragraph);
             }
             foreach (var image in custom.Images.OrderBy(x => x.Order).Where(x => IsSupportedImageFile(x.FilePath)))
@@ -434,6 +471,7 @@ public sealed class WordReportService
                 newElements.Add(CloneImageParagraph(mainPart, imageTemplate, image.FilePath));
                 var caption = (Paragraph)captionTemplate.CloneNode(true);
                 SetParagraphText(caption, $"Figura 4.{figureNumber} – {custom.Title ?? "Imagem complementar"}.");
+                ConfigureParagraph(caption, keepLines: true, center: true, after: 240);
                 newElements.Add(caption);
                 figureNumber++;
             }
@@ -443,16 +481,26 @@ public sealed class WordReportService
         RemoveInclusive(first, last);
     }
 
-    private static string FormatSectionTitle(InspectionSection section)
+    private static string FormatSectionHeading(InspectionSection section)
     {
-        var title = !string.IsNullOrWhiteSpace(section.StartPoint) && !string.IsNullOrWhiteSpace(section.EndPoint)
-            ? $"{section.StartPoint.Trim()} → {section.EndPoint.Trim()}"
-            : section.Name.Trim();
-        if (section.Diameter is not null && !title.Contains("mm", StringComparison.OrdinalIgnoreCase))
-            title += $" – REDE {FormatMeters(section.Diameter)} mm";
+        var heading = FormatSectionName(section.Name);
+        var points = new[] { section.StartPoint, section.EndPoint }
+            .Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!.Trim()).ToList();
+        if (points.Count > 0) heading += $" - {string.Join(" → ", points)}";
+        if (section.Diameter is not null)
+            heading += $" {(points.Count > 0 ? "–" : "-")} REDE {FormatMeters(section.Diameter)} mm";
         if (!string.IsNullOrWhiteSpace(section.Reference))
-            title += $" ({section.Reference.Trim()})";
-        return title;
+            heading += $" ({section.Reference.Trim()})";
+        return heading;
+    }
+
+    private static string FormatSectionName(string name)
+    {
+        var trimmed = name.Trim();
+        var numbered = Regex.Match(trimmed, @"^trecho\s*0*(\d+)$", RegexOptions.IgnoreCase);
+        if (numbered.Success && int.TryParse(numbered.Groups[1].Value, out var number))
+            return $"TRECHO {number:00}";
+        return Regex.Replace(trimmed, @"^trecho\b", "TRECHO", RegexOptions.IgnoreCase);
     }
 
     private static string EffectiveLocation(Report report) =>
@@ -461,32 +509,61 @@ public sealed class WordReportService
     private static string FormatOccurrenceForReport(Occurrence occurrence)
     {
         if (!string.IsNullOrWhiteSpace(occurrence.ManualDescriptionOverride))
-            return occurrence.ManualDescriptionOverride.Trim();
+            return OccurrenceRules.ApplySeverityMarker(NormalizeReportDescription(occurrence.ManualDescriptionOverride), occurrence.IsSevere);
         if (!string.IsNullOrWhiteSpace(occurrence.CustomGeneratedText))
-            return occurrence.CustomGeneratedText.Trim();
+            return OccurrenceRules.ApplySeverityMarker(NormalizeReportDescription(occurrence.CustomGeneratedText), occurrence.IsSevere);
         var hasUsableLocation = occurrence.LocationMode == OccurrenceLocationMode.EntireSection ||
                                 occurrence.LocationMode == OccurrenceLocationMode.Point && occurrence.Meterage is not null ||
-                                occurrence.LocationMode == OccurrenceLocationMode.Range && occurrence.Meterage is not null && occurrence.EndMeterage is not null;
+                                occurrence.LocationMode == OccurrenceLocationMode.Range && occurrence.Meterage is not null && occurrence.EndMeterage is not null ||
+                                occurrence.LocationMode == OccurrenceLocationMode.MultiPoint && occurrence.MeteragePoints.Count >= 2 ||
+                                occurrence.LocationMode == OccurrenceLocationMode.From && occurrence.Meterage is not null;
         if (occurrence.Anomalies.Count > 0 && hasUsableLocation)
-            return OccurrenceRules.GenerateDescription(occurrence);
+            return NormalizeReportDescription(OccurrenceRules.GenerateDescription(occurrence));
         if (!string.IsNullOrWhiteSpace(occurrence.GeneratedDescription))
-            return occurrence.GeneratedDescription.Trim();
+            return OccurrenceRules.ApplySeverityMarker(NormalizeReportDescription(occurrence.GeneratedDescription), occurrence.IsSevere);
 
         var description = occurrence.Anomalies.Count == 0
             ? "Anomalia registrada"
-            : string.Join(", ", occurrence.Anomalies.OrderBy(x => x.Order).Select(x => x.AnomalyType.Name));
+            : string.Join(", ", occurrence.Anomalies.OrderBy(x => x.Order).Select(x => x.DisplayName));
         description += occurrence.LocationMode switch
         {
             OccurrenceLocationMode.SpecificMeterage when occurrence.Meterage is not null =>
                 $" a {FormatMeters(occurrence.Meterage)} metros do início da filmagem",
             OccurrenceLocationMode.Interval when occurrence.Meterage is not null && occurrence.EndMeterage is not null =>
                 $" entre {FormatMeters(occurrence.Meterage)} e {FormatMeters(occurrence.EndMeterage)} metros do início da filmagem",
+            OccurrenceLocationMode.MultiPoint when occurrence.MeteragePoints.Count >= 2 =>
+                $" a {JoinMeterages(occurrence.MeteragePoints.OrderBy(x => x.Order).Select(x => x.Meterage).ToList())} metros do início da filmagem",
+            OccurrenceLocationMode.From when occurrence.Meterage is not null =>
+                $" a partir de {FormatMeters(occurrence.Meterage)} {(occurrence.Meterage == 1 ? "metro" : "metros")} do início da filmagem",
             OccurrenceLocationMode.EntireSection => " em todo trecho filmado",
             _ => ""
         };
         if (!string.IsNullOrWhiteSpace(occurrence.Position)) description += $" ({occurrence.Position.Trim()})";
         if (!string.IsNullOrWhiteSpace(occurrence.Notes)) description += $", {occurrence.Notes.Trim()}";
-        return description;
+        return OccurrenceRules.ApplySeverityMarker(NormalizeReportDescription(description), occurrence.IsSevere);
+    }
+
+    private static string JoinMeterages(IReadOnlyList<decimal> values)
+    {
+        var formatted = values.Select(x => FormatMeters(x)).ToList();
+        return formatted.Count switch
+        {
+            0 => string.Empty,
+            1 => formatted[0],
+            2 => $"{formatted[0]} e {formatted[1]}",
+            _ => string.Join(", ", formatted.Take(formatted.Count - 1)) + " e " + formatted[^1]
+        };
+    }
+
+    private static string NormalizeReportDescription(string value)
+    {
+        var text = value.Trim();
+        text = Regex.Replace(text, @"\bAcumulo\b", match => char.IsUpper(match.Value[0]) ? "Acúmulo" : "acúmulo",
+            RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, @"\bagua\b", match => char.IsUpper(match.Value[0]) ? "Água" : "água",
+            RegexOptions.IgnoreCase);
+        if (text.Length > 0) text = char.ToUpper(text[0], CultureInfo.GetCultureInfo("pt-BR")) + text[1..];
+        return text;
     }
 
     private static bool IsSupportedImageFile(string? path)
@@ -531,19 +608,23 @@ public sealed class WordReportService
     private static Paragraph CloneImageParagraph(MainDocumentPart mainPart, Paragraph template, string filePath)
     {
         var clone = (Paragraph)template.CloneNode(true);
-        clone.ParagraphProperties ??= new ParagraphProperties();
-        clone.ParagraphProperties.KeepNext = new KeepNext { Val = true };
+        ConfigureParagraph(clone, keepNext: true, keepLines: true, center: true, before: 240);
         var imagePart = mainPart.AddImagePart(GetImagePartType(filePath));
         using (var stream = File.OpenRead(filePath)) imagePart.FeedData(stream);
         clone.Descendants<A.Blip>().First().Embed = mainPart.GetIdOfPart(imagePart);
-        ResizeDrawingToFit(clone, filePath);
+        ResizeDrawing(clone, EvidenceMaxWidthEmus, EvidenceMaxHeightEmus);
+        var properties = clone.Descendants<DW.DocProperties>().FirstOrDefault();
+        if (properties is not null) properties.Id = NextDrawingId(mainPart);
         return clone;
     }
 
-    private static void ResizeDrawingToFit(Paragraph paragraph, string filePath)
+    private static void ResizeDrawingToFit(Paragraph paragraph, string filePath, long? requestedMaxWidth = null,
+        long? requestedMaxHeight = null)
     {
         var extent = paragraph.Descendants<DW.Extent>().FirstOrDefault();
         if (extent?.Cx?.Value is not long maxWidth || extent.Cy?.Value is not long maxHeight) return;
+        maxWidth = requestedMaxWidth ?? maxWidth;
+        maxHeight = requestedMaxHeight ?? maxHeight;
         var (width, height) = FitImage(filePath, maxWidth, maxHeight);
         extent.Cx = width; extent.Cy = height;
         foreach (var drawingExtent in paragraph.Descendants<A.Extents>())
@@ -551,6 +632,35 @@ public sealed class WordReportService
             drawingExtent.Cx = width;
             drawingExtent.Cy = height;
         }
+    }
+
+    private static void ResizeDrawing(Paragraph paragraph, long width, long height)
+    {
+        var extent = paragraph.Descendants<DW.Extent>().FirstOrDefault();
+        if (extent is not null) { extent.Cx = width; extent.Cy = height; }
+        foreach (var drawingExtent in paragraph.Descendants<A.Extents>())
+        {
+            drawingExtent.Cx = width;
+            drawingExtent.Cy = height;
+        }
+    }
+
+    private static void ConfigureParagraph(Paragraph paragraph, bool keepNext = false, bool keepLines = false,
+        bool center = false, int before = 0, int after = 0)
+    {
+        paragraph.ParagraphProperties ??= new ParagraphProperties();
+        paragraph.ParagraphProperties.KeepNext = keepNext ? new KeepNext { Val = true } : null;
+        paragraph.ParagraphProperties.KeepLines = keepLines ? new KeepLines { Val = true } : null;
+        if (center)
+        {
+            paragraph.ParagraphProperties.Justification = new Justification { Val = JustificationValues.Center };
+            paragraph.ParagraphProperties.Indentation = new Indentation { Left = "0", Right = "0", FirstLine = "0" };
+        }
+        paragraph.ParagraphProperties.SpacingBetweenLines = new SpacingBetweenLines
+        {
+            Before = before.ToString(CultureInfo.InvariantCulture),
+            After = after.ToString(CultureInfo.InvariantCulture)
+        };
     }
 
     private static Drawing CreateDrawing(string relationshipId, string name, long width, long height, uint id)
@@ -650,6 +760,32 @@ public sealed class WordReportService
         paragraph.AppendChild(newRun);
     }
 
+    private static void SetOccurrenceParagraphText(Paragraph paragraph, string description, string reference, bool isSevere)
+    {
+        var firstRun = paragraph.Elements<Run>().FirstOrDefault();
+        var baseProperties = firstRun?.RunProperties?.CloneNode(true) as RunProperties;
+        foreach (var run in paragraph.Elements<Run>().ToList()) run.Remove();
+
+        var text = description.TrimEnd('.', ';');
+        if (isSevere && text.EndsWith("(grave)", StringComparison.CurrentCultureIgnoreCase))
+            text = text[..^"(grave)".Length].TrimEnd();
+        AppendTextRun(paragraph, baseProperties, $"- {text}");
+        if (isSevere)
+        {
+            var severeProperties = baseProperties?.CloneNode(true) as RunProperties ?? new RunProperties();
+            severeProperties.Color = new Color { Val = "FF0000" };
+            AppendTextRun(paragraph, severeProperties, " (grave)");
+        }
+        AppendTextRun(paragraph, baseProperties, $"{reference}.");
+    }
+
+    private static void AppendTextRun(Paragraph paragraph, RunProperties? properties, string text)
+    {
+        var run = properties is null ? new Run() : new Run(properties.CloneNode(true));
+        run.AppendChild(new Text(text) { Space = SpaceProcessingModeValues.Preserve });
+        paragraph.AppendChild(run);
+    }
+
     private static void RemoveBlock(Body body, string startPrefix, string endPrefix)
     {
         var start = FindParagraph(body, startPrefix);
@@ -687,6 +823,28 @@ public sealed class WordReportService
         if (update is null) settingsPart.Settings.AppendChild(new UpdateFieldsOnOpen { Val = true });
         else update.Val = true;
         settingsPart.Settings.Save();
+
+        MarkFieldsDirty(mainPart.Document);
+        foreach (var headerPart in mainPart.HeaderParts)
+        {
+            MarkFieldsDirty(headerPart.Header);
+            headerPart.Header.Save();
+        }
+        foreach (var footerPart in mainPart.FooterParts)
+        {
+            MarkFieldsDirty(footerPart.Footer);
+            footerPart.Footer.Save();
+        }
+    }
+
+    private static void MarkFieldsDirty(OpenXmlElement root)
+    {
+        const string wordNamespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+        foreach (var field in root.Descendants<FieldChar>()
+                     .Where(x => x.FieldCharType?.Value == FieldCharValues.Begin))
+            field.SetAttribute(new OpenXmlAttribute("w", "dirty", wordNamespace, "true"));
+        foreach (var field in root.Descendants<SimpleField>())
+            field.SetAttribute(new OpenXmlAttribute("w", "dirty", wordNamespace, "true"));
     }
 
     private static string FormatDiameters(Report report)

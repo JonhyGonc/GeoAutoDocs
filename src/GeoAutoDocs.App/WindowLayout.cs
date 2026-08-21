@@ -12,13 +12,33 @@ internal static class WindowLayout
 
     public static void KeepInsideWorkArea(Window window, double preferredWidth, double preferredHeight)
     {
-        window.SourceInitialized += (_, _) => Fit(window, preferredWidth, preferredHeight);
+        window.SourceInitialized += (_, _) =>
+        {
+            ApplyDarkTitleBar(window);
+            Fit(window, preferredWidth, preferredHeight);
+        };
         window.DpiChanged += (_, _) => window.Dispatcher.BeginInvoke(() =>
         {
             if (window.WindowState == WindowState.Normal)
                 Fit(window, Math.Min(window.Width, preferredWidth), Math.Min(window.Height, preferredHeight));
         });
     }
+
+    private static void ApplyDarkTitleBar(Window window)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var handle = new WindowInteropHelper(window).Handle;
+        var enabled = 1;
+        if (DwmSetWindowAttribute(handle, 20, ref enabled, sizeof(int)) != 0)
+            DwmSetWindowAttribute(handle, 19, ref enabled, sizeof(int));
+
+        var captionColor = ColorRef(7, 21, 34);
+        var textColor = ColorRef(245, 249, 252);
+        DwmSetWindowAttribute(handle, 35, ref captionColor, sizeof(int));
+        DwmSetWindowAttribute(handle, 36, ref textColor, sizeof(int));
+    }
+
+    private static int ColorRef(byte red, byte green, byte blue) => red | green << 8 | blue << 16;
 
     private static void Fit(Window window, double preferredWidth, double preferredHeight)
     {
@@ -82,6 +102,10 @@ internal static class WindowLayout
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo monitorInfo);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr windowHandle, int attribute,
+        ref int attributeValue, int attributeSize);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeRect

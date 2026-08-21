@@ -29,9 +29,14 @@ public sealed class OccurrenceService(AppDataPaths paths, LocalLogger logger)
             GeneratedDescription = duplicate ? string.Empty : source.GeneratedDescription,
             ManualDescriptionOverride = duplicate ? null : source.ManualDescriptionOverride,
             InterruptedRecording = !duplicate && source.InterruptedRecording,
+            IsSevere = !duplicate && source.IsSevere,
             CreatedAt = duplicate ? DateTime.UtcNow : source.CreatedAt,
             UpdatedAt = DateTime.UtcNow,
             Order = duplicate ? (section.Occurrences.Count == 0 ? 0 : section.Occurrences.Max(x => x.Order) + 1) : source.Order,
+            MeteragePoints = duplicate ? [] : source.MeteragePoints.OrderBy(x => x.Order).Select(x => new OccurrenceMeteragePoint
+            {
+                Id = x.Id, OccurrenceId = source.Id, Meterage = x.Meterage, Order = x.Order
+            }).ToList(),
             Anomalies = source.Anomalies.OrderBy(x => x.Order).Select(x => new OccurrenceAnomaly
             {
                 OccurrenceId = duplicate ? Guid.Empty : source.Id, AnomalyTypeId = x.AnomalyTypeId,
@@ -39,7 +44,7 @@ public sealed class OccurrenceService(AppDataPaths paths, LocalLogger logger)
                 ApproximateExtension = x.ApproximateExtension, Dimension = x.Dimension,
                 Condition = x.Condition, InfiltrationCondition = x.InfiltrationCondition,
                 EstimatedPercentage = x.EstimatedPercentage, Notes = x.Notes,
-                CustomText = x.CustomText, Order = x.Order, AnomalyType = x.AnomalyType
+                CustomText = x.CustomText, Order = x.Order, AnomalyName = x.DisplayName, AnomalyType = x.AnomalyType
             }).ToList(),
             Evidence = duplicate ? [] : source.Evidence.OrderBy(x => x.Order).Select(x => new Evidence
             {
@@ -49,6 +54,7 @@ public sealed class OccurrenceService(AppDataPaths paths, LocalLogger logger)
                 IsPrimary = x.IsPrimary, ManagedByGeoAutoDocs = x.ManagedByGeoAutoDocs, SharedFilePath = x.SharedFilePath
             }).ToList()
         };
+        foreach (var point in draft.MeteragePoints) point.OccurrenceId = draft.Id;
         foreach (var item in draft.Anomalies) item.OccurrenceId = draft.Id;
         return draft;
     }
@@ -64,7 +70,9 @@ public sealed class OccurrenceService(AppDataPaths paths, LocalLogger logger)
         NormalizeChildren(draft);
         OccurrenceRules.Validate(draft);
         await PrepareEvidenceAsync(project, section, draft, cancellationToken);
-        draft.GeneratedDescription = OccurrenceRules.GenerateDescription(draft);
+        var existingIndex = section.Occurrences.FindIndex(x => x.Id == draft.Id);
+        if (existingIndex < 0 || string.IsNullOrWhiteSpace(draft.GeneratedDescription))
+            draft.GeneratedDescription = OccurrenceRules.GenerateDescription(draft);
         draft.ManualDescriptionOverride = EmptyToNull(draft.ManualDescriptionOverride);
         draft.ReferencePoint = EmptyToNull(draft.ReferencePoint);
         draft.Notes = EmptyToNull(draft.Notes);
@@ -72,7 +80,6 @@ public sealed class OccurrenceService(AppDataPaths paths, LocalLogger logger)
         if (draft.CreatedAt == default) draft.CreatedAt = now;
         draft.UpdatedAt = now;
 
-        var existingIndex = section.Occurrences.FindIndex(x => x.Id == draft.Id);
         if (existingIndex >= 0) section.Occurrences[existingIndex] = draft;
         else section.Occurrences.Add(draft);
         RefreshCaptureStatuses(project);
@@ -159,7 +166,26 @@ public sealed class OccurrenceService(AppDataPaths paths, LocalLogger logger)
 
     private static void NormalizeLocation(Occurrence occurrence)
     {
-        if (occurrence.LocationMode == OccurrenceLocationMode.Point) occurrence.EndMeterage = null;
+        occurrence.MeteragePoints ??= [];
+        if (occurrence.LocationMode == OccurrenceLocationMode.MultiPoint)
+        {
+            var duplicate = occurrence.MeteragePoints.GroupBy(x => x.Meterage).FirstOrDefault(x => x.Count() > 1);
+            if (duplicate is not null)
+                throw new InvalidOperationException($"A metragem {MeasurementText.Format(duplicate.Key)} m foi adicionada mais de uma vez.");
+            occurrence.MeteragePoints = occurrence.MeteragePoints.OrderBy(x => x.Meterage).ToList();
+            for (var index = 0; index < occurrence.MeteragePoints.Count; index++)
+            {
+                occurrence.MeteragePoints[index].OccurrenceId = occurrence.Id;
+                occurrence.MeteragePoints[index].Order = index;
+            }
+            occurrence.Meterage = occurrence.MeteragePoints.FirstOrDefault()?.Meterage;
+            occurrence.EndMeterage = null;
+            return;
+        }
+
+        occurrence.MeteragePoints.Clear();
+        if (occurrence.LocationMode is OccurrenceLocationMode.Point or OccurrenceLocationMode.From)
+            occurrence.EndMeterage = null;
         if (occurrence.LocationMode == OccurrenceLocationMode.EntireSection)
         {
             occurrence.Meterage = null;

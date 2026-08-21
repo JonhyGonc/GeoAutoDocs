@@ -23,7 +23,6 @@ public partial class NewLocationWindow : Window
     {
         if (string.IsNullOrWhiteSpace(NameBox.Text))
         {
-            ValidationText.Foreground = (System.Windows.Media.Brush)FindResource("DangerBrush");
             NameBox.Focus();
             return;
         }

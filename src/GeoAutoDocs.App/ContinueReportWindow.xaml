@@ -1,0 +1,76 @@
+<Window x:Class="GeoAutoDocs.App.ContinueReportWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Continuar relatório existente" Width="920" Height="720" MinWidth="720" MinHeight="520"
+        WindowStartupLocation="CenterOwner" Background="{StaticResource WindowBackgroundBrush}">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <StackPanel>
+            <TextBlock Text="Continuar relatório existente" Style="{StaticResource PageTitleTextStyle}" FontSize="24"/>
+            <TextBlock Text="Selecione um DOCX já emitido. O original será preservado e uma nova revisão será criada."
+                       Foreground="{StaticResource TextSecondaryBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <Grid Grid.Row="1" Margin="0,18,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBox x:Name="SourcePathBox" IsReadOnly="True" VerticalContentAlignment="Center"/>
+            <Button Grid.Column="1" Content="Selecionar DOCX" Margin="8,0,0,0" Click="SelectSource_Click"/>
+        </Grid>
+
+        <Border x:Name="SummaryPanel" Grid.Row="2" Style="{StaticResource SubtleCardStyle}" Margin="0,14,0,12" Visibility="Collapsed">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <TextBlock x:Name="DocumentSummaryText" TextWrapping="Wrap"/>
+                <TextBlock x:Name="ChangeSummaryText" Grid.Column="1" TextWrapping="Wrap"/>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="3">
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+            <DockPanel Margin="0,0,0,8">
+                <TextBlock Text="Conteúdo encontrado" FontWeight="SemiBold" FontSize="16"/>
+                <TextBlock x:Name="SelectionHint" DockPanel.Dock="Right" Foreground="{StaticResource TextMutedBrush}"/>
+            </DockPanel>
+            <Border Grid.Row="1" Background="{StaticResource SurfaceMutedBrush}" BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="1" CornerRadius="7">
+                <ListBox x:Name="ItemsList" BorderThickness="0" Background="Transparent" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="8,6">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}" IsEnabled="{Binding CanSelect}" VerticalAlignment="Center"/>
+                                <StackPanel Grid.Column="1" Margin="10,0,14,0">
+                                    <TextBlock Text="{Binding Description}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                    <TextBlock Text="{Binding ContextText}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,3,0,0"/>
+                                </StackPanel>
+                                <TextBlock Grid.Column="2" Text="{Binding StatusText}" Foreground="{StaticResource PrimaryBrush}" VerticalAlignment="Center"/>
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Border>
+        </Grid>
+
+        <StackPanel Grid.Row="4" Margin="0,12,0,0">
+            <TextBlock x:Name="MessagesText" Foreground="{StaticResource WarningBrush}" TextWrapping="Wrap"/>
+            <CheckBox x:Name="LegacyReviewCheck" Content="Revisei os avisos e confirmo a vinculação deste relatório"
+                      Visibility="Collapsed" Margin="0,8,0,0" Checked="ReviewChanged" Unchecked="ReviewChanged"/>
+            <TextBlock x:Name="ResultText" Foreground="{StaticResource SuccessBrush}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+        </StackPanel>
+
+        <DockPanel Grid.Row="5" Margin="0,18,0,0">
+            <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+                <Button x:Name="OpenResultButton" Content="Abrir resultado" IsEnabled="False" Click="OpenResult_Click"/>
+                <Button x:Name="OpenFolderButton" Content="Abrir pasta" IsEnabled="False" Click="OpenFolder_Click"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="CloseButton" Content="Fechar" IsCancel="True" Click="Close_Click"/>
+                <Button x:Name="GenerateButton" Content="Gerar nova versão" Style="{StaticResource PrimaryButtonStyle}"
+                        MinWidth="170" IsEnabled="False" Click="Generate_Click"/>
+            </StackPanel>
+        </DockPanel>
+    </Grid>
+</Window>

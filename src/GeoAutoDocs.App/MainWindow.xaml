@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
-        Title="GeoAutoDocs" Height="900" Width="1480" MinHeight="480" MinWidth="820"
+        Title="GeoAutoDocs" Icon="Assets/GeoAutoDocs.ico" Height="900" Width="1480" MinHeight="480" MinWidth="820"
         WindowStartupLocation="CenterScreen" WindowState="Maximized" Background="{StaticResource WindowBackgroundBrush}"
         PreviewKeyDown="Window_PreviewKeyDown">
     <Window.Resources>
@@ -10,68 +10,76 @@
             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/><Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}"/><Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="Padding" Value="14,9"/><Setter Property="Margin" Value="0,0,8,8"/><Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToggleButton"><Border x:Name="Chip" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="18" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chip" Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/></Trigger><Trigger Property="IsChecked" Value="True"><Setter TargetName="Chip" Property="Background" Value="{StaticResource PrimaryBrush}"/><Setter TargetName="Chip" Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chip" Property="Opacity" Value="0.45"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
         </Style>
+        <Style x:Key="CleanContextMenuItemStyle" TargetType="MenuItem">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Padding" Value="14,10"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="MenuItem">
+                        <Border x:Name="ItemBorder" Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter ContentSource="Header" RecognizesAccessKey="True"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="ItemBorder" Property="Background" Value="#20384C"/></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="CleanContextMenuStyle" TargetType="ContextMenu">
+            <Setter Property="Background" Value="#132536"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="MinWidth" Value="170"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContextMenu">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="5">
+                            <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="CleanContextMenuSeparatorStyle" TargetType="Separator">
+            <Setter Property="Margin" Value="10,3"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Separator"><Border Height="1" Background="{StaticResource BorderBrush}"/></ControlTemplate></Setter.Value></Setter>
+        </Style>
     </Window.Resources>
     <Grid Background="{StaticResource WindowBackgroundBrush}">
         <Grid x:Name="HomeShell">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="226"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-
-            <Border x:Name="HomeSidebar" Panel.ZIndex="2" Background="#081827" BorderBrush="#203143" BorderThickness="0,0,1,0">
-                <Grid Margin="16,26,16,22">
-                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                    <Grid Margin="8,0,8,0">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="38"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                        <Border Width="32" Height="32" CornerRadius="16" Background="#173F70" HorizontalAlignment="Left">
-                            <TextBlock Text="&#xE774;" FontFamily="Segoe MDL2 Assets" FontSize="17" Foreground="#55B9FF" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <TextBlock Grid.Column="1" Text="GeoAutoDocs" FontSize="17" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                    </Grid>
-
-                    <StackPanel Grid.Row="1" Margin="0,34,0,0">
-                        <Button Style="{StaticResource SidebarItemActiveStyle}">
-                            <StackPanel Orientation="Horizontal"><Grid Width="32"><Path Data="{StaticResource FolderIconGeometry}" Stroke="#55B9FF" StrokeThickness="2" Width="20" Height="16" Stretch="Uniform" HorizontalAlignment="Left" VerticalAlignment="Center"/></Grid><TextBlock Text="Projetos" FontSize="14"/></StackPanel>
-                        </Button>
-                        <Button Style="{StaticResource SidebarItemStyle}" IsEnabled="False" ToolTipService.ShowOnDisabled="True" ToolTip="Abra um projeto para acessar as inspeções.">
-                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE714;" FontFamily="Segoe MDL2 Assets" FontSize="16" Width="32"/><TextBlock Text="Inspeções" FontSize="14"/></StackPanel>
-                        </Button>
-                        <Button Style="{StaticResource SidebarItemStyle}" IsEnabled="False" ToolTipService.ShowOnDisabled="True" ToolTip="Abra um projeto para acessar os relatórios.">
-                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8A5;" FontFamily="Segoe MDL2 Assets" FontSize="16" Width="32"/><TextBlock Text="Relatórios" FontSize="14"/></StackPanel>
-                        </Button>
-                    </StackPanel>
-
-                    <Border Grid.Row="2" BorderBrush="#203143" BorderThickness="1" CornerRadius="8" Padding="12,10" Background="#0A1B2A">
-                        <StackPanel>
-                            <TextBlock Text="GeoAutoDocs Desktop" FontWeight="SemiBold" FontSize="12"/>
-                            <TextBlock x:Name="SidebarVersionText" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,3,0,0"/>
-                        </StackPanel>
-                    </Border>
-                </Grid>
+            <Grid.RowDefinitions><RowDefinition Height="46"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+            <Border Background="#071522" BorderBrush="#1B3042" BorderThickness="0,0,0,1">
+                <StackPanel Orientation="Horizontal" Margin="18,0" VerticalAlignment="Center">
+                    <Border Width="25" Height="25" CornerRadius="13" Background="#123C66" Margin="0,0,9,0"><TextBlock Text="&#xE774;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="#55B9FF" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                    <TextBlock Text="GeoAutoDocs" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                </StackPanel>
             </Border>
 
-            <Grid Grid.Column="1" ClipToBounds="True">
-                <Grid x:Name="ProjectsView" Margin="40,32,46,30" MaxWidth="1680" HorizontalAlignment="Stretch">
-                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+            <Grid Grid.Row="1" ClipToBounds="True">
+                <Grid x:Name="ProjectsView" Margin="38,28,38,28" MaxWidth="1680" HorizontalAlignment="Stretch">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 
-                    <Grid>
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                        <StackPanel>
-                            <TextBlock Text="Projetos" Style="{StaticResource PageTitleTextStyle}"/>
+                    <Grid x:Name="ProjectsHeaderGrid">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="0"/></Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition x:Name="ProjectsSearchColumn" Width="390"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <StackPanel x:Name="ProjectsHeaderTitlePanel">
+                            <TextBlock Text="Projetos" Style="{StaticResource PageTitleTextStyle}" FontSize="30"/>
                             <TextBlock Text="Gerencie seus projetos de vídeo inspeção" Foreground="{StaticResource TextSecondaryBrush}" FontSize="14" Margin="0,6,0,0"/>
                         </StackPanel>
-                        <Button x:Name="NewProjectTopButton" Grid.Column="1" Style="{StaticResource PrimaryButtonStyle}" MinWidth="154" Height="46" Margin="0" Click="NewProject_Click">
+                        <Grid x:Name="ProjectsHeaderSearchPanel" Grid.Column="1" Margin="18,0,18,0" VerticalAlignment="Center">
+                            <TextBlock Text="&#xE721;" FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="15,0,0,0" Panel.ZIndex="1" IsHitTestVisible="False"/>
+                            <TextBox x:Name="ProjectsSearchBox" Style="{StaticResource SearchBoxStyle}" ToolTip="Pesquisar projetos por nome ou cliente" TextChanged="ProjectsSearchBox_TextChanged" Margin="0"/>
+                            <TextBlock x:Name="ProjectsSearchHint" Text="Pesquisar projetos..." Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" Margin="42,0,0,0" IsHitTestVisible="False"/>
+                        </Grid>
+                        <Button x:Name="NewProjectTopButton" Grid.Column="2" Style="{StaticResource PrimaryButtonStyle}" MinWidth="154" Height="46" Margin="0" Click="NewProject_Click">
                             <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" FontFamily="Segoe MDL2 Assets" Margin="0,0,9,0"/><TextBlock Text="Novo projeto"/></StackPanel>
                         </Button>
                     </Grid>
 
-                    <Grid Grid.Row="1" Margin="0,24,0,22" HorizontalAlignment="Right" Width="390">
-                        <TextBlock Text="&#xE721;" FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="15,0,0,0" Panel.ZIndex="1" IsHitTestVisible="False"/>
-                        <TextBox x:Name="ProjectsSearchBox" Style="{StaticResource SearchBoxStyle}" ToolTip="Pesquisar projetos por nome ou cliente" TextChanged="ProjectsSearchBox_TextChanged"/>
-                        <TextBlock x:Name="ProjectsSearchHint" Text="Pesquisar projetos..." Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" Margin="42,0,0,0" IsHitTestVisible="False"/>
-                    </Grid>
-
-                    <UniformGrid Grid.Row="2" Columns="4" Margin="0,0,0,24">
+                    <UniformGrid Grid.Row="1" Columns="4" Margin="0,42,0,28">
                         <Border x:Name="TotalProjectsCard" Style="{StaticResource StatCardStyle}" Margin="0,0,12,0">
                             <Grid><Grid.ColumnDefinitions><ColumnDefinition x:Name="TotalProjectsIconColumn" Width="54"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                 <Border Width="44" Height="44" CornerRadius="22" Background="#102F4C" BorderBrush="#235B89" BorderThickness="1"><Path Data="{StaticResource FolderIconGeometry}" Stroke="#55B9FF" StrokeThickness="2" Width="23" Height="19" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
@@ -98,7 +106,7 @@
                         </Border>
                     </UniformGrid>
 
-                    <Grid Grid.Row="3">
+                    <Grid Grid.Row="2">
                         <Grid x:Name="ProjectsListPanel">
                             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                             <TextBlock Text="Projetos cadastrados" Style="{StaticResource SectionTitleTextStyle}" Margin="0,0,0,12"/>
@@ -128,10 +136,10 @@
                                                 <Button Content="Abrir" Style="{StaticResource PrimaryButtonStyle}" Tag="{Binding Id}" Click="OpenProject_Click" MinWidth="82" Margin="0,0,7,0"/>
                                                 <Button Content="&#xE712;" Style="{StaticResource IconButtonStyle}" Tag="{Binding Id}" Click="ProjectActions_Click" ToolTip="Ações do projeto" Margin="0">
                                                     <Button.ContextMenu>
-                                                        <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                                                            <MenuItem Header="Renomear" Tag="{Binding Id}" Click="RenameProject_Click"/>
-                                                            <Separator/>
-                                                            <MenuItem Header="Excluir" Tag="{Binding Id}" Click="DeleteProject_Click" Foreground="{StaticResource DangerBrush}"/>
+                                                        <ContextMenu Style="{StaticResource CleanContextMenuStyle}" DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                                            <MenuItem Header="Renomear" Style="{StaticResource CleanContextMenuItemStyle}" Tag="{Binding Id}" Click="RenameProject_Click"/>
+                                                            <Separator Style="{StaticResource CleanContextMenuSeparatorStyle}"/>
+                                                            <MenuItem Header="Excluir" Style="{StaticResource CleanContextMenuItemStyle}" Tag="{Binding Id}" Click="DeleteProject_Click" Foreground="{StaticResource DangerBrush}"/>
                                                         </ContextMenu>
                                                     </Button.ContextMenu>
                                                 </Button>
@@ -161,6 +169,17 @@
                             </ScrollViewer>
                         </Border>
                     </Grid>
+
+                    <Border Grid.Row="3" Style="{StaticResource CardStyle}" Padding="24,18" Margin="0,24,0,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="1"/><ColumnDefinition Width="*"/><ColumnDefinition Width="1"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Grid Grid.Column="0"><Grid.ColumnDefinitions><ColumnDefinition Width="54"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Border Width="42" Height="42" CornerRadius="21" Background="#102F4C"><TextBlock Text="&#xE753;" FontFamily="Segoe MDL2 Assets" FontSize="19" Foreground="#55B9FF" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><StackPanel Grid.Column="1"><TextBlock Text="Armazenamento" Foreground="{StaticResource TextSecondaryBrush}"/><TextBlock x:Name="StorageValueText" Text="Local" FontWeight="SemiBold" FontSize="15" Margin="0,4,0,0"/><TextBlock x:Name="StorageDetailText" Text="Projetos salvos neste computador" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/></StackPanel></Grid>
+                            <Border Grid.Column="1" Background="{StaticResource BorderBrush}" Margin="18,0"/>
+                            <Grid Grid.Column="2" Margin="24,0"><Grid.ColumnDefinitions><ColumnDefinition Width="54"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Border Width="42" Height="42" CornerRadius="21" Background="#302B19"><TextBlock Text="&#xEA18;" FontFamily="Segoe MDL2 Assets" FontSize="19" Foreground="{StaticResource WarningBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><StackPanel Grid.Column="1"><TextBlock Text="Segurança" Foreground="{StaticResource TextSecondaryBrush}"/><TextBlock x:Name="SecurityValueText" Text="Salvamento automático ativo" FontWeight="SemiBold" FontSize="15" Margin="0,4,0,0"/><TextBlock x:Name="SecurityDetailText" Text="Alterações são persistidas automaticamente" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/></StackPanel></Grid>
+                            <Border Grid.Column="3" Background="{StaticResource BorderBrush}" Margin="18,0"/>
+                            <Grid Grid.Column="4" Margin="24,0,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="54"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Border Width="42" Height="42" CornerRadius="21" Background="#102F4C"><TextBlock Text="&#xE895;" FontFamily="Segoe MDL2 Assets" FontSize="19" Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><StackPanel Grid.Column="1"><TextBlock Text="Último backup" Foreground="{StaticResource TextSecondaryBrush}"/><TextBlock x:Name="BackupValueText" Text="Nunca realizado" FontWeight="SemiBold" FontSize="15" Margin="0,4,0,0"/><TextBlock x:Name="BackupDetailText" Text="Nenhum backup disponível" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/></StackPanel></Grid>
+                        </Grid>
+                    </Border>
                 </Grid>
 
                 <Grid x:Name="NewProjectView" Visibility="Collapsed" Margin="40,30,46,28" MaxWidth="1240" HorizontalAlignment="Stretch">
@@ -191,14 +210,14 @@
 
         <Grid x:Name="EditorView" Visibility="Collapsed" Margin="16,14,18,10" MaxWidth="1760" HorizontalAlignment="Stretch">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-            <Grid Margin="0,0,0,12">
+            <Grid x:Name="EditorHeaderGrid" Margin="0,0,0,12">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <Button Margin="0,0,16,0" VerticalAlignment="Center" Click="Back_Click"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72B;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/><TextBlock Text="Voltar para projetos"/></StackPanel></Button>
+                <Button Margin="0,0,16,0" VerticalAlignment="Center" Click="Back_Click"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72B;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/><TextBlock x:Name="BackToProjectsText" Text="Voltar para projetos"/></StackPanel></Button>
                 <StackPanel Grid.Column="1"><TextBlock x:Name="ProjectTitle" Style="{StaticResource PageTitleTextStyle}" FontSize="23" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="ProjectClientSummary" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" Margin="0,2,0,0"/></StackPanel>
-                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center"><TextBlock x:Name="StorageStatus" Foreground="{StaticResource TextSecondaryBrush}" FontWeight="SemiBold" Margin="0,0,12,0"/><Button x:Name="ShareProjectButton" Click="ShareProject_Click"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72D;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/><TextBlock Text="Compartilhar"/></StackPanel></Button><Button x:Name="HeaderNewReportButton" Style="{StaticResource PrimaryButtonStyle}" Click="NewReport_Click"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/><TextBlock Text="Novo relatório"/></StackPanel></Button></StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center"><TextBlock x:Name="StorageStatus" Foreground="{StaticResource TextSecondaryBrush}" FontWeight="SemiBold" Margin="0,0,12,0"/><Button x:Name="AnomalyCatalogButton" Content="Catálogo de anomalias" Click="AnomalyCatalog_Click"/><Button x:Name="ShareProjectButton" Click="ShareProject_Click" ToolTip="Compartilhar projeto"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72D;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/><TextBlock x:Name="ShareProjectText" Text="Compartilhar"/></StackPanel></Button><Button x:Name="HeaderNewReportButton" Style="{StaticResource PrimaryButtonStyle}" Click="NewReport_Click"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/><TextBlock Text="Novo relatório"/></StackPanel></Button></StackPanel>
             </Grid>
 
-            <TabControl x:Name="ReportEditorTabs" Grid.Row="1" Margin="0">
+            <TabControl x:Name="ReportEditorTabs" Grid.Row="1" Margin="0" SelectionChanged="ReportEditorTabs_SelectionChanged">
                 <TabItem x:Name="OverviewTab" Header="Visão geral">
                     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,14,8,0">
                         <Grid x:Name="OverviewWorkspace">
@@ -269,78 +288,204 @@
                     </ScrollViewer>
                 </TabItem>
                 <TabItem x:Name="InspectionsTab" Header="Inspeção">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                        <Grid Margin="0,10,8,0" MinHeight="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType={x:Type ScrollViewer}}}">
-                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="3*" MinHeight="330"/><RowDefinition Height="1.25*" MinHeight="175"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <TabItem.Resources>
+                        <Style x:Key="AnomalyDashboardCardStyle" TargetType="Border">
+                            <Setter Property="Background" Value="#0C1B28"/>
+                            <Setter Property="BorderBrush" Value="#1E3547"/>
+                            <Setter Property="BorderThickness" Value="1"/>
+                            <Setter Property="CornerRadius" Value="10"/>
+                            <Setter Property="Padding" Value="12"/>
+                            <Setter Property="Margin" Value="0,0,0,9"/>
+                            <Style.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Background" Value="#102333"/>
+                                    <Setter Property="BorderBrush" Value="#31536B"/>
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                        <Style x:Key="AnomalyCardActionStyle" TargetType="Button" BasedOn="{StaticResource IconButtonStyle}">
+                            <Setter Property="Width" Value="36"/>
+                            <Setter Property="Height" Value="36"/>
+                            <Setter Property="Margin" Value="5,0,0,0"/>
+                            <Setter Property="Foreground" Value="#38AFFF"/>
+                        </Style>
+                    </TabItem.Resources>
+                    <Grid x:Name="InspectionLayoutRoot" Margin="0,10,8,0">
+                            <Grid.ColumnDefinitions><ColumnDefinition x:Name="PlayerColumn" Width="*"/><ColumnDefinition x:Name="InspectionSplitterColumn" Width="6"/><ColumnDefinition x:Name="InspectionSideColumn" Width="360"/></Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
 
-                            <Grid Margin="0,0,0,10">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="1.05*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="1.05*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="1.15*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                <TextBlock Text="Local" VerticalAlignment="Center" FontWeight="SemiBold" Margin="2,0,9,0"/>
-                                <ComboBox x:Name="LocationsList" Grid.Column="1" DisplayMemberPath="Name" SelectionChanged="LocationsList_SelectionChanged" Margin="0" MinWidth="100"/>
-                                <Button x:Name="AddLocationButton" Grid.Column="2" Content="+  Local" Margin="6,0,0,0" Click="AddLocation_Click" ToolTip="Novo local"/>
-                                <TextBlock Grid.Column="4" Text="Trecho" VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,0,9,0"/>
-                                <ComboBox x:Name="SectionsList" Grid.Column="5" SelectionChanged="SectionsList_SelectionChanged" Margin="0" MinWidth="100" TextSearch.TextPath="Name"><ComboBox.ItemTemplate><DataTemplate><StackPanel><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/><TextBlock FontSize="10" Foreground="{StaticResource TextMutedBrush}" TextTrimming="CharacterEllipsis"><Run Text="{Binding StartPoint}"/><Run Text=" → "/><Run Text="{Binding EndPoint}"/></TextBlock></StackPanel></DataTemplate></ComboBox.ItemTemplate></ComboBox>
-                                <Button x:Name="AddSectionButton" Grid.Column="6" Content="+  Trecho" Margin="6,0,0,0" Click="AddSection_Click" ToolTip="Novo trecho"/>
-                                <TextBlock Grid.Column="8" Text="Vídeo" VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,0,9,0"/>
-                                <ComboBox x:Name="VideosList" Grid.Column="9" SelectionChanged="VideosList_SelectionChanged" Margin="0" MinWidth="110" TextSearch.TextPath="DisplayName"><ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Availability}"/></DataTemplate></ComboBox.ItemTemplate></ComboBox>
-                                <Button x:Name="AddVideoButton" Grid.Column="10" Content="+  Vídeo" Margin="6,0,0,0" Click="AddVideo_Click" ToolTip="Adicionar vídeo"/>
-                                <StackPanel Grid.Column="11" Orientation="Horizontal"><Button x:Name="RelocateVideoButton" Content="Localizar" Margin="6,0,0,0" Click="RelocateVideo_Click" IsEnabled="False" Visibility="Collapsed" ToolTip="Localizar arquivo ausente"/><Button x:Name="RemoveVideoButton" Margin="6,0,0,0" Style="{StaticResource DangerButtonStyle}" Click="RemoveVideo_Click" IsEnabled="False"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74D;" FontFamily="Segoe MDL2 Assets" Margin="0,0,7,0"/><TextBlock Text="Remover"/></StackPanel></Button></StackPanel>
+                            <Expander x:Name="InspectionContextExpander" Grid.ColumnSpan="3" Header="Local / Trecho / Vídeo" IsExpanded="True" Expanded="InspectionLayoutPreferenceChanged" Collapsed="InspectionLayoutPreferenceChanged" Margin="0,0,0,8">
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Style="{StaticResource SubtleCardStyle}" Padding="12" Margin="0,0,6,0">
+                                    <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                        <DockPanel Margin="0,0,0,8"><Button x:Name="AddLocationButton" DockPanel.Dock="Right" Style="{StaticResource IconButtonStyle}" Content="&#xE710;" Margin="4,0,0,0" Click="AddLocation_Click" ToolTip="Criar local"/><StackPanel Orientation="Horizontal" VerticalAlignment="Center"><Border Width="24" Height="24" CornerRadius="12" Background="#173F70" Margin="0,0,8,0"><TextBlock Text="1" FontWeight="Bold" Foreground="#55B9FF" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Local" FontWeight="SemiBold" VerticalAlignment="Center"/></StackPanel></DockPanel>
+                                        <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <ComboBox x:Name="LocationsList" DisplayMemberPath="Name" SelectionChanged="LocationsList_SelectionChanged" Margin="0,0,6,0" MinWidth="80" ToolTip="Selecione o local da inspeção"/>
+                                            <Button x:Name="RenameLocationButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Content="&#xE70F;" Margin="0,0,4,0" Click="RenameLocation_Click" ToolTip="Renomear local"/>
+                                            <Button x:Name="DeleteLocationButton" Grid.Column="2" Style="{StaticResource IconButtonStyle}" Content="&#xE74D;" Foreground="{StaticResource DangerBrush}" Click="DeleteLocation_Click" ToolTip="Excluir local"/>
+                                        </Grid>
+                                    </Grid>
+                                </Border>
+                                <Border Grid.Column="1" Style="{StaticResource SubtleCardStyle}" Padding="12" Margin="6,0">
+                                    <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                        <DockPanel Margin="0,0,0,8"><Button x:Name="AddSectionButton" DockPanel.Dock="Right" Style="{StaticResource IconButtonStyle}" Content="&#xE710;" Margin="4,0,0,0" Click="AddSection_Click" ToolTip="Criar trecho"/><StackPanel Orientation="Horizontal" VerticalAlignment="Center"><Border Width="24" Height="24" CornerRadius="12" Background="#173F70" Margin="0,0,8,0"><TextBlock Text="2" FontWeight="Bold" Foreground="#55B9FF" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Trecho" FontWeight="SemiBold" VerticalAlignment="Center"/></StackPanel></DockPanel>
+                                        <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <ComboBox x:Name="SectionsList" SelectionChanged="SectionsList_SelectionChanged" Margin="0,0,6,0" MinWidth="80" TextSearch.TextPath="Name" ToolTip="Selecione o trecho a inspecionar"><ComboBox.ItemTemplate><DataTemplate><StackPanel><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/><TextBlock FontSize="10" Foreground="{StaticResource TextMutedBrush}" TextTrimming="CharacterEllipsis"><Run Text="{Binding StartPoint}"/><Run Text=" → "/><Run Text="{Binding EndPoint}"/></TextBlock></StackPanel></DataTemplate></ComboBox.ItemTemplate></ComboBox>
+                                            <Button x:Name="EditSectionButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Content="&#xE70F;" Margin="0,0,4,0" Click="EditSection_Click" ToolTip="Editar trecho" ToolTipService.ShowOnDisabled="True"/>
+                                            <Button x:Name="DeleteSectionButton" Grid.Column="2" Style="{StaticResource IconButtonStyle}" Content="&#xE74D;" Foreground="{StaticResource DangerBrush}" Click="DeleteSection_Click" ToolTip="Excluir trecho"/>
+                                        </Grid>
+                                    </Grid>
+                                </Border>
+                                <Border Grid.Column="2" Style="{StaticResource SubtleCardStyle}" Padding="12" Margin="6,0,0,0">
+                                    <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                        <DockPanel Margin="0,0,0,8"><Button x:Name="AddVideoButton" DockPanel.Dock="Right" Style="{StaticResource IconButtonStyle}" Content="&#xE710;" Margin="4,0,0,0" Click="AddVideo_Click" ToolTip="Adicionar vídeo"/><StackPanel Orientation="Horizontal" VerticalAlignment="Center"><Border Width="24" Height="24" CornerRadius="12" Background="#173F70" Margin="0,0,8,0"><TextBlock Text="3" FontWeight="Bold" Foreground="#55B9FF" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Vídeo" FontWeight="SemiBold" VerticalAlignment="Center"/></StackPanel></DockPanel>
+                                        <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <ComboBox x:Name="VideosList" SelectionChanged="VideosList_SelectionChanged" Margin="0" MinWidth="80" TextSearch.TextPath="DisplayName" ToolTip="Selecione o vídeo para revisar"><ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Availability}"/></DataTemplate></ComboBox.ItemTemplate></ComboBox>
+                                            <Button x:Name="ReloadVideoButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Content="&#xE72C;" Margin="6,0,0,0" Click="RetryVideo_Click" IsEnabled="False" ToolTip="Recarregar vídeo"/>
+                                            <Button x:Name="RelocateVideoButton" Grid.Column="2" Style="{StaticResource IconButtonStyle}" Content="&#xE838;" Margin="6,0,0,0" Click="RelocateVideo_Click" IsEnabled="False" Visibility="Collapsed" ToolTip="Localizar arquivo ausente"/>
+                                            <Button x:Name="RemoveVideoButton" Grid.Column="3" Style="{StaticResource DangerButtonStyle}" Content="&#xE74D;" FontFamily="Segoe MDL2 Assets" MinWidth="38" Width="38" Padding="4" Margin="6,0,0,0" Click="RemoveVideo_Click" IsEnabled="False" ToolTip="Remover referência do vídeo"/>
+                                        </Grid>
+                                    </Grid>
+                                </Border>
                             </Grid>
+                            </Expander>
 
-                            <Border Grid.Row="1" Background="#02070B" CornerRadius="7" BorderBrush="#203547" BorderThickness="1" ClipToBounds="True">
+                            <Border x:Name="PlayerContainer" Grid.Row="1" Grid.Column="0" Background="#02070B" CornerRadius="7" BorderBrush="#203547" BorderThickness="1" ClipToBounds="True">
                                 <Grid>
                                     <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                    <vlc:VideoView x:Name="VideoView">
-                                        <Grid>
-                                            <StackPanel x:Name="VideoEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                                <TextBlock x:Name="VideoMessage" Text="Escolha um trecho e um vídeo para iniciar." Foreground="{StaticResource TextSecondaryBrush}" FontSize="16" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"/>
-                                                <Button x:Name="EmptyVideoButton" Content="+ Adicionar vídeo" HorizontalAlignment="Center" Margin="0,12,0,0" Click="AddVideo_Click" Visibility="Collapsed"/>
+                                    <vlc:VideoView x:Name="VideoView" MouseDoubleClick="VideoView_MouseDoubleClick"/>
+                                        <Grid x:Name="VideoOverlayLayer">
+                                            <StackPanel x:Name="VideoEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="520" Margin="24">
+                                                <Border Width="54" Height="54" CornerRadius="27" Background="#132535" HorizontalAlignment="Center" Margin="0,0,0,13"><TextBlock x:Name="VideoStateIcon" Text="&#xE714;" FontFamily="Segoe MDL2 Assets" FontSize="23" Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                                <TextBlock x:Name="VideoStateTitle" Text="Selecione o contexto da inspeção" Foreground="{StaticResource TextPrimaryBrush}" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"/>
+                                                <TextBlock x:Name="VideoMessage" Text="Escolha um local, um trecho e um vídeo para iniciar." Foreground="{StaticResource TextSecondaryBrush}" Margin="0,6,0,0" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"/>
+                                                <WrapPanel HorizontalAlignment="Center" Margin="0,13,0,0"><Button x:Name="EmptyVideoButton" Content="Adicionar vídeo" Style="{StaticResource PrimaryButtonStyle}" Margin="4" Click="AddVideo_Click" Visibility="Collapsed"/><Button x:Name="EmptyRelocateVideoButton" Content="Localizar arquivo" Style="{StaticResource PrimaryButtonStyle}" Margin="4" Click="RelocateVideo_Click" Visibility="Collapsed"/><Button x:Name="RetryVideoButton" Content="Tentar novamente" Margin="4" Click="RetryVideo_Click" Visibility="Collapsed"/></WrapPanel>
                                             </StackPanel>
                                             <Border x:Name="VideoLoadedBadge" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="16" Padding="10,6" CornerRadius="5" Background="#D90A1923"><StackPanel Orientation="Horizontal"><Ellipse Width="9" Height="9" Fill="{StaticResource SuccessBrush}" Margin="0,0,7,0"/><TextBlock Text="Vídeo carregado" FontSize="11" FontWeight="SemiBold"/></StackPanel></Border>
-                                            <Button x:Name="CaptureFrameOverlayButton" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="16" Style="{StaticResource IconButtonStyle}" Content="&#xE722;" Click="CaptureFrame_Click" ToolTip="Capturar frame"/>
+                                            <Button x:Name="CaptureFrameOverlayButton" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="16" Style="{StaticResource PrimaryButtonStyle}" Click="CaptureFrame_Click" ToolTip="Capturar o frame atual e cadastrar uma anomalia"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE722;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/><TextBlock x:Name="CaptureFrameOverlayText" Text="Capturar evidência"/></StackPanel></Button>
+                                            <Border x:Name="ReadOnlyInspectionBanner" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="16" Padding="10,6" CornerRadius="5" Background="#D9321C23" BorderBrush="#67323C" BorderThickness="1"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72E;" FontFamily="Segoe MDL2 Assets" Foreground="{StaticResource DangerBrush}" Margin="0,0,7,0"/><TextBlock Text="Somente leitura" Foreground="{StaticResource DangerBrush}" FontSize="11" FontWeight="SemiBold"/></StackPanel></Border>
                                             <Border x:Name="CapturePreviewPanel" Background="#F50D1924" BorderBrush="{StaticResource PrimaryBrush}" BorderThickness="2" CornerRadius="8" Padding="18" Margin="18" Visibility="Collapsed" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" MaxWidth="1080">
                                                 <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                                     <DockPanel><Button Content="&#xE711;" FontFamily="Segoe MDL2 Assets" Style="{StaticResource IconButtonStyle}" DockPanel.Dock="Right" Click="RetakeCapture_Click" ToolTip="Fechar preview"/><StackPanel><TextBlock Text="Conferir captura" Style="{StaticResource SectionTitleTextStyle}"/><TextBlock Text="Cadastre a anomalia agora ou deixe a imagem pendente para revisar depois." Foreground="{StaticResource TextSecondaryBrush}" Margin="0,3,0,0"/></StackPanel></DockPanel>
                                                     <Image x:Name="CapturePreviewImage" Grid.Row="1" Stretch="Uniform" Margin="0,10"/>
                                                     <TextBlock x:Name="CapturePreviewTimestamp" Grid.Row="2" FontFamily="Consolas" HorizontalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}"/>
-                                                    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,10,0,0"><Button Content="Refazer captura" Click="RetakeCapture_Click"/><Button Content="Deixar pendente" Click="AcceptCapture_Click"/><Button Content="Cadastrar anomalia" Style="{StaticResource PrimaryButtonStyle}" ToolTip="Abre o cadastro com esta imagem, vídeo e momento associados." Click="CreateOccurrenceFromCapture_Click"/></StackPanel>
+                                                    <WrapPanel Grid.Row="3" HorizontalAlignment="Center" Margin="0,10,0,0"><Button Content="Refazer captura" Click="RetakeCapture_Click"/><Button Content="Deixar pendente" Click="AcceptCapture_Click"/><Button Content="Cadastrar anomalia" Style="{StaticResource PrimaryButtonStyle}" ToolTip="Abre o cadastro com esta imagem, vídeo e momento associados." Click="CreateOccurrenceFromCapture_Click"/></WrapPanel>
                                                 </Grid>
                                             </Border>
                                         </Grid>
-                                    </vlc:VideoView>
-                                    <Grid Grid.Row="1" Background="#09131D" Margin="14,9">
-                                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <Grid x:Name="PlayerControlsLayer" Grid.Row="1" Background="#09131D" Margin="14,9">
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                        <Slider x:Name="ProgressSlider" Margin="0,0,12,0" Minimum="0" Maximum="1" PreviewMouseLeftButtonDown="ProgressSlider_DragStarted" PreviewMouseLeftButtonUp="ProgressSlider_DragCompleted"/>
+                                        <Slider x:Name="ProgressSlider" Margin="0,0,12,0" Minimum="0" Maximum="1" IsEnabled="False" PreviewMouseLeftButtonDown="ProgressSlider_DragStarted" PreviewMouseLeftButtonUp="ProgressSlider_DragCompleted"/>
                                         <TextBlock x:Name="TimeText" Grid.Column="1" Text="00:00:00.000 / 00:00:00.000" VerticalAlignment="Center" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}"/>
-                                        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,8,0,0"><Button x:Name="PlayPauseButton" Content="▶" Width="54" Margin="0,0,6,0" Click="PlayPause_Click" Foreground="{StaticResource PrimaryBrush}"/><Button Content="−5s" Margin="0,0,6,0" Click="Back5_Click"/><Button Content="−1s" Margin="0,0,6,0" Click="Back1_Click"/><Button Content="+1s" Margin="0,0,6,0" Click="Forward1_Click"/><Button Content="+5s" Margin="0" Click="Forward5_Click"/><TextBlock x:Name="ReadOnlyInspectionText" Text="Somente leitura: alterações bloqueadas." Foreground="{StaticResource DangerBrush}" Margin="12,0,0,0" VerticalAlignment="Center" Visibility="Collapsed"/></StackPanel>
-                                        <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0"><Button x:Name="CaptureFrameButton" Click="CaptureFrame_Click" Visibility="Collapsed"/><TextBlock Text="Velocidade" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,7,0"/><ComboBox x:Name="SpeedCombo" Width="88" Margin="0" SelectionChanged="SpeedCombo_SelectionChanged"><ComboBoxItem Content="0,25x" Tag="0.25"/><ComboBoxItem Content="0,5x" Tag="0.5"/><ComboBoxItem Content="1,0x" Tag="1" IsSelected="True"/><ComboBoxItem Content="1,5x" Tag="1.5"/><ComboBoxItem Content="2,0x" Tag="2"/></ComboBox></StackPanel>
+                                        <WrapPanel x:Name="PlaybackControlsPanel" Grid.Row="1" Grid.ColumnSpan="2" Margin="0,8,0,0" IsEnabled="False"><Button x:Name="PlayPauseButton" Content="▶" Width="54" Margin="0,0,6,4" Click="PlayPause_Click" Foreground="{StaticResource PrimaryBrush}" ToolTip="Reproduzir ou pausar"/><Button Content="−5s" Margin="0,0,6,4" Click="Back5_Click" ToolTip="Voltar 5 segundos"/><Button Content="−1s" Margin="0,0,6,4" Click="Back1_Click" ToolTip="Voltar 1 segundo"/><Button Content="+1s" Margin="0,0,6,4" Click="Forward1_Click" ToolTip="Avançar 1 segundo"/><Button Content="+5s" Margin="0,0,12,4" Click="Forward5_Click" ToolTip="Avançar 5 segundos"/><TextBlock Text="Velocidade" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,7,4"/><ComboBox x:Name="SpeedCombo" Width="88" Margin="0,0,0,4" SelectionChanged="SpeedCombo_SelectionChanged"><ComboBoxItem Content="0,25x" Tag="0.25"/><ComboBoxItem Content="0,5x" Tag="0.5"/><ComboBoxItem Content="1,0x" Tag="1" IsSelected="True"/><ComboBoxItem Content="1,5x" Tag="1.5"/><ComboBoxItem Content="2,0x" Tag="2"/><ComboBoxItem Content="3,0x" Tag="3"/></ComboBox><Button x:Name="CaptureFrameButton" Click="CaptureFrame_Click" Visibility="Collapsed"/><TextBlock x:Name="ReadOnlyInspectionText" Text="Alterações bloqueadas" Foreground="{StaticResource DangerBrush}" Margin="12,0,0,4" VerticalAlignment="Center" Visibility="Collapsed"/></WrapPanel>
+                                        <Button x:Name="FocusVideoButton" Grid.Row="2" Grid.ColumnSpan="2" HorizontalAlignment="Right" Margin="0,4,0,0" Content="Modo foco" Click="FocusVideo_Click"/>
                                     </Grid>
                                 </Grid>
                             </Border>
 
-                            <Border Grid.Row="2" Style="{StaticResource CardStyle}" Padding="16,12" Margin="0,9,0,0">
+                            <GridSplitter x:Name="InspectionSideSplitter" Grid.Row="1" Grid.Column="1" Width="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Transparent" DragCompleted="InspectionSideSplitter_DragCompleted"/>
+                            <Grid x:Name="InspectionSidePanel" Grid.Row="1" Grid.Column="2" Margin="8,0,0,0" MinWidth="380">
+                            <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <Border Grid.Row="0" Style="{StaticResource CardStyle}" Padding="12">
                                 <Grid>
-                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                                    <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Anomalias do trecho" Style="{StaticResource SectionTitleTextStyle}"/><TextBlock x:Name="AnomalySummaryText" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,2,0,0"/></StackPanel><StackPanel Grid.Column="1" Orientation="Horizontal"><TextBox x:Name="AnomalyListSearchBox" Width="155" Margin="0" ToolTip="Pesquisar anomalias" TextChanged="AnomalyListFilterChanged"/><ComboBox x:Name="AnomalyStatusFilter" Width="142" Margin="7,0" SelectionChanged="AnomalyListFilterChanged"><ComboBoxItem Content="Todas as anomalias" Tag="All" IsSelected="True"/><ComboBoxItem Content="Completas" Tag="Complete"/><ComboBoxItem Content="Incompletas" Tag="Incomplete"/></ComboBox><Button x:Name="NewOccurrenceButton" Style="{StaticResource PrimaryButtonStyle}" Click="NewOccurrence_Click" Margin="0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" FontFamily="Segoe MDL2 Assets" Margin="0,0,7,0"/><TextBlock Text="Cadastrar anomalia"/></StackPanel></Button></StackPanel></Grid>
-                                    <Grid Grid.Row="1"><ListBox x:Name="OccurrencesList" AllowDrop="True" PreviewMouseLeftButtonDown="OccurrencesList_PreviewMouseLeftButtonDown" PreviewMouseMove="OccurrencesList_PreviewMouseMove" Drop="OccurrencesList_Drop" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListBox.ItemTemplate><DataTemplate>
-                                        <Border Background="#0B1926" BorderBrush="#1E3345" BorderThickness="1" CornerRadius="5" Padding="10,7" Margin="0,0,0,5"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="105"/><ColumnDefinition Width="1.5*"/><ColumnDefinition Width="1.1*"/><ColumnDefinition Width="92"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="☰" Cursor="SizeAll" Foreground="{StaticResource TextMutedBrush}" FontSize="17" VerticalAlignment="Center" ToolTip="Arraste para reordenar"/><TextBlock Grid.Column="1" Text="{Binding Location}" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/><StackPanel Grid.Column="2" VerticalAlignment="Center"><TextBlock Text="{Binding Anomalies}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Completeness}" Foreground="{Binding CompletenessColor}" FontSize="10" TextTrimming="CharacterEllipsis"/></StackPanel><TextBlock Grid.Column="3" Text="{Binding PositionSummary}" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/><TextBlock Grid.Column="4" Text="{Binding EvidenceSummary}" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/><StackPanel Grid.Column="5" Orientation="Horizontal"><Button Content="Editar" Tag="{Binding Id}" Click="EditOccurrence_Click"/><Button Content="Ir ao vídeo" Tag="{Binding Id}" Click="GoToOccurrenceVideo_Click" IsEnabled="{Binding CanGoToVideo}"/><Button Content="&#xE8C8;" FontFamily="Segoe MDL2 Assets" Style="{StaticResource IconButtonStyle}" Tag="{Binding Id}" Click="DuplicateOccurrence_Click" IsEnabled="{Binding CanModify}" ToolTip="Duplicar"/><Button Content="&#xE74D;" Style="{StaticResource DangerButtonStyle}" FontFamily="Segoe MDL2 Assets" MinWidth="38" Width="38" Padding="4" Tag="{Binding Id}" Click="DeleteOccurrence_Click" IsEnabled="{Binding CanModify}" ToolTip="Excluir"/></StackPanel></Grid></Border>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <StackPanel Margin="2,2,2,14">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="Anomalias do trecho" FontSize="21" FontWeight="Bold"/>
+                                                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                                    <TextBlock Text="&#xE81D;" FontFamily="Segoe MDL2 Assets" Foreground="#75899B" Margin="0,0,7,0"/>
+                                                    <TextBlock x:Name="AnomalySummaryText" Foreground="{StaticResource TextMutedBrush}" FontSize="12" TextWrapping="Wrap" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                            <Border Grid.Column="1" Width="38" Height="38" CornerRadius="8" Background="#102231" BorderBrush="#263E50" BorderThickness="1">
+                                                <TextBlock Text="&#xE9D2;" FontFamily="Segoe MDL2 Assets" Foreground="#7E93A6" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                        </Grid>
+                                        <Button x:Name="NewOccurrenceButton" Style="{StaticResource PrimaryButtonStyle}" Click="NewOccurrence_Click" Height="46" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,14,0,0">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" FontFamily="Segoe MDL2 Assets" FontSize="16" Margin="0,0,8,0"/><TextBlock Text="Cadastrar anomalia" FontSize="14" FontWeight="SemiBold"/></StackPanel>
+                                        </Button>
+                                        <Grid Margin="0,12,0,0">
+                                            <TextBox x:Name="AnomalyListSearchBox" MinHeight="42" Padding="38,0,10,0" VerticalContentAlignment="Center" ToolTip="Pesquisar por anomalia, posição ou metragem" TextChanged="AnomalyListFilterChanged"/>
+                                            <TextBlock Text="&#xE721;" FontFamily="Segoe MDL2 Assets" Foreground="#8295A7" FontSize="15" VerticalAlignment="Center" Margin="13,0,0,0" IsHitTestVisible="False"/>
+                                            <TextBlock x:Name="AnomalySearchPlaceholder" Text="Pesquisar anomalias..." Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" Margin="39,0,10,0" IsHitTestVisible="False"/>
+                                        </Grid>
+                                        <ComboBox x:Name="AnomalyStatusFilter" MinHeight="40" HorizontalAlignment="Stretch" Margin="0,9,0,0" SelectionChanged="AnomalyListFilterChanged"><ComboBoxItem Content="Todas as anomalias" Tag="All" IsSelected="True"/><ComboBoxItem Content="Anomalias completas" Tag="Complete"/><ComboBoxItem Content="Anomalias incompletas" Tag="Incomplete"/></ComboBox>
+                                    </StackPanel>
+                                    <Grid Grid.Row="1"><ListBox x:Name="OccurrencesList" AllowDrop="True" Background="Transparent" BorderThickness="0" Padding="0,0,4,0" PreviewMouseMove="OccurrencesList_PreviewMouseMove" Drop="OccurrencesList_Drop" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto"><ListBox.ItemTemplate><DataTemplate>
+                                        <Border Style="{StaticResource AnomalyDashboardCardStyle}">
+                                            <Grid>
+                                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="3"/><ColumnDefinition Width="25"/><ColumnDefinition Width="50"/><ColumnDefinition Width="*"/><ColumnDefinition Width="41"/><ColumnDefinition Width="41"/></Grid.ColumnDefinitions>
+                                                <Border x:Name="AccentBar" Grid.RowSpan="3" Width="3" Margin="-12,-12,0,-12" HorizontalAlignment="Left" Background="#2ECFA8" CornerRadius="10,0,0,10"/>
+                                                <TextBlock Grid.Column="1" Grid.RowSpan="3" Text="⠿" Cursor="SizeAll" Foreground="#718698" FontSize="20" VerticalAlignment="Center" HorizontalAlignment="Center" IsEnabled="{Binding CanModify}" ToolTip="{Binding ModifyToolTip}" ToolTipService.ShowOnDisabled="True" PreviewMouseLeftButtonDown="OccurrencesList_PreviewMouseLeftButtonDown"/>
+                                                <Border x:Name="CategoryTile" Grid.Column="2" Grid.RowSpan="3" Width="43" Height="43" Background="#10352F" BorderBrush="#236658" BorderThickness="1" CornerRadius="8" VerticalAlignment="Center">
+                                                    <TextBlock x:Name="CategoryIcon" Text="&#xE91F;" FontFamily="Segoe MDL2 Assets" Foreground="#45D8B3" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                </Border>
+                                                <TextBlock Grid.Column="3" Text="{Binding Anomalies}" Margin="10,0,6,0" FontSize="15" FontWeight="Bold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Anomalies}"/>
+                                                <Border x:Name="PositionTag" Grid.Row="1" Grid.Column="3" Margin="10,5,6,0" Padding="7,2" HorizontalAlignment="Left" MaxWidth="155" Background="#122F2A" BorderBrush="#286458" BorderThickness="1" CornerRadius="5">
+                                                    <TextBlock x:Name="PositionTagText" Text="{Binding PositionSummary}" Foreground="#76DEC7" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip="{Binding PositionSummary}"/>
+                                                </Border>
+                                                <StackPanel Grid.Row="2" Grid.Column="3" Orientation="Horizontal" Margin="10,7,6,0">
+                                                    <TextBlock Text="&#xE91B;" FontFamily="Segoe MDL2 Assets" Foreground="#8296A7" Margin="0,0,6,0"/>
+                                                    <TextBlock Text="{Binding EvidenceSummary}" Foreground="{StaticResource TextMutedBrush}" FontSize="11" ToolTip="Quantidade de imagens"/>
+                                                </StackPanel>
+                                                <Button Grid.Column="4" Grid.RowSpan="3" Content="&#xE70F;" FontFamily="Segoe MDL2 Assets" Style="{StaticResource AnomalyCardActionStyle}" Tag="{Binding Id}" Click="EditOccurrence_Click" IsEnabled="{Binding CanModify}" ToolTip="{Binding EditToolTip}" ToolTipService.ShowOnDisabled="True" VerticalAlignment="Center"/>
+                                                <Button Grid.Column="5" Grid.RowSpan="3" Content="&#xE712;" FontFamily="Segoe MDL2 Assets" Style="{StaticResource AnomalyCardActionStyle}" Tag="{Binding Id}" Click="OccurrenceActions_Click" ToolTip="Mais ações" VerticalAlignment="Center"/>
+                                            </Grid>
+                                        </Border>
+                                            <DataTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding Anomalies}" Value="Deslocamento">
+                                                    <Setter TargetName="AccentBar" Property="Background" Value="#2BA9FF"/>
+                                                    <Setter TargetName="CategoryTile" Property="Background" Value="#102D46"/>
+                                                    <Setter TargetName="CategoryTile" Property="BorderBrush" Value="#205D88"/>
+                                                    <Setter TargetName="CategoryIcon" Property="Text" Value="&#xE711;"/>
+                                                    <Setter TargetName="CategoryIcon" Property="Foreground" Value="#3EB4FF"/>
+                                                    <Setter TargetName="PositionTag" Property="Background" Value="#112B41"/>
+                                                    <Setter TargetName="PositionTag" Property="BorderBrush" Value="#285B7E"/>
+                                                    <Setter TargetName="PositionTagText" Property="Foreground" Value="#75C7FF"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Anomalies}" Value="Fissura">
+                                                    <Setter TargetName="AccentBar" Property="Background" Value="#A66BFF"/>
+                                                    <Setter TargetName="CategoryTile" Property="Background" Value="#2A2044"/>
+                                                    <Setter TargetName="CategoryTile" Property="BorderBrush" Value="#604194"/>
+                                                    <Setter TargetName="CategoryIcon" Property="Text" Value="&#xE814;"/>
+                                                    <Setter TargetName="CategoryIcon" Property="Foreground" Value="#BA83FF"/>
+                                                    <Setter TargetName="PositionTag" Property="Background" Value="#281F3D"/>
+                                                    <Setter TargetName="PositionTag" Property="BorderBrush" Value="#654398"/>
+                                                    <Setter TargetName="PositionTagText" Property="Foreground" Value="#C391FF"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Anomalies}" Value="Trinca">
+                                                    <Setter TargetName="AccentBar" Property="Background" Value="#A66BFF"/>
+                                                    <Setter TargetName="CategoryTile" Property="Background" Value="#2A2044"/>
+                                                    <Setter TargetName="CategoryTile" Property="BorderBrush" Value="#604194"/>
+                                                    <Setter TargetName="CategoryIcon" Property="Text" Value="&#xE814;"/>
+                                                    <Setter TargetName="CategoryIcon" Property="Foreground" Value="#BA83FF"/>
+                                                    <Setter TargetName="PositionTag" Property="Background" Value="#281F3D"/>
+                                                    <Setter TargetName="PositionTag" Property="BorderBrush" Value="#654398"/>
+                                                    <Setter TargetName="PositionTagText" Property="Foreground" Value="#C391FF"/>
+                                                </DataTrigger>
+                                            </DataTemplate.Triggers>
                                     </DataTemplate></ListBox.ItemTemplate></ListBox>
                                         <StackPanel x:Name="OccurrencesEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Margin="16"><Border Width="42" Height="42" CornerRadius="21" Background="#172737" Margin="0,0,0,9"><TextBlock Text="&#xE8A5;" FontFamily="Segoe MDL2 Assets" Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock x:Name="OccurrencesEmptyTitle" Text="Nenhuma anomalia cadastrada neste trecho." FontWeight="SemiBold" HorizontalAlignment="Center"/><TextBlock x:Name="OccurrencesEmptyDescription" Text="Clique em “Cadastrar anomalia” para adicionar." Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,0" HorizontalAlignment="Center"/></StackPanel>
                                     </Grid>
+                                    <Border Grid.Row="2" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="0,10,0,0" Margin="0,8,0,0"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center"><TextBlock x:Name="SectionReviewStatusText" Text="Em edição" FontWeight="SemiBold"/><TextBlock x:Name="SectionPersistenceStatusText" Text="Alterações salvas automaticamente" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,2,0,0"/></StackPanel><Button x:Name="CompleteSectionAnomaliesButton" Grid.Column="1" Content="Concluir anomalias do trecho" Style="{StaticResource PrimaryButtonStyle}" Click="CompleteSectionAnomalies_Click" Margin="10,0,0,0"/></Grid></Border>
                                 </Grid>
                             </Border>
 
-                            <Expander Grid.Row="3" Margin="0,8,0,4" IsExpanded="False"><Expander.Header><StackPanel Orientation="Horizontal"><TextBlock Text="Capturas pendentes" FontWeight="SemiBold"/><TextBlock x:Name="PendingCapturesSummary" Foreground="{StaticResource TextMutedBrush}" Margin="8,0,0,0"/></StackPanel></Expander.Header>
+                            <Expander Grid.Row="1" Margin="0,10,0,0" Padding="10,6" Background="{StaticResource SurfaceMutedBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" IsExpanded="False"><Expander.Header><StackPanel Orientation="Horizontal"><TextBlock Text="Capturas pendentes" FontWeight="SemiBold"/><TextBlock x:Name="PendingCapturesSummary" Foreground="{StaticResource TextMutedBrush}" Margin="8,0,0,0"/></StackPanel></Expander.Header>
                                 <ListBox x:Name="CapturesList" MaxHeight="160" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel><ListBox.ItemTemplate><DataTemplate><Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="6" Padding="6" Margin="4" Width="180"><StackPanel><Image Source="{Binding Thumbnail}" Height="80" Stretch="Uniform"/><TextBlock Text="{Binding Timestamp}" FontFamily="Consolas" FontWeight="SemiBold"/><TextBlock Text="{Binding VideoName}" TextTrimming="CharacterEllipsis" Foreground="{StaticResource TextSecondaryBrush}"/><WrapPanel><Button Content="Cadastrar" Tag="{Binding Id}" Click="CreateOccurrenceFromPending_Click"/><Button Content="Ir ao vídeo" Tag="{Binding Id}" Click="GoToCapture_Click"/><Button Content="Excluir" Style="{StaticResource DangerButtonStyle}" Tag="{Binding Id}" Click="DeleteCapture_Click"/></WrapPanel></StackPanel></Border></DataTemplate></ListBox.ItemTemplate></ListBox>
                             </Expander>
+                            </Grid>
                         </Grid>
-                    </ScrollViewer>
                 </TabItem>
 
                 <TabItem x:Name="WordConfigTab" Header="Relatórios">
                     <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="300"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                        <StackPanel Margin="0,0,18,0"><DockPanel Margin="0,0,0,10"><Button x:Name="NewReportButton" Content="+  Novo relatório" Style="{StaticResource PrimaryButtonStyle}" DockPanel.Dock="Right" Click="NewReport_Click"/><TextBlock Text="Relatórios" Style="{StaticResource SectionTitleTextStyle}" VerticalAlignment="Center"/></DockPanel>
+                        <StackPanel Margin="0,0,18,0"><DockPanel Margin="0,0,0,10"><Button x:Name="NewReportButton" DockPanel.Dock="Right" Content="+  Novo relatório" Style="{StaticResource PrimaryButtonStyle}" Click="NewReport_Click"/><TextBlock Text="Relatórios" Style="{StaticResource SectionTitleTextStyle}" VerticalAlignment="Center"/></DockPanel>
                             <ComboBox x:Name="ReportsCombo" Visibility="Collapsed" DisplayMemberPath="DisplayCode" SelectionChanged="ReportsCombo_SelectionChanged"/>
                             <Grid><ListBox x:Name="ReportsList" SelectionChanged="ReportsList_SelectionChanged" BorderThickness="0"><ListBox.ItemTemplate><DataTemplate><Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="7" Padding="13" Margin="0,0,0,8"><StackPanel><TextBlock Text="{Binding DisplayCode}" FontSize="16" FontWeight="SemiBold"/><TextBlock Text="{Binding ReportDate, StringFormat={}{0:dd/MM/yyyy}, TargetNullValue='Data não informada'}" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0"/><TextBlock Text="{Binding SectionLinks.Count, StringFormat={}{0} trecho(s)}" Foreground="{StaticResource TextMutedBrush}"/><TextBlock Margin="0,5,0,0"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Text" Value="Finalizado"/><Setter Property="Foreground" Value="{StaticResource SuccessBrush}"/><Style.Triggers><DataTrigger Binding="{Binding GeneratedReportPath}" Value="{x:Null}"><Setter Property="Text" Value="Em andamento"/><Setter Property="Foreground" Value="{StaticResource WarningBrush}"/></DataTrigger><DataTrigger Binding="{Binding GeneratedReportPath}" Value=""><Setter Property="Text" Value="Em andamento"/><Setter Property="Foreground" Value="{StaticResource WarningBrush}"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock><TextBlock Text="Abrir preparação" Foreground="{StaticResource PrimaryBrush}" Margin="0,7,0,0"/></StackPanel></Border></DataTemplate></ListBox.ItemTemplate></ListBox>
                                 <StackPanel x:Name="ReportsEmptyState" VerticalAlignment="Center" Visibility="Collapsed"><TextBlock Text="Nenhum relatório criado" FontWeight="SemiBold" HorizontalAlignment="Center"/><TextBlock Text="Crie o primeiro relatório para preparar o documento." Foreground="{StaticResource TextMutedBrush}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,4,0,0"/><Button Content="Novo relatório" HorizontalAlignment="Center" Margin="0,10,0,0" Click="NewReport_Click"/></StackPanel>
@@ -348,12 +493,12 @@
                         </StackPanel>
                         <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="0,0,8,0">
                             <StackPanel MaxWidth="940" HorizontalAlignment="Center">
-                                <StackPanel Margin="0,0,0,16"><TextBlock x:Name="ActiveReportTitle" Text="Selecione um relatório" Style="{StaticResource PageTitleTextStyle}" FontSize="22"/><TextBlock Text="Preparação do documento" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,3,0,0"/></StackPanel>
+                                <DockPanel Margin="0,0,0,16"><Button x:Name="DeleteReportButton" DockPanel.Dock="Right" Content="Excluir relatório" Style="{StaticResource DangerButtonStyle}" Click="DeleteReport_Click"/><Border x:Name="ReadOnlyReportBanner" DockPanel.Dock="Right" Visibility="Collapsed" Background="#321C23" BorderBrush="#67323C" BorderThickness="1" CornerRadius="5" Padding="10,6" Margin="0,0,8,0"><TextBlock Text="Somente leitura" Foreground="{StaticResource DangerBrush}" FontWeight="SemiBold"/></Border><StackPanel><TextBlock x:Name="ActiveReportTitle" Text="Selecione um relatório" Style="{StaticResource PageTitleTextStyle}" FontSize="22"/><TextBlock Text="Preparação do documento" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,3,0,0"/></StackPanel></DockPanel>
                                 <Grid x:Name="ReportHeaderTab" Visibility="Collapsed"><TextBox x:Name="ClientBox"/><TextBox x:Name="CnpjBox"/><TextBox x:Name="AreaBox"/><TextBox x:Name="ContractBox"/><TextBox x:Name="PurchaseOrderBox"/><TextBox x:Name="TemplateBox"/><TextBox x:Name="LogoBox"/></Grid>
                                 <TextBlock Text="Dados da emissão" Style="{StaticResource SectionTitleTextStyle}"/>
                                 <Grid Margin="0,10,0,16"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                     <StackPanel><TextBlock Text="Código do relatório" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="ReportCodeBox" TextChanged="FieldChanged"/></StackPanel>
-                                    <StackPanel Grid.Column="2"><TextBlock Text="Data" Style="{StaticResource FieldLabelTextStyle}"/><DatePicker x:Name="ReportDatePicker" SelectedDateChanged="FieldChanged"/></StackPanel>
+                                    <StackPanel Grid.Column="2"><TextBlock Text="Data" Style="{StaticResource FieldLabelTextStyle}"/><DatePicker x:Name="ReportDatePicker" CalendarStyle="{StaticResource ThemedCalendarStyle}" SelectedDateChanged="FieldChanged"/></StackPanel>
                                     <StackPanel Grid.Column="4"><TextBlock Text="Metragem total (m)" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="MetersBox" TextChanged="FieldChanged"/></StackPanel>
                                 </Grid>
 
@@ -384,7 +529,8 @@
                                 <DockPanel Margin="0,18,0,8"><Button Content="+  Adicionar seção" DockPanel.Dock="Right" Click="AddCustomSection_Click"/><TextBlock Text="Etapas adicionais" Style="{StaticResource SectionTitleTextStyle}" VerticalAlignment="Center"/></DockPanel>
                                 <ItemsControl x:Name="CustomSectionsList"><ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="6" Padding="10" Margin="0,4"><DockPanel><Button Content="Remover" Style="{StaticResource DangerButtonStyle}" DockPanel.Dock="Right" Tag="{Binding Id}" Click="RemoveCustomSection_Click"/><StackPanel><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Text}" TextTrimming="CharacterEllipsis" MaxWidth="650" Foreground="{StaticResource TextSecondaryBrush}"/><TextBlock Text="{Binding Images.Count, StringFormat={}{0} imagem(ns)}" Foreground="{StaticResource TextMutedBrush}"/></StackPanel></DockPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
                                 <Border Style="{StaticResource SubtleCardStyle}" Margin="0,18,0,0"><StackPanel><TextBlock x:Name="ReportReviewTitle" Text="Revisão do relatório" FontWeight="SemiBold"/><TextBlock x:Name="ReportReviewSummary" Margin="0,7,0,0" TextWrapping="Wrap"/><TextBlock x:Name="ReportReviewIssues" Margin="0,7,0,0" Foreground="{StaticResource WarningBrush}" TextWrapping="Wrap"/></StackPanel></Border>
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,22,0,8"><Button x:Name="OpenReportButton" Content="Abrir arquivo" IsEnabled="False" Click="OpenReport_Click"/><Button x:Name="OpenReportFolderButton" Content="Abrir pasta" IsEnabled="False" Click="OpenReportFolder_Click"/><Button Content="Gerar relatório" Style="{StaticResource PrimaryButtonStyle}" Click="GenerateReport_Click" MinWidth="170"/></StackPanel>
+                                <WrapPanel HorizontalAlignment="Right" Margin="0,22,0,8"><Button x:Name="OpenReportButton" Content="Abrir arquivo" IsEnabled="False" Click="OpenReport_Click"/><Button x:Name="OpenReportFolderButton" Content="Abrir pasta" IsEnabled="False" Click="OpenReportFolder_Click"/><Button x:Name="ContinueReportButton" Content="Continuar relatório existente" Click="ContinueReport_Click" ToolTipService.ShowOnDisabled="True"/><Button x:Name="ExportInspectionButton" Content="Exportar .geoadocs.json" Click="ExportInspection_Click"/><Button x:Name="SendToGeoAutoEngineButton" Content="Enviar ao GeoAutoEngine" Click="SendToGeoAutoEngine_Click" MinWidth="175"/><Button x:Name="GenerateReportButton" Content="Gerar relatório" Style="{StaticResource PrimaryButtonStyle}" Click="GenerateReport_Click" MinWidth="170"/></WrapPanel>
+                                <TextBlock x:Name="GeoAutoEngineStatusText" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6" HorizontalAlignment="Right"/>
                                 <TextBlock x:Name="GeneratedReportText" TextWrapping="Wrap" Foreground="{StaticResource SuccessBrush}"/>
                             </StackPanel>
                         </ScrollViewer>

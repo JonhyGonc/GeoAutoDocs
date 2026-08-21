@@ -86,6 +86,7 @@ public sealed class Report
     public List<DevelopmentImage> DevelopmentImages { get; set; } = [];
     public List<CustomSection> CustomSections { get; set; } = [];
     public List<ReportSection> SectionLinks { get; set; } = [];
+    public List<ReportContinuationExport> ContinuationExports { get; set; } = [];
 
     [NotMapped]
     public string DisplayCode => string.IsNullOrWhiteSpace(ReportCode) ? Name : ReportCode;
@@ -105,6 +106,20 @@ public sealed class Report
             Order = SectionLinks.Count
         });
     }
+}
+
+public sealed class ReportContinuationExport
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ReportId { get; set; }
+    public string BaseFilePath { get; set; } = string.Empty;
+    public string BaseFileHash { get; set; } = string.Empty;
+    public string GeneratedFilePath { get; set; } = string.Empty;
+    public int Version { get; set; }
+    public DateTime GeneratedAt { get; set; } = DateTime.UtcNow;
+    public string ManifestJson { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? Message { get; set; }
 }
 
 public enum DevelopmentImageGroup { VideoInspection, InspectionOpening, Gpr }
@@ -159,9 +174,13 @@ public sealed class InspectionSection
     public string? Reference { get; set; }
     public decimal? InvestigatedMeters { get; set; }
     public int Order { get; set; }
+    public SectionAnomalyReviewStatus AnomalyReviewStatus { get; set; }
+    public DateTime? AnomalyReviewUpdatedAt { get; set; }
     public List<VideoReference> VideoReferences { get; set; } = [];
     public List<Occurrence> Occurrences { get; set; } = [];
 }
+
+public enum SectionAnomalyReviewStatus { InProgress, Reviewed, Completed }
 
 public enum MediaReferenceStatus { LocalOnly, SharedUnc }
 
@@ -189,6 +208,7 @@ public sealed class VideoReference
 public enum OccurrenceLocationMode
 {
     Point = 0, Range = 1, EntireSection = 2, NotApplicable = 3,
+    MultiPoint = 4, From = 5,
     SpecificMeterage = Point, Interval = Range
 }
 
@@ -229,15 +249,25 @@ public sealed class Occurrence
     public string GeneratedDescription { get; set; } = string.Empty;
     public string? ManualDescriptionOverride { get; set; }
     public bool InterruptedRecording { get; set; }
+    public bool IsSevere { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public int Order { get; set; }
+    public List<OccurrenceMeteragePoint> MeteragePoints { get; set; } = [];
     public List<OccurrenceAnomaly> Anomalies { get; set; } = [];
     public List<Evidence> Evidence { get; set; } = [];
 
     [NotMapped]
     public string EffectiveDescription => string.IsNullOrWhiteSpace(ManualDescriptionOverride)
         ? GeneratedDescription : ManualDescriptionOverride.Trim();
+}
+
+public sealed class OccurrenceMeteragePoint
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid OccurrenceId { get; set; }
+    public decimal Meterage { get; set; }
+    public int Order { get; set; }
 }
 
 public sealed class AnomalyDefinition
@@ -255,6 +285,11 @@ public sealed class AnomalyDefinition
     public bool SupportsCondition { get; set; }
     public bool SupportsInfiltrationCondition { get; set; }
     public bool SupportsPercentage { get; set; }
+    public bool SupportsComplementaryText { get; set; }
+    public string DescriptionTemplate { get; set; } = string.Empty;
+    public bool IsBuiltIn { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
 public sealed class OccurrenceAnomaly
@@ -271,7 +306,11 @@ public sealed class OccurrenceAnomaly
     public string? Notes { get; set; }
     public string? CustomText { get; set; }
     public int Order { get; set; }
+    public string AnomalyName { get; set; } = string.Empty;
     public AnomalyDefinition AnomalyType { get; set; } = null!;
+
+    [NotMapped]
+    public string DisplayName => string.IsNullOrWhiteSpace(AnomalyName) ? AnomalyType.Name : AnomalyName;
 }
 
 public enum EvidenceSourceType { VideoCapture, ExternalImage }

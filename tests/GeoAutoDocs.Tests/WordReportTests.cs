@@ -91,6 +91,10 @@ public sealed class WordReportTests : IAsyncLifetime
         Assert.Contains("Desenvolvido para atender nossos clientes", bodyText);
         Assert.Contains("Através dos serviços executados foi possível identificar", bodyText);
         Assert.Contains("As anomalias estão descritas", bodyText);
+        Assert.Contains("Ocorrência dinâmica de prova (grave)", bodyText);
+        var severeRun = Assert.Single(main.Document.Body!.Descendants<Run>(),
+            x => x.InnerText.Trim().Equals("(grave)", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("FF0000", severeRun.RunProperties?.Color?.Val?.Value);
         Assert.Contains("Felipe França", bodyText);
         Assert.Contains("CREA: 5069912165", bodyText);
 
@@ -101,7 +105,7 @@ public sealed class WordReportTests : IAsyncLifetime
         Assert.Contains("Além disso, foram realizadas intervenções", bodyText);
         Assert.DoesNotContain("Em complemento à investigação", bodyText);
 
-        Assert.Contains("Trecho de prova", bodyText);
+        Assert.Contains("TRECHO de prova", bodyText);
         Assert.Contains("Ocorrência dinâmica de prova", bodyText);
         Assert.Contains("Figura 4.1", bodyText);
         Assert.Contains("Etapa especial", bodyText);
@@ -224,6 +228,7 @@ public sealed class WordReportTests : IAsyncLifetime
         {
             InspectionSectionId = section.Id,
             CustomGeneratedText = "Ocorrência dinâmica de prova",
+            IsSevere = true,
             Order = 0
         };
         occurrence.Evidence.Add(new Evidence

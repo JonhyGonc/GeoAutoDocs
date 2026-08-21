@@ -5,6 +5,7 @@ namespace GeoAutoDocs.Core;
 public static class AnomalyCatalog
 {
     public static readonly Guid OtherId = Guid.Parse("9f2f34e7-07c1-4c29-a25c-4d62cf43300c");
+    public static readonly Guid SedimentAccumulationId = Guid.Parse("9f2f34e7-07c1-4c29-a25c-4d62cf433012");
     public static IReadOnlySet<Guid> PrimaryIds { get; } = new HashSet<Guid>
     {
         Guid.Parse("9f2f34e7-07c1-4c29-a25c-4d62cf433001"),
@@ -35,7 +36,8 @@ public static class AnomalyCatalog
         New("9f2f34e7-07c1-4c29-a25c-4d62cf43300f", "Deslocamento das juntas", 13, dimension: true, condition: true),
         New("9f2f34e7-07c1-4c29-a25c-4d62cf433010", "Junta aberta", 14, dimension: true, condition: true),
         New("9f2f34e7-07c1-4c29-a25c-4d62cf433011", "Rompimento", 15, orientation: true, extension: true, dimension: true, condition: true),
-        New(OtherId.ToString(), "Outro", 16, allowsCustomText: true, orientation: true, extension: true, dimension: true, condition: true)
+        New(OtherId.ToString(), "Outro", 16, allowsCustomText: true, orientation: true, extension: true, dimension: true, condition: true),
+        New(SedimentAccumulationId.ToString(), "Acúmulo de sedimentos", 17, position: true)
     ];
 
     private static AnomalyDefinition New(string id, string name, int order,
@@ -80,7 +82,28 @@ public static class OccurrenceRules
                 if (occurrence.EndMeterage < occurrence.Meterage)
                     throw new InvalidOperationException("A metragem final deve ser maior ou igual à inicial.");
                 break;
+            case OccurrenceLocationMode.MultiPoint:
+                if (occurrence.MeteragePoints is null || occurrence.MeteragePoints.Count < 2)
+                    throw new InvalidOperationException("Informe pelo menos duas metragens distintas.");
+                if (occurrence.MeteragePoints.Any(x => x.Meterage < 0))
+                    throw new InvalidOperationException("As metragens dos múltiplos pontos não podem ser negativas.");
+                if (occurrence.MeteragePoints.Select(x => x.Meterage).Distinct().Count() != occurrence.MeteragePoints.Count)
+                    throw new InvalidOperationException("A mesma metragem foi adicionada mais de uma vez.");
+                if (!occurrence.MeteragePoints.Select(x => x.Meterage)
+                        .SequenceEqual(occurrence.MeteragePoints.OrderBy(x => x.Meterage).Select(x => x.Meterage)))
+                    throw new InvalidOperationException("As metragens dos múltiplos pontos devem estar em ordem crescente.");
+                if (occurrence.EndMeterage is not null)
+                    throw new InvalidOperationException("Múltiplos pontos não possuem metragem final.");
+                break;
+            case OccurrenceLocationMode.From:
+                if (occurrence.Meterage is null || occurrence.Meterage < 0)
+                    throw new InvalidOperationException("Informe uma metragem inicial válida.");
+                if (occurrence.EndMeterage is not null)
+                    throw new InvalidOperationException("A localização ‘A partir de’ não possui metragem final.");
+                break;
             case OccurrenceLocationMode.EntireSection:
+                if (occurrence.Meterage is not null || occurrence.EndMeterage is not null)
+                    throw new InvalidOperationException("Uma ocorrência em todo o trecho não possui metragem.");
                 break;
             default:
                 throw new InvalidOperationException("Selecione a localização da anomalia.");
@@ -110,6 +133,10 @@ public static class OccurrenceRules
         OccurrenceLocationMode.Point when occurrence.Meterage is not null => $"{FormatMeters(occurrence.Meterage.Value)} m",
         OccurrenceLocationMode.Range when occurrence.Meterage is not null && occurrence.EndMeterage is not null =>
             $"{FormatMeters(occurrence.Meterage.Value)} m a {FormatMeters(occurrence.EndMeterage.Value)} m",
+        OccurrenceLocationMode.MultiPoint when occurrence.MeteragePoints.Count >= 2 =>
+            $"{FormatMeterageList(occurrence.MeteragePoints.Select(x => x.Meterage).ToList())} m",
+        OccurrenceLocationMode.From when occurrence.Meterage is not null =>
+            $"A partir de {FormatMeters(occurrence.Meterage.Value)} m",
         OccurrenceLocationMode.EntireSection => "Todo o trecho",
         _ => "Localização não informada"
     };
@@ -125,7 +152,17 @@ public static class OccurrenceRules
         var details = ordered.Select(FormatTechnicalDetails)
             .Where(x => x.Length > 0).ToList();
         var detailText = details.Count == 0 ? string.Empty : " " + string.Join(" ", details);
-        return $"{anomalySummary} {location}{reference}{ending}{detailText}".Trim();
+        return ApplySeverityMarker($"{anomalySummary} {location}{reference}{ending}{detailText}".Trim(), occurrence.IsSevere);
+    }
+
+    public static string ApplySeverityMarker(string description, bool isSevere)
+    {
+        var text = description.Trim();
+        if (!isSevere) return text;
+        var withoutEnding = text.TrimEnd('.', ';');
+        if (withoutEnding.EndsWith("(grave)", StringComparison.CurrentCultureIgnoreCase)) return text;
+        var ending = withoutEnding.Length == text.Length ? string.Empty : text[^1].ToString();
+        return $"{withoutEnding} (grave){ending}";
     }
 
     public static string GenerateCaptionSummary(Occurrence occurrence) =>
@@ -139,7 +176,9 @@ public static class OccurrenceRules
         if (occurrence.Anomalies.Count == 0) pending.Add("Sem anomalia");
         if ((occurrence.LocationMode == OccurrenceLocationMode.Point && occurrence.Meterage is null) ||
             (occurrence.LocationMode == OccurrenceLocationMode.Range &&
-             (occurrence.Meterage is null || occurrence.EndMeterage is null))) pending.Add("Sem metragem");
+             (occurrence.Meterage is null || occurrence.EndMeterage is null)) ||
+            (occurrence.LocationMode == OccurrenceLocationMode.MultiPoint && occurrence.MeteragePoints.Count < 2) ||
+            (occurrence.LocationMode == OccurrenceLocationMode.From && occurrence.Meterage is null)) pending.Add("Sem metragem");
         if (occurrence.Evidence.Count == 0) pending.Add("Sem evidência");
         if (string.IsNullOrWhiteSpace(occurrence.EffectiveDescription)) pending.Add("Descrição pendente");
         return pending;
@@ -179,8 +218,10 @@ public static class OccurrenceRules
 
     private static string FormatTechnicalDetails(OccurrenceAnomaly anomaly)
     {
+        if (!string.IsNullOrWhiteSpace(anomaly.AnomalyType.DescriptionTemplate))
+            return AnomalyTemplate.Render(anomaly.AnomalyType.DescriptionTemplate, anomaly.AnomalyType, anomaly);
         var name = anomaly.AnomalyType.AllowsCustomText && !string.IsNullOrWhiteSpace(anomaly.CustomText)
-            ? anomaly.CustomText.Trim() : anomaly.AnomalyType.Name;
+            ? anomaly.CustomText.Trim() : anomaly.DisplayName;
         var parts = new List<string>();
         if (anomaly.Orientation != AnomalyOrientation.NotReported)
             parts.Add(FormatOrientation(anomaly.Orientation).ToLowerInvariant());
@@ -202,12 +243,12 @@ public static class OccurrenceRules
         var names = anomalies.Select((item, index) =>
         {
             var name = item.AnomalyType.AllowsCustomText && !string.IsNullOrWhiteSpace(item.CustomText)
-                ? item.CustomText!.Trim() : item.AnomalyType.Name.Trim();
+                ? item.CustomText!.Trim() : item.DisplayName.Trim();
             return firstGroup && index == 0 ? name : LowercaseInitial(name);
         }).ToList();
         var position = anomalies[0].Position;
         if (position == AnomalyPosition.Side && anomalies.Count == 1 &&
-            anomalies[0].AnomalyType.Name.Equals("Contribuição", StringComparison.CurrentCultureIgnoreCase))
+            anomalies[0].DisplayName.Equals("Contribuição", StringComparison.CurrentCultureIgnoreCase))
             return $"{names[0]} lateral";
         return Join(names) + FormatPositionPhrase(position);
     }
@@ -242,9 +283,16 @@ public static class OccurrenceRules
             $"a {FormatMeters(occurrence.Meterage.Value)} {(occurrence.Meterage.Value == 1 ? "metro" : "metros")} do início da filmagem",
         OccurrenceLocationMode.Range when occurrence.Meterage is not null && occurrence.EndMeterage is not null =>
             $"entre {FormatMeters(occurrence.Meterage.Value)} e {FormatMeters(occurrence.EndMeterage.Value)} metros do início da filmagem",
-        OccurrenceLocationMode.EntireSection => "ao longo de toda a filmagem",
+        OccurrenceLocationMode.MultiPoint when occurrence.MeteragePoints.Count >= 2 =>
+            $"a {FormatMeterageList(occurrence.MeteragePoints.Select(x => x.Meterage).ToList())} metros do início da filmagem",
+        OccurrenceLocationMode.From when occurrence.Meterage is not null =>
+            $"a partir de {FormatMeters(occurrence.Meterage.Value)} {(occurrence.Meterage.Value == 1 ? "metro" : "metros")} do início da filmagem",
+        OccurrenceLocationMode.EntireSection => "em todo trecho filmado",
         _ => "durante a filmagem"
     };
+
+    private static string FormatMeterageList(IReadOnlyList<decimal> values) =>
+        Join(values.Select(FormatMeters).ToList());
 
     private static string LowercaseInitial(string value) => value.Length == 0
         ? value : char.ToLower(value[0], CultureInfo.GetCultureInfo("pt-BR")) + value[1..];

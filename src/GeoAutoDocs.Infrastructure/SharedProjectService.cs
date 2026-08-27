@@ -122,7 +122,10 @@ public sealed class SharedProjectService(AppDataPaths paths)
 
     internal void ReleaseLock(SharedProjectSession session)
     {
-        if (session.OwnedLock is not null) TryDeleteOwnedLock(session.LockPath, session.OwnedLock.SessionId);
+        if (session.OwnedLock is null) return;
+        EnsureOwnedLock(session);
+        File.Delete(session.LockPath);
+        session.OwnedLock = null;
     }
 
     private static void EnsureOwnedLock(SharedProjectSession session)
@@ -170,7 +173,8 @@ public sealed class SharedProjectService(AppDataPaths paths)
             cancellationToken.ThrowIfCancellationRequested();
             Directory.CreateDirectory(targetDirectory);
             var target = Path.Combine(targetDirectory, $"capture_{capture.Id:N}.png");
-            if (!PathsEqual(capture.FilePath, target)) await CopyAtomicallyAsync(capture.FilePath, target, cancellationToken);
+            if (ShouldCopyManagedFile(capture.FilePath, target))
+                await CopyAtomicallyAsync(capture.FilePath, target, cancellationToken);
             capture.SharedFilePath = target;
         }
 
@@ -182,7 +186,8 @@ public sealed class SharedProjectService(AppDataPaths paths)
             cancellationToken.ThrowIfCancellationRequested();
             Directory.CreateDirectory(evidenceDirectory);
             var target = Path.Combine(evidenceDirectory, $"evidence_{evidence.Id:N}{Path.GetExtension(evidence.FilePath).ToLowerInvariant()}");
-            if (!PathsEqual(evidence.FilePath, target)) await CopyAtomicallyAsync(evidence.FilePath, target, cancellationToken);
+            if (ShouldCopyManagedFile(evidence.FilePath, target))
+                await CopyAtomicallyAsync(evidence.FilePath, target, cancellationToken);
             evidence.SharedFilePath = target;
         }
     }
@@ -229,9 +234,21 @@ public sealed class SharedProjectService(AppDataPaths paths)
         }
     }
 
+    private static bool ShouldCopyManagedFile(string source, string destination)
+    {
+        if (PathsEqual(source, destination)) return false;
+        var destinationInfo = new FileInfo(destination);
+        if (!destinationInfo.Exists) return true;
+
+        var sourceInfo = new FileInfo(source);
+        if (sourceInfo.Length != destinationInfo.Length) return true;
+        return sourceInfo.LastWriteTimeUtc > destinationInfo.LastWriteTimeUtc;
+    }
+
     private static async Task CopyAtomicallyAsync(string source, string destination, CancellationToken cancellationToken)
     {
         var temporary = destination + ".tmp." + Guid.NewGuid().ToString("N");
+        var sourceLastWriteTime = File.GetLastWriteTimeUtc(source);
         try
         {
             await using (var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read,
@@ -243,6 +260,7 @@ public sealed class SharedProjectService(AppDataPaths paths)
                 await output.FlushAsync(cancellationToken);
             }
             File.Move(temporary, destination, true);
+            File.SetLastWriteTimeUtc(destination, sourceLastWriteTime);
         }
         finally
         {
@@ -291,6 +309,8 @@ public sealed class SharedProjectService(AppDataPaths paths)
 public sealed class SharedProjectSession
 {
     private readonly SharedProjectService _service;
+    private readonly SemaphoreSlim _checkpointGate = new(1, 1);
+    private bool _closed;
     internal string OfficialPath { get; }
     internal string CachePath { get; }
     internal string LockPath { get; }
@@ -316,15 +336,59 @@ public sealed class SharedProjectSession
     public Task SaveLocalAsync(CancellationToken cancellationToken = default) =>
         _service.SaveCacheAsync(this, cancellationToken);
 
-    public Task CheckpointAsync(CancellationToken cancellationToken = default) =>
-        _service.CheckpointAsync(this, cancellationToken);
+    public async Task CheckpointAsync(CancellationToken cancellationToken = default)
+    {
+        await _checkpointGate.WaitAsync(cancellationToken);
+        try
+        {
+            ThrowIfClosed();
+            await _service.CheckpointAsync(this, cancellationToken);
+        }
+        finally
+        {
+            _checkpointGate.Release();
+        }
+    }
 
-    public Task HeartbeatAsync(CancellationToken cancellationToken = default) =>
-        _service.HeartbeatAsync(this, cancellationToken);
+    public Task HeartbeatAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfClosed();
+        return _service.HeartbeatAsync(this, cancellationToken);
+    }
 
     public async Task CloseAsync(CancellationToken cancellationToken = default)
     {
-        if (!IsReadOnly) await CheckpointAsync(cancellationToken);
-        _service.ReleaseLock(this);
+        await _checkpointGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_closed) return;
+            if (!IsReadOnly) await _service.CheckpointAsync(this, cancellationToken);
+            _service.ReleaseLock(this);
+            _closed = true;
+        }
+        finally
+        {
+            _checkpointGate.Release();
+        }
+    }
+
+    public async Task AbandonAsync(CancellationToken cancellationToken = default)
+    {
+        await _checkpointGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_closed) return;
+            _service.ReleaseLock(this);
+            _closed = true;
+        }
+        finally
+        {
+            _checkpointGate.Release();
+        }
+    }
+
+    private void ThrowIfClosed()
+    {
+        if (_closed) throw new InvalidOperationException("A sessão compartilhada já foi finalizada.");
     }
 }

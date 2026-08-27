@@ -847,12 +847,32 @@ public partial class MainWindow : Window
     private async Task CheckpointSharedAsync()
     {
         if (_sharedSession is null || _sharedSession.IsReadOnly || !_sharedDirty) return;
+        if (!await SavePendingAsync())
+        {
+            _sharedDirty = true;
+            SaveStatus.Text = "Sincronização adiada — alterações locais não foram salvas";
+            return;
+        }
+
+        await _persistenceGate.WaitAsync();
         try
         {
-            await SavePendingAsync(); await _sharedSession.CheckpointAsync(); _sharedDirty = false;
-            SaveStatus.Text = "Sincronizado com o servidor";
+            if (_sharedSession is null || _sharedSession.IsReadOnly || !_sharedDirty) return;
+            await _sharedSession.CheckpointAsync();
+            _sharedDirty = _hasPendingChanges;
+            SaveStatus.Text = _sharedDirty
+                ? "Alterações pendentes de sincronização"
+                : "Sincronizado com o servidor";
         }
-        catch (Exception ex) { SaveStatus.Text = "Servidor indisponível — alterações protegidas localmente"; _logger.Error("Falha no checkpoint compartilhado.", ex); }
+        catch (Exception ex)
+        {
+            SaveStatus.Text = "Servidor indisponível — alterações protegidas localmente";
+            _logger.Error("Falha no checkpoint compartilhado.", ex);
+        }
+        finally
+        {
+            _persistenceGate.Release();
+        }
     }
 
     private async Task HeartbeatAsync()
@@ -865,21 +885,27 @@ public partial class MainWindow : Window
     {
         try
         {
-            _frameCaptureService.Discard(_captureDraft);
-            _captureDraft = null;
-            StopAndReleaseCurrentMedia();
-            await SavePendingAsync();
+            if (!await SavePendingAsync())
+            {
+                SaveStatus.Text = "Fechamento cancelado — alterações ainda não foram salvas";
+                return false;
+            }
+
             if (_sharedSession is not null)
             {
                 await _sharedSession.CloseAsync();
                 _sharedDirty = false;
             }
+
+            _frameCaptureService.Discard(_captureDraft);
+            _captureDraft = null;
+            StopAndReleaseCurrentMedia();
             SetSharedTimers(false);
             return true;
         }
         catch (Exception ex)
         {
-            ShowError("A sincronização final falhou. O cache local foi preservado.", ex);
+            ShowError("A sincronização final falhou. O projeto permanece aberto.", ex);
             return false;
         }
     }
@@ -906,6 +932,7 @@ public partial class MainWindow : Window
         try
         {
             ApplyFieldsToModel();
+            if (!await SavePendingAsync()) return;
             _sharedSession = await _sharedProjects.OpenAsync(_currentProject, dialog.FolderName);
             _currentProject = _sharedSession.Project;
             await _store.SaveAsync(_currentProject);
@@ -1016,7 +1043,7 @@ public partial class MainWindow : Window
     {
         if (_currentProject is null || _currentReport is null) return;
         ApplyFieldsToModel();
-        await SavePendingAsync();
+        if (!await SavePendingAsync()) return;
         try
         {
             var validation = _wordReportService.Validate(_currentProject, _currentReport);
@@ -1072,7 +1099,7 @@ public partial class MainWindow : Window
             if (!IsReadOnly)
             {
                 ApplyFieldsToModel();
-                await SavePendingAsync();
+                if (!await SavePendingAsync()) return;
             }
             var document = _inspectionExchangeService.Build(_currentProject, _currentReport);
             var reportsDirectory = Path.Combine(_currentProject.ProjectPath ?? "", "reports");
@@ -1114,7 +1141,12 @@ public partial class MainWindow : Window
             if (!IsReadOnly)
             {
                 ApplyFieldsToModel();
-                await SavePendingAsync();
+                if (!await SavePendingAsync())
+                {
+                    GeoAutoEngineStatusText.Text = "Envio cancelado — alterações locais não foram salvas.";
+                    GeoAutoEngineStatusText.Foreground = (System.Windows.Media.Brush)FindResource("WarningBrush");
+                    return;
+                }
             }
             var document = _inspectionExchangeService.Build(_currentProject, _currentReport);
             var result = await _geoAutoEngineTransport.SendAsync(document);
@@ -1172,7 +1204,7 @@ public partial class MainWindow : Window
         else
         {
             ApplyFieldsToModel();
-            await SavePendingAsync();
+            if (!await SavePendingAsync()) return;
         }
 
         var window = new ContinueReportWindow(_currentProject, report, _wordReportService) { Owner = this };
@@ -1211,7 +1243,7 @@ public partial class MainWindow : Window
             Message = $"{result.AddedOccurrences} anomalia(s), {result.AddedEvidences} evidência(s)"
         });
         MarkPendingChanges();
-        await SavePendingAsync();
+        if (!await SavePendingAsync()) return;
         LoadReport(report);
         ReportsList.Items.Refresh();
     }

@@ -283,7 +283,7 @@ public sealed class ProjectStoreTests : IAsyncLifetime
         {
             OccurrenceId = occurrence.Id,
             FilePath = @"C:\evidencias\frame.png",
-            SourceType = EvidenceSourceType.ManualImport
+            SourceType = EvidenceSourceType.ExternalImage
         });
         section.VideoReferences.Add(video);
         section.Occurrences.Add(occurrence);

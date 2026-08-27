@@ -2611,11 +2611,7 @@ public partial class MainWindow : Window
             SaveStatus.Text = "Salvando...";
             await _store.SaveSectionAsync(section);
             _currentProject.UpdatedAt = DateTime.UtcNow;
-            if (_sharedSession is not null)
-            {
-                await _sharedSession.SaveLocalAsync();
-                _sharedDirty = true;
-            }
+            if (_sharedSession is not null) _sharedDirty = true;
             _saveErrorNotified = false;
             SaveStatus.Text = "✓ Salvo";
             RefreshHomeStatus();

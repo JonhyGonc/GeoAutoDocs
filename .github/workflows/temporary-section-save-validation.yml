@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - fix/section-edit-save-stability
+  pull_request:
+    branches:
+      - main
 
 jobs:
   build-and-test:

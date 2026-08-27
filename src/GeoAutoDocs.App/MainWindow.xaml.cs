@@ -52,6 +52,8 @@ public partial class MainWindow : Window
     private bool _hasPendingChanges;
     private long _pendingSaveRevision;
     private bool _sharedDirty;
+    private bool _checkpointInProgress;
+    private bool _finalizationInProgress;
     private bool _closingAfterSave;
     private bool _saveErrorNotified;
     private bool _seeking;
@@ -846,32 +848,43 @@ public partial class MainWindow : Window
 
     private async Task CheckpointSharedAsync()
     {
-        if (_sharedSession is null || _sharedSession.IsReadOnly || !_sharedDirty) return;
-        if (!await SavePendingAsync())
-        {
-            _sharedDirty = true;
-            SaveStatus.Text = "Sincronização adiada — alterações locais não foram salvas";
-            return;
-        }
+        if (_checkpointInProgress || _finalizationInProgress ||
+            _sharedSession is null || _sharedSession.IsReadOnly || !_sharedDirty) return;
 
-        await _persistenceGate.WaitAsync();
+        _checkpointInProgress = true;
         try
         {
-            if (_sharedSession is null || _sharedSession.IsReadOnly || !_sharedDirty) return;
-            await _sharedSession.CheckpointAsync();
-            _sharedDirty = _hasPendingChanges;
-            SaveStatus.Text = _sharedDirty
-                ? "Alterações pendentes de sincronização"
-                : "Sincronizado com o servidor";
+            if (!await SavePendingAsync())
+            {
+                _sharedDirty = true;
+                SaveStatus.Text = "Sincronização adiada — alterações locais não foram salvas";
+                return;
+            }
+
+            await _persistenceGate.WaitAsync();
+            try
+            {
+                if (_sharedSession is null || _sharedSession.IsReadOnly || !_sharedDirty) return;
+                await _sharedSession.CheckpointAsync();
+                _sharedDirty = _hasPendingChanges;
+                SaveStatus.Text = _sharedDirty
+                    ? "Alterações pendentes de sincronização"
+                    : "Sincronizado com o servidor";
+            }
+            finally
+            {
+                _persistenceGate.Release();
+            }
         }
         catch (Exception ex)
         {
+            _sharedDirty = true;
             SaveStatus.Text = "Servidor indisponível — alterações protegidas localmente";
             _logger.Error("Falha no checkpoint compartilhado.", ex);
         }
         finally
         {
-            _persistenceGate.Release();
+            _checkpointInProgress = false;
         }
     }
 
@@ -883,6 +896,13 @@ public partial class MainWindow : Window
 
     private async Task<bool> FinalizeCurrentProjectAsync()
     {
+        if (_finalizationInProgress) return false;
+        _finalizationInProgress = true;
+        var session = _sharedSession;
+        var restoreSharedTimers = session is { IsReadOnly: false };
+        var completed = false;
+        if (restoreSharedTimers) SetSharedTimers(false);
+
         try
         {
             if (!await SavePendingAsync())
@@ -891,9 +911,9 @@ public partial class MainWindow : Window
                 return false;
             }
 
-            if (_sharedSession is not null)
+            if (session is not null)
             {
-                await _sharedSession.CloseAsync();
+                await session.CloseAsync();
                 _sharedDirty = false;
             }
 
@@ -901,12 +921,20 @@ public partial class MainWindow : Window
             _captureDraft = null;
             StopAndReleaseCurrentMedia();
             SetSharedTimers(false);
+            completed = true;
             return true;
         }
         catch (Exception ex)
         {
+            _sharedDirty = session is { IsReadOnly: false };
             ShowError("A sincronização final falhou. O projeto permanece aberto.", ex);
             return false;
+        }
+        finally
+        {
+            if (!completed && restoreSharedTimers && session is { IsClosed: false })
+                SetSharedTimers(true);
+            _finalizationInProgress = false;
         }
     }
 
@@ -929,16 +957,39 @@ public partial class MainWindow : Window
         if (_currentProject is null) return;
         var dialog = new OpenFolderDialog { Title = "Selecione a pasta do projeto compartilhado", Multiselect = false };
         if (dialog.ShowDialog(this) != true) return;
+
+        var project = _currentProject;
+        var previousStorageKind = project.StorageKind;
+        var previousSharedPath = project.SharedProjectPath;
+        var previousVersion = project.ProjectDataVersion;
+        SharedProjectSession? openedSession = null;
         try
         {
             ApplyFieldsToModel();
             if (!await SavePendingAsync()) return;
-            _sharedSession = await _sharedProjects.OpenAsync(_currentProject, dialog.FolderName);
-            _currentProject = _sharedSession.Project;
-            await _store.SaveAsync(_currentProject);
-            LoadProject(_currentProject); SetSharedTimers(true);
+            openedSession = await _sharedProjects.OpenAsync(project, dialog.FolderName);
+            await _store.SaveAsync(openedSession.Project);
+            _sharedSession = openedSession;
+            _currentProject = openedSession.Project;
+            LoadProject(_currentProject);
+            SetSharedTimers(true);
         }
-        catch (Exception ex) { ShowError("Não foi possível compartilhar o projeto.", ex); }
+        catch (Exception ex)
+        {
+            SetSharedTimers(false);
+            if (openedSession is { IsClosed: false })
+            {
+                try { await openedSession.AbandonAsync(); }
+                catch (Exception releaseError) { _logger.Error("Falha ao liberar lock após compartilhamento incompleto.", releaseError); }
+            }
+
+            project.StorageKind = previousStorageKind;
+            project.SharedProjectPath = previousSharedPath;
+            project.ProjectDataVersion = previousVersion;
+            _sharedSession = null;
+            _currentProject = project;
+            ShowError("Não foi possível compartilhar o projeto.", ex);
+        }
     }
 
     private void SetSharedTimers(bool enabled)
@@ -1071,8 +1122,15 @@ public partial class MainWindow : Window
 
             GeneratedReportText.Text = "Preparando relatório... Processando trechos e inserindo imagens...";
             var path = await _wordReportService.GenerateToAsync(_currentProject, _currentReport, dialog.FileName);
-            if (_sharedSession?.IsReadOnly != true) { MarkPendingChanges(); await SavePendingAsync(); }
-            GeneratedReportText.Text = $"✓ Relatório gerado\n{Path.GetFileName(path)}";
+            var persisted = true;
+            if (_sharedSession?.IsReadOnly != true)
+            {
+                MarkPendingChanges();
+                persisted = await SavePendingAsync();
+            }
+            GeneratedReportText.Text = persisted
+                ? $"✓ Relatório gerado\n{Path.GetFileName(path)}"
+                : $"⚠ Relatório gerado, mas o estado permanece pendente de salvamento\n{Path.GetFileName(path)}";
             OpenReportButton.IsEnabled = true; OpenReportFolderButton.IsEnabled = true;
             ReportsList.Items.Refresh();
             RefreshOverview();

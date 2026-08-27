@@ -150,9 +150,11 @@ public sealed class ProjectStore : IProjectStore
             var stored = await db.Set<InspectionSection>()
                 .SingleOrDefaultAsync(x => x.Id == section.Id, cancellationToken)
                 ?? throw new InvalidOperationException("O trecho não foi encontrado para atualização.");
-            var project = await db.Projects
-                .SingleOrDefaultAsync(x => db.Set<Location>()
-                    .Any(location => location.Id == stored.LocationId && location.ProjectId == x.Id), cancellationToken)
+            var projectId = await db.Set<Location>()
+                .Where(x => x.Id == stored.LocationId)
+                .Select(x => x.ProjectId)
+                .SingleOrDefaultAsync(cancellationToken);
+            var project = await db.Projects.SingleOrDefaultAsync(x => x.Id == projectId, cancellationToken)
                 ?? throw new InvalidOperationException("O projeto do trecho não foi encontrado.");
 
             stored.Name = name;

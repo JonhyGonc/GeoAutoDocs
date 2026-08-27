@@ -35,6 +35,7 @@ public partial class MainWindow : Window
     private readonly LibVLC _libVlc;
     private readonly MediaPlayer _mediaPlayer;
     private readonly DispatcherTimer _saveTimer;
+    private readonly SemaphoreSlim _persistenceGate = new(1, 1);
     private readonly DispatcherTimer _syncTimer;
     private readonly DispatcherTimer _heartbeatTimer;
     private readonly DispatcherTimer _playerTimer;
@@ -49,6 +50,7 @@ public partial class MainWindow : Window
     private FrameCaptureDraft? _captureDraft;
     private bool _loadingFields;
     private bool _hasPendingChanges;
+    private long _pendingSaveRevision;
     private bool _sharedDirty;
     private bool _closingAfterSave;
     private bool _saveErrorNotified;
@@ -697,7 +699,7 @@ public partial class MainWindow : Window
         _loadingFields = false;
         LoadReport(_currentReport);
         WordConfigTab.IsSelected = true;
-        _hasPendingChanges = true;
+        MarkPendingChanges();
         await SavePendingAsync();
         ReportCodeBox.Focus();
         ReportCodeBox.SelectAll();
@@ -749,7 +751,7 @@ public partial class MainWindow : Window
     private void FieldChanged(object sender, RoutedEventArgs e)
     {
         if (_loadingFields || _currentProject is null || _sharedSession?.IsReadOnly == true) return;
-        _hasPendingChanges = true;
+        MarkPendingChanges();
         SaveStatus.Text = "Salvando...";
         if (sender == OpeningCheck || sender == GprCheck) RefreshDevelopmentImageSummary();
         _saveTimer.Stop(); _saveTimer.Start();
@@ -790,37 +792,55 @@ public partial class MainWindow : Window
     private async Task<bool> SavePendingAsync()
     {
         _saveTimer.Stop();
-        if (!_hasPendingChanges || _currentProject is null || _sharedSession?.IsReadOnly == true)
-            return !_saveErrorNotified;
+        await _persistenceGate.WaitAsync();
         try
         {
-            ApplyFieldsToModel();
-            await _store.SaveAsync(_currentProject);
-            if (_sharedSession is not null) { await _sharedSession.SaveLocalAsync(); _sharedDirty = true; }
-            _hasPendingChanges = false;
-            _saveErrorNotified = false;
-            RefreshHomeStatus();
-            ProjectClientSummary.Text = string.IsNullOrWhiteSpace(_currentProject.DefaultClient)
-                ? "Dados do cliente ainda não informados" : _currentProject.DefaultClient;
-            ActiveReportTitle.Text = _currentReport?.DisplayCode ?? "Selecione um relatório";
-            ReportsList.Items.Refresh();
-            RefreshOverview();
-            RefreshReportReview();
-            SaveStatus.Text = "✓ Salvo";
-            UpdateSectionReviewState();
-            return true;
+            if (!_hasPendingChanges || _currentProject is null || _sharedSession?.IsReadOnly == true)
+                return !_saveErrorNotified;
+            try
+            {
+                do
+                {
+                    var saveRevision = _pendingSaveRevision;
+                    ApplyFieldsToModel();
+                    await _store.SaveAsync(_currentProject);
+                    if (_sharedSession is not null)
+                    {
+                        await _sharedSession.SaveLocalAsync();
+                        _sharedDirty = true;
+                    }
+                    _hasPendingChanges = _pendingSaveRevision != saveRevision;
+                }
+                while (_hasPendingChanges);
+
+                _saveErrorNotified = false;
+                RefreshHomeStatus();
+                ProjectClientSummary.Text = string.IsNullOrWhiteSpace(_currentProject.DefaultClient)
+                    ? "Dados do cliente ainda não informados" : _currentProject.DefaultClient;
+                ActiveReportTitle.Text = _currentReport?.DisplayCode ?? "Selecione um relatório";
+                ReportsList.Items.Refresh();
+                RefreshOverview();
+                RefreshReportReview();
+                SaveStatus.Text = "✓ Salvo";
+                UpdateSectionReviewState();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                SaveStatus.Text = "Falha ao salvar — consulte o log";
+                UpdateSectionReviewState();
+                _logger.Error("Não foi possível salvar as alterações.", ex);
+                if (_saveErrorNotified) return false;
+                _saveErrorNotified = true;
+                RefreshHomeStatus();
+                MessageBox.Show("Não foi possível salvar as alterações. Consulte o log.",
+                    "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
+                return false;
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            SaveStatus.Text = "Falha ao salvar — consulte o log";
-            UpdateSectionReviewState();
-            _logger.Error("Não foi possível salvar as alterações.", ex);
-            if (_saveErrorNotified) return false;
-            _saveErrorNotified = true;
-            RefreshHomeStatus();
-            MessageBox.Show("Não foi possível salvar as alterações. Consulte o log.",
-                "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
-            return false;
+            _persistenceGate.Release();
         }
     }
 
@@ -1024,7 +1044,7 @@ public partial class MainWindow : Window
 
             GeneratedReportText.Text = "Preparando relatório... Processando trechos e inserindo imagens...";
             var path = await _wordReportService.GenerateToAsync(_currentProject, _currentReport, dialog.FileName);
-            if (_sharedSession?.IsReadOnly != true) { _hasPendingChanges = true; await SavePendingAsync(); }
+            if (_sharedSession?.IsReadOnly != true) { MarkPendingChanges(); await SavePendingAsync(); }
             GeneratedReportText.Text = $"✓ Relatório gerado\n{Path.GetFileName(path)}";
             OpenReportButton.IsEnabled = true; OpenReportFolderButton.IsEnabled = true;
             ReportsList.Items.Refresh();
@@ -1033,7 +1053,7 @@ public partial class MainWindow : Window
         }
         catch (InspectionExchangeExportException ex)
         {
-            if (_sharedSession?.IsReadOnly != true) { _hasPendingChanges = true; await SavePendingAsync(); }
+            if (_sharedSession?.IsReadOnly != true) { MarkPendingChanges(); await SavePendingAsync(); }
             GeneratedReportText.Text = $"⚠ DOCX gerado; falha no arquivo de intercâmbio\n{Path.GetFileName(ex.DocxPath)}";
             OpenReportButton.IsEnabled = true;
             OpenReportFolderButton.IsEnabled = true;
@@ -1190,7 +1210,7 @@ public partial class MainWindow : Window
             Status = "Concluído",
             Message = $"{result.AddedOccurrences} anomalia(s), {result.AddedEvidences} evidência(s)"
         });
-        _hasPendingChanges = true;
+        MarkPendingChanges();
         await SavePendingAsync();
         LoadReport(report);
         ReportsList.Items.Refresh();
@@ -1385,6 +1405,13 @@ public partial class MainWindow : Window
         UpdateInspectionWriteState();
     }
 
+    private void RefreshSectionMetadata()
+    {
+        SectionsList.Items.Refresh();
+        SectionsList.SelectedItem = _currentSection;
+        UpdateInspectionWriteState();
+    }
+
     private void RefreshVideos()
     {
         var videoId = _currentVideo?.Id;
@@ -1539,7 +1566,7 @@ public partial class MainWindow : Window
         var previousUpdatedAt = _currentSection.AnomalyReviewUpdatedAt;
         _currentSection.AnomalyReviewStatus = status;
         _currentSection.AnomalyReviewUpdatedAt = DateTime.UtcNow;
-        _hasPendingChanges = true;
+        MarkPendingChanges();
         SectionPersistenceStatusText.Text = "Salvando...";
         if (await SavePendingAsync()) return true;
         _currentSection.AnomalyReviewStatus = previousStatus;
@@ -1588,7 +1615,7 @@ public partial class MainWindow : Window
             targetIndex++;
         ordered.Insert(targetIndex, source);
         for (var index = 0; index < ordered.Count; index++) ordered[index].Order = index;
-        _hasPendingChanges = true;
+        MarkPendingChanges();
         UpdateSectionReviewState();
         if (!await SavePendingAsync())
             foreach (var occurrence in ordered) occurrence.Order = previousOrders[occurrence.Id];
@@ -1815,9 +1842,9 @@ public partial class MainWindow : Window
         _currentSection.EndPoint = draft.EndPoint;
         _currentSection.Reference = draft.Reference;
         _currentSection.InvestigatedMeters = draft.InvestigatedMeters;
-        RefreshSections();
+        RefreshSectionMetadata();
         RefreshReportSectionSelection();
-        await SaveInspectionChangesAsync();
+        await SaveSectionMetadataAsync(_currentSection);
     }
 
     private async void DeleteSection_Click(object sender, RoutedEventArgs e)
@@ -2575,10 +2602,51 @@ public partial class MainWindow : Window
         await SaveInspectionChangesAsync();
     }
 
+    private async Task SaveSectionMetadataAsync(InspectionSection section)
+    {
+        if (_currentProject is null || IsReadOnly) return;
+        await _persistenceGate.WaitAsync();
+        try
+        {
+            SaveStatus.Text = "Salvando...";
+            await _store.SaveSectionAsync(section);
+            _currentProject.UpdatedAt = DateTime.UtcNow;
+            if (_sharedSession is not null)
+            {
+                await _sharedSession.SaveLocalAsync();
+                _sharedDirty = true;
+            }
+            _saveErrorNotified = false;
+            SaveStatus.Text = "✓ Salvo";
+            RefreshHomeStatus();
+            UpdateSectionReviewState();
+        }
+        catch (Exception ex)
+        {
+            MarkPendingChanges();
+            _saveTimer.Stop();
+            _saveTimer.Start();
+            SaveStatus.Text = "Falha ao salvar — nova tentativa pendente";
+            UpdateSectionReviewState();
+            _logger.Error("Não foi possível salvar os metadados do trecho.", ex);
+            if (!_saveErrorNotified)
+            {
+                _saveErrorNotified = true;
+                RefreshHomeStatus();
+                MessageBox.Show("Não foi possível salvar o trecho. Uma nova tentativa será feita automaticamente.",
+                    "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+        finally
+        {
+            _persistenceGate.Release();
+        }
+    }
+
     private async Task SaveInspectionChangesAsync()
     {
         if (_currentProject is null || IsReadOnly) return;
-        _hasPendingChanges = true;
+        MarkPendingChanges();
         UpdateSectionReviewState();
         await SavePendingAsync();
         if (_sharedSession is not null) _sharedDirty = true;
@@ -2767,9 +2835,23 @@ public partial class MainWindow : Window
     private static BitmapImage? LoadThumbnail(string? path)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return null;
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad;
-        image.DecodePixelWidth = 220; image.StreamSource = stream; image.EndInit(); image.Freeze(); return image;
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            var image = new BitmapImage();
+            image.BeginInit();
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            image.DecodePixelWidth = 220;
+            image.StreamSource = stream;
+            image.EndInit();
+            image.Freeze();
+            return image;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Thumbnail ignorada para '{path}': {ex.Message}");
+            return null;
+        }
     }
 
     private sealed class VideoListItem
@@ -2866,10 +2948,16 @@ public partial class MainWindow : Window
         public string When { get; } = timestamp.ToString("dd/MM/yyyy HH:mm");
     }
 
+    private void MarkPendingChanges()
+    {
+        _hasPendingChanges = true;
+        _pendingSaveRevision++;
+    }
+
     private void ScheduleSave()
     {
         if (_loadingFields || _currentProject is null || _sharedSession?.IsReadOnly == true) return;
-        _hasPendingChanges = true; SaveStatus.Text = "Salvando..."; UpdateSectionReviewState();
+        MarkPendingChanges(); SaveStatus.Text = "Salvando..."; UpdateSectionReviewState();
         _saveTimer.Stop(); _saveTimer.Start();
     }
 

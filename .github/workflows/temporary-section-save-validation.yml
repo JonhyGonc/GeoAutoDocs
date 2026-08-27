@@ -18,4 +18,5 @@ jobs:
         with:
           dotnet-version: 8.0.x
       - run: dotnet restore GeoAutoDocs.sln
-      - run: dotnet test GeoAutoDocs.sln --configuration Release --no-restore
+      - run: dotnet build GeoAutoDocs.sln --configuration Release --no-restore
+      - run: dotnet test tests/GeoAutoDocs.Tests/GeoAutoDocs.Tests.csproj --configuration Release --no-build --filter "FullyQualifiedName~GeoAutoDocs.Tests.ProjectStoreTests"

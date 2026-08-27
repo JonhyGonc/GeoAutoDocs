@@ -926,7 +926,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            _sharedDirty = session is { IsReadOnly: false };
+            _sharedDirty = _hasPendingChanges || session is { IsReadOnly: false, IsClosed: false };
             ShowError("A sincronização final falhou. O projeto permanece aberto.", ex);
             return false;
         }
@@ -977,17 +977,37 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             SetSharedTimers(false);
+            var sessionReleased = openedSession is null;
             if (openedSession is { IsClosed: false })
             {
-                try { await openedSession.AbandonAsync(); }
-                catch (Exception releaseError) { _logger.Error("Falha ao liberar lock após compartilhamento incompleto.", releaseError); }
+                try
+                {
+                    await openedSession.AbandonAsync();
+                    sessionReleased = true;
+                }
+                catch (Exception releaseError)
+                {
+                    _logger.Error("Falha ao liberar lock após compartilhamento incompleto.", releaseError);
+                }
             }
 
-            project.StorageKind = previousStorageKind;
-            project.SharedProjectPath = previousSharedPath;
-            project.ProjectDataVersion = previousVersion;
-            _sharedSession = null;
-            _currentProject = project;
+            if (sessionReleased)
+            {
+                project.StorageKind = previousStorageKind;
+                project.SharedProjectPath = previousSharedPath;
+                project.ProjectDataVersion = previousVersion;
+                _sharedSession = null;
+                _currentProject = project;
+                _sharedDirty = false;
+            }
+            else
+            {
+                _sharedSession = openedSession;
+                _currentProject = openedSession!.Project;
+                _sharedDirty = true;
+                LoadProject(_currentProject);
+                SetSharedTimers(true);
+            }
             ShowError("Não foi possível compartilhar o projeto.", ex);
         }
     }

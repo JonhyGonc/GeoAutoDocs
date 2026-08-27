@@ -351,10 +351,18 @@ public sealed class SharedProjectSession
         }
     }
 
-    public Task HeartbeatAsync(CancellationToken cancellationToken = default)
+    public async Task HeartbeatAsync(CancellationToken cancellationToken = default)
     {
-        ThrowIfClosed();
-        return _service.HeartbeatAsync(this, cancellationToken);
+        await _checkpointGate.WaitAsync(cancellationToken);
+        try
+        {
+            ThrowIfClosed();
+            await _service.HeartbeatAsync(this, cancellationToken);
+        }
+        finally
+        {
+            _checkpointGate.Release();
+        }
     }
 
     public async Task CloseAsync(CancellationToken cancellationToken = default)

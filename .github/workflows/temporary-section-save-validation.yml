@@ -1,0 +1,18 @@
+name: Temporary section save validation
+
+on:
+  push:
+    branches:
+      - fix/section-edit-save-stability
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet restore GeoAutoDocs.sln
+      - run: dotnet test GeoAutoDocs.sln --configuration Release --no-restore

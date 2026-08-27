@@ -1158,8 +1158,15 @@ public partial class MainWindow : Window
         }
         catch (InspectionExchangeExportException ex)
         {
-            if (_sharedSession?.IsReadOnly != true) { MarkPendingChanges(); await SavePendingAsync(); }
-            GeneratedReportText.Text = $"⚠ DOCX gerado; falha no arquivo de intercâmbio\n{Path.GetFileName(ex.DocxPath)}";
+            var persisted = true;
+            if (_sharedSession?.IsReadOnly != true)
+            {
+                MarkPendingChanges();
+                persisted = await SavePendingAsync();
+            }
+            GeneratedReportText.Text = persisted
+                ? $"⚠ DOCX gerado; falha no arquivo de intercâmbio\n{Path.GetFileName(ex.DocxPath)}"
+                : $"⚠ DOCX gerado; intercâmbio falhou e o estado permanece pendente de salvamento\n{Path.GetFileName(ex.DocxPath)}";
             OpenReportButton.IsEnabled = true;
             OpenReportFolderButton.IsEnabled = true;
             ReportsList.Items.Refresh();

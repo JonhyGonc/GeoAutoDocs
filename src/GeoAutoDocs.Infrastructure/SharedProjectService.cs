@@ -318,6 +318,7 @@ public sealed class SharedProjectSession
     internal long BaseVersion { get; set; }
     public Project Project { get; }
     public bool IsReadOnly { get; }
+    public bool IsClosed => _closed;
     public string LocalCachePath => CachePath;
 
     internal SharedProjectSession(SharedProjectService service, Project project, string officialPath,

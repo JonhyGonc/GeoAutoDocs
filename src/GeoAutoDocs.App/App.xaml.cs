@@ -30,6 +30,8 @@ public partial class App : Application
         _logger.Info("Aplicação iniciada.");
 
         DispatcherUnhandledException += OnUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException += OnAppDomainUnhandledException;
+        TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
         try
         {
@@ -79,6 +81,8 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        AppDomain.CurrentDomain.UnhandledException -= OnAppDomainUnhandledException;
+        TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;
         _shutdown.Cancel();
         _shutdown.Dispose();
         if (_ownsSingleInstance) _singleInstance?.ReleaseMutex();
@@ -92,5 +96,18 @@ public partial class App : Application
         MessageBox.Show("Ocorreu um erro inesperado. Os detalhes foram registrados no log.",
             "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
         e.Handled = true;
+    }
+
+    private void OnAppDomainUnhandledException(object? sender, UnhandledExceptionEventArgs e)
+    {
+        var exception = e.ExceptionObject as Exception ??
+                        new InvalidOperationException($"Exceção não gerenciada sem objeto Exception: {e.ExceptionObject}");
+        _logger?.Error($"Erro não tratado no AppDomain. Encerramento={e.IsTerminating}.", exception);
+    }
+
+    private void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        _logger?.Error("Erro não observado em tarefa assíncrona.", e.Exception);
+        e.SetObserved();
     }
 }

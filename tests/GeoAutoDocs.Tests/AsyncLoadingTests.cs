@@ -6,6 +6,60 @@ namespace GeoAutoDocs.Tests;
 public sealed class AsyncLoadingTests
 {
     [Fact]
+    public void MainPlayerUsesSoftwareDecodingForNativeStability()
+    {
+        Assert.Contains("--avcodec-hw=none", MediaPlaybackSafety.LibVlcOptions);
+        Assert.DoesNotContain("--quiet", MediaPlaybackSafety.LibVlcOptions);
+    }
+
+    [Fact]
+    public async Task AviPreflightAcceptsRiffAviHeaderWithoutDecodingMedia()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"valid_{Guid.NewGuid():N}.avi");
+        try
+        {
+            await File.WriteAllBytesAsync(path,
+                [(byte)'R', (byte)'I', (byte)'F', (byte)'F', 4, 0, 0, 0,
+                    (byte)'A', (byte)'V', (byte)'I', (byte)' ']);
+
+            var result = await MediaPlaybackSafety.InspectAsync(path);
+
+            Assert.True(result.CanOpen);
+            Assert.Equal(12, result.FileLength);
+            Assert.Equal(MediaPreflightFailureKind.None, result.FailureKind);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task AviPreflightRejectsInvalidContainerBeforeLibVlcReceivesIt()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"invalid_{Guid.NewGuid():N}.avi");
+        try
+        {
+            await File.WriteAllBytesAsync(path, new byte[32]);
+
+            var result = await MediaPlaybackSafety.InspectAsync(path);
+
+            Assert.False(result.CanOpen);
+            Assert.Equal(MediaPreflightFailureKind.InvalidContainer, result.FailureKind);
+            Assert.Contains("RIFF/AVI", result.FailureReason);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task AviPreflightTreatsMissingFileAsRecoverableItemFailure()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"missing_{Guid.NewGuid():N}.avi");
+
+        var result = await MediaPlaybackSafety.InspectAsync(path);
+
+        Assert.False(result.CanOpen);
+        Assert.Equal(MediaPreflightFailureKind.Missing, result.FailureKind);
+    }
+
+    [Fact]
     public void ContextSelectionCannotOpenMedia()
     {
         Assert.False(MediaLoadPolicy.CanOpen(MediaLoadIntent.ContextSelection));

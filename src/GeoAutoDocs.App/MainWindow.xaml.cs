@@ -74,9 +74,13 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _mediaLoadCts;
     private long _inspectionLoadGeneration;
     private long _mediaGeneration;
+    private long _activeMediaGeneration;
     private string _inspectionLoadStage = "idle";
+    private readonly ConcurrentDictionary<string, byte> _reportedLibVlcLogs = new(StringComparer.Ordinal);
     private bool _playerErrorNotified;
+    private bool _playerTelemetryErrorNotified;
     private bool _playerDisposed;
+    private bool _playerDisposeInProgress;
     private bool _captureInProgress;
     private bool _loadingInspections;
     private bool _sectionReviewInProgress;
@@ -111,42 +115,47 @@ public partial class MainWindow : Window
         _geoAutoEngineTransport = geoAutoEngineTransport;
         _backupStatus = backupStatus;
         LibVLCSharp.Shared.Core.Initialize();
-        _libVlc = new LibVLC("--no-video-title-show", "--quiet", "--no-audio");
+        _libVlc = new LibVLC(MediaPlaybackSafety.LibVlcOptions.ToArray());
+        _libVlc.Log += OnLibVlcLog;
         _mediaPlayer = new MediaPlayer(_libVlc);
         VideoView.MediaPlayer = _mediaPlayer;
         CaptureFrameOverlayButton.Visibility = Visibility.Collapsed;
         CaptureFrameButton.Visibility = Visibility.Visible;
         CaptureFrameButton.Content = "Capturar evidência";
         RefreshBackupStatus();
-        _mediaPlayer.EncounteredError += (_, _) => Dispatcher.BeginInvoke(() =>
+        _mediaPlayer.EncounteredError += (_, _) =>
         {
-            if (_currentMedia is not null && !_playerDisposed) HandlePlayerError();
-        });
-        _mediaPlayer.Playing += (_, _) => Dispatcher.BeginInvoke(() =>
+            var generation = Volatile.Read(ref _activeMediaGeneration);
+            QueuePlayerUiUpdate(generation, HandlePlayerError);
+        };
+        _mediaPlayer.Playing += (_, _) =>
         {
-            if (_currentMedia is null || _playerDisposed) return;
-            VideoEmptyState.Visibility = Visibility.Collapsed;
-            VideoLoadedBadge.Visibility = Visibility.Visible;
-            UpdatePlayerControlState();
-            if (!TryApplyPlaybackRate(_selectedPlaybackRate))
+            var generation = Volatile.Read(ref _activeMediaGeneration);
+            Dispatcher.BeginInvoke(new Action(async () =>
             {
-                var rejectedRate = _selectedPlaybackRate;
-                _selectedPlaybackRate = 1f;
-                TryApplyPlaybackRate(1f);
-                SelectSpeed(1f);
-                MessageBox.Show($"O formato deste vídeo não aceita {rejectedRate:0.##}x. A velocidade voltou para 1,0x.",
-                    "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Warning);
-            }
-            PlayPauseButton.Content = "❚❚";
-        });
-        _mediaPlayer.Paused += (_, _) => Dispatcher.BeginInvoke(() => PlayPauseButton.Content = "▶");
-        _mediaPlayer.Stopped += (_, _) => Dispatcher.BeginInvoke(() => PlayPauseButton.Content = "▶");
-        _mediaPlayer.EndReached += (_, _) => Dispatcher.BeginInvoke(() =>
+                try { await HandlePlayerPlayingAsync(generation); }
+                catch (Exception ex) { LogPlayerControlFailure("callback Playing", ex); }
+            }));
+        };
+        _mediaPlayer.Paused += (_, _) =>
         {
-            _lastKnownPlayerTime = Math.Max(_lastKnownPlayerTime, Math.Max(0, _mediaPlayer.Length));
-            PlayPauseButton.Content = "▶";
-            RefreshPlayerPosition();
-        });
+            var generation = Volatile.Read(ref _activeMediaGeneration);
+            QueuePlayerUiUpdate(generation, () => PlayPauseButton.Content = "▶");
+        };
+        _mediaPlayer.Stopped += (_, _) =>
+        {
+            var generation = Volatile.Read(ref _activeMediaGeneration);
+            QueuePlayerUiUpdate(generation, () => PlayPauseButton.Content = "▶");
+        };
+        _mediaPlayer.EndReached += (_, _) =>
+        {
+            var generation = Volatile.Read(ref _activeMediaGeneration);
+            Dispatcher.BeginInvoke(new Action(async () =>
+            {
+                try { await HandlePlayerEndedAsync(generation); }
+                catch (Exception ex) { LogPlayerControlFailure("callback EndReached", ex); }
+            }));
+        };
         ProjectsList.ItemsSource = _projects;
         _saveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
         _saveTimer.Tick += async (_, _) => { _saveTimer.Stop(); await SavePendingAsync(); };
@@ -181,6 +190,78 @@ public partial class MainWindow : Window
         LoadInspectionLayoutPreferences();
         _inspectionLayoutReady = true;
         ApplyInspectionLayout();
+    }
+
+    private void QueuePlayerUiUpdate(long generation, Action update)
+    {
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (_playerDisposed || generation <= 0 ||
+                generation != Volatile.Read(ref _activeMediaGeneration)) return;
+            try { update(); }
+            catch (Exception ex) { LogPlayerControlFailure("atualização de estado", ex); }
+        }));
+    }
+
+    private async Task HandlePlayerPlayingAsync(long generation)
+    {
+        if (_playerDisposed || generation <= 0) return;
+        await _playerLifecycleGate.WaitAsync();
+        float? rejectedRate = null;
+        try
+        {
+            if (_playerDisposed || _currentMedia is null ||
+                generation != Volatile.Read(ref _activeMediaGeneration)) return;
+            VideoEmptyState.Visibility = Visibility.Collapsed;
+            VideoLoadedBadge.Visibility = Visibility.Visible;
+            UpdatePlayerControlState();
+            if (!TryApplyPlaybackRate(_selectedPlaybackRate))
+            {
+                rejectedRate = _selectedPlaybackRate;
+                _selectedPlaybackRate = 1f;
+                TryApplyPlaybackRate(1f);
+                SelectSpeed(1f);
+            }
+            PlayPauseButton.Content = "❚❚";
+        }
+        finally { _playerLifecycleGate.Release(); }
+
+        if (rejectedRate is not null)
+            MessageBox.Show($"O formato deste vídeo não aceita {rejectedRate:0.##}x. A velocidade voltou para 1,0x.",
+                "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+
+    private async Task HandlePlayerEndedAsync(long generation)
+    {
+        if (_playerDisposed || generation <= 0) return;
+        await _playerLifecycleGate.WaitAsync();
+        try
+        {
+            if (_playerDisposed || _currentMedia is null ||
+                generation != Volatile.Read(ref _activeMediaGeneration)) return;
+            _lastKnownPlayerTime = Math.Max(_lastKnownPlayerTime, Math.Max(0, _mediaPlayer.Length));
+            PlayPauseButton.Content = "▶";
+            RefreshPlayerPositionUnsafe();
+        }
+        finally { _playerLifecycleGate.Release(); }
+    }
+
+    private void OnLibVlcLog(object? sender, LogEventArgs e)
+    {
+        if (e.Level < LogLevel.Warning) return;
+        var message = e.Message.Length <= 800 ? e.Message : e.Message[..800];
+        var path = _currentVideo?.FilePath ?? "(nenhum)";
+        var key = $"{path}|{e.Level}|{e.Module}|{message}";
+        if (!_reportedLibVlcLogs.TryAdd(key, 0)) return;
+        _logger.Error(
+            $"LibVLC nativo. Nivel={e.Level}; Modulo='{e.Module ?? "desconhecido"}'; Caminho='{path}'.",
+            new IOException(message));
+    }
+
+    private void LogPlayerControlFailure(string operation, Exception exception)
+    {
+        if (_playerDisposed) return;
+        _logger.Error($"Falha durante {operation} do player. Caminho='{_currentVideo?.FilePath}'.", exception);
     }
 
     private void LoadInspectionLayoutPreferences()
@@ -1017,15 +1098,24 @@ public partial class MainWindow : Window
     private async void OnClosing(object? sender, CancelEventArgs e)
     {
         SaveInspectionLayoutPreferences();
-        if (_closingAfterSave || (_currentProject is null && !_hasPendingChanges))
-        {
-            DisposePlayer();
-            return;
-        }
+        if (_closingAfterSave && _playerDisposed) return;
         e.Cancel = true;
-        if (!await FinalizeCurrentProjectAsync()) return;
-        _closingAfterSave = true;
-        _ = Dispatcher.BeginInvoke(Close);
+        if (_playerDisposeInProgress || _finalizationInProgress) return;
+
+        try
+        {
+            if ((_currentProject is not null || _hasPendingChanges) &&
+                !await FinalizeCurrentProjectAsync()) return;
+            await DisposePlayerAsync();
+            _closingAfterSave = true;
+            _ = Dispatcher.BeginInvoke(Close);
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Falha ao finalizar o player durante o fechamento.", ex);
+            MessageBox.Show("Não foi possível concluir o fechamento com segurança. Consulte o log.",
+                "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private async void ShareProject_Click(object sender, RoutedEventArgs e)
@@ -2427,18 +2517,48 @@ public partial class MainWindow : Window
         var token = cancellation.Token;
         _currentVideo = video;
         _playerErrorNotified = false;
+        _playerTelemetryErrorNotified = false;
         Media? pendingMedia = null;
         var lockTaken = false;
         try
         {
-            var available = await Task.Run(() => File.Exists(video.FilePath), token);
-            if (!available)
+            var preflightWatch = Stopwatch.StartNew();
+            MediaPreflightResult preflight;
+            using (var preflightCancellation = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
+                preflightCancellation.CancelAfter(TimeSpan.FromSeconds(15));
+                try
+                {
+                    preflight = await MediaPlaybackSafety.InspectAsync(video.FilePath, preflightCancellation.Token);
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested)
+                {
+                    ShowVideoState("O arquivo demorou para responder. Aguarde o Dropbox concluir a sincronização e tente novamente.",
+                        false, VideoSurfaceState.Error);
+                    _logger.Error(
+                        $"Timeout na pré-validação do vídeo. Caminho='{video.FilePath}'; Tempo={preflightWatch.ElapsedMilliseconds}ms.",
+                        new TimeoutException("O cabeçalho do arquivo não ficou disponível em 15 segundos."));
+                    return;
+                }
+            }
+
+            if (!preflight.CanOpen)
+            {
+                var state = preflight.FailureKind == MediaPreflightFailureKind.Missing
+                    ? VideoSurfaceState.Missing : VideoSurfaceState.Error;
                 if (generation == Volatile.Read(ref _mediaGeneration))
-                    ShowVideoState("O arquivo foi movido, renomeado ou está indisponível.", false,
-                        VideoSurfaceState.Missing);
+                    ShowVideoState(preflight.FailureReason ?? "O arquivo de vídeo não pôde ser validado.", false, state);
+                _logger.Error(
+                    $"Vídeo rejeitado antes do LibVLC. Caminho='{video.FilePath}'; Extensao='{Path.GetExtension(video.FilePath)}'; " +
+                    $"Tamanho={preflight.FileLength}; Motivo='{preflight.FailureReason}'; Tempo={preflightWatch.ElapsedMilliseconds}ms.",
+                    new InvalidDataException(preflight.FailureReason));
                 return;
             }
+
+            _logger.Info(
+                $"Pré-validação de vídeo concluída. Caminho='{video.FilePath}'; Extensao='{Path.GetExtension(video.FilePath)}'; " +
+                $"Tamanho={preflight.FileLength}; Tempo={preflightWatch.ElapsedMilliseconds}ms; Geracao={generation}.");
+
             await _playerLifecycleGate.WaitAsync(token);
             lockTaken = true;
             token.ThrowIfCancellationRequested();
@@ -2449,16 +2569,28 @@ public partial class MainWindow : Window
                 VideoSurfaceState.Loading);
             pendingMedia = new Media(_libVlc, video.FilePath, FromType.FromPath);
             token.ThrowIfCancellationRequested();
+
+            Interlocked.Exchange(ref _activeMediaGeneration, 0);
             var previousMedia = _currentMedia;
             try { _mediaPlayer.Stop(); }
             catch (Exception ex) { _logger.Error("Falha ao interromper a mídia anterior antes da troca.", ex); }
             _currentMedia = null;
             previousMedia?.Dispose();
-            if (!_mediaPlayer.Play(pendingMedia)) throw new InvalidOperationException("O player não conseguiu iniciar o vídeo.");
+
             _currentMedia = pendingMedia;
+            Interlocked.Exchange(ref _activeMediaGeneration, generation);
+            if (!_mediaPlayer.Play(pendingMedia))
+            {
+                Interlocked.Exchange(ref _activeMediaGeneration, 0);
+                _currentMedia = null;
+                throw new InvalidOperationException("O player não conseguiu iniciar o vídeo.");
+            }
+
             pendingMedia = null;
             _lastKnownPlayerTime = 0;
-            _logger.Info($"Vídeo aberto: {video.FilePath}");
+            _logger.Info(
+                $"Vídeo entregue ao LibVLC. Caminho='{video.FilePath}'; Extensao='{Path.GetExtension(video.FilePath)}'; " +
+                $"DecodificacaoHardware=False; Geracao={generation}.");
             if (seekTo is not null)
             {
                 SetPlayerOperationState(true);
@@ -2480,7 +2612,9 @@ public partial class MainWindow : Window
             if (generation == Volatile.Read(ref _mediaGeneration))
                 ShowVideoState("Verifique o arquivo, codec ou acesso ao local de armazenamento.", false,
                     VideoSurfaceState.Error);
-            _logger.Error($"Falha ao abrir vídeo. Caminho='{video.FilePath}', extensão='{Path.GetExtension(video.FilePath)}', backend='LibVLC'.", ex);
+            _logger.Error(
+                $"Falha ao abrir vídeo. Caminho='{video.FilePath}', extensão='{Path.GetExtension(video.FilePath)}', " +
+                $"backend='LibVLC', decodificaçãoHardware=False, geracao={generation}.", ex);
         }
         finally
         {
@@ -2498,8 +2632,12 @@ public partial class MainWindow : Window
 
     private async void RetryVideo_Click(object sender, RoutedEventArgs e)
     {
-        if (_currentVideo is not null && !_playerOperationInProgress)
-            await LoadVideoAsync(_currentVideo, MediaLoadIntent.Reload);
+        try
+        {
+            if (_currentVideo is not null && !_playerOperationInProgress)
+                await LoadVideoAsync(_currentVideo, MediaLoadIntent.Reload);
+        }
+        catch (Exception ex) { ShowError("Não foi possível recarregar o vídeo.", ex); }
     }
 
     private async Task WaitForMediaReadyAsync(CancellationToken cancellationToken = default)
@@ -2509,12 +2647,33 @@ public partial class MainWindow : Window
         if (_mediaPlayer.Length <= 0) throw new InvalidOperationException("Não foi possível obter a duração do vídeo.");
     }
 
-    private void PlayPause_Click(object sender, RoutedEventArgs e)
+    private async void PlayPause_Click(object sender, RoutedEventArgs e)
     {
         if (_currentVideo is null) return;
-        if (_currentMedia is null) { _ = LoadVideoAsync(_currentVideo, MediaLoadIntent.Reload); return; }
-        if (_mediaPlayer.IsPlaying) _mediaPlayer.SetPause(true);
-        else _mediaPlayer.Play();
+        try
+        {
+            if (_currentMedia is null)
+            {
+                await LoadVideoAsync(_currentVideo, MediaLoadIntent.Reload);
+                return;
+            }
+
+            await _playerLifecycleGate.WaitAsync();
+            try
+            {
+                if (_playerDisposed || _currentMedia is null) return;
+                if (_mediaPlayer.IsPlaying) _mediaPlayer.SetPause(true);
+                else if (!_mediaPlayer.Play())
+                    throw new InvalidOperationException("O LibVLC não conseguiu retomar a reprodução.");
+            }
+            finally { _playerLifecycleGate.Release(); }
+        }
+        catch (Exception ex)
+        {
+            ShowVideoState("Não foi possível alterar o estado da reprodução. Tente recarregar o vídeo.",
+                false, VideoSurfaceState.Error);
+            ShowError("Falha ao reproduzir ou pausar o vídeo.", ex);
+        }
     }
 
     private async void Back5_Click(object sender, RoutedEventArgs e) => await SeekRelativeAsync(-5, false);
@@ -2573,7 +2732,7 @@ public partial class MainWindow : Window
         finally { _seeking = false; }
     }
 
-    private void SpeedCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async void SpeedCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_updatingSpeedSelection) return;
         if (SpeedCombo.SelectedItem is not ComboBoxItem { Tag: string value } ||
@@ -2584,14 +2743,36 @@ public partial class MainWindow : Window
             _selectedPlaybackRate = rate;
             return;
         }
-        if (TryApplyPlaybackRate(rate))
+
+        try
         {
-            _selectedPlaybackRate = rate;
-            return;
+            await _playerLifecycleGate.WaitAsync();
+            try
+            {
+                if (_playerDisposed || _currentMedia is null)
+                {
+                    _selectedPlaybackRate = rate;
+                    return;
+                }
+                if (TryApplyPlaybackRate(rate))
+                {
+                    _selectedPlaybackRate = rate;
+                    return;
+                }
+            }
+            finally { _playerLifecycleGate.Release(); }
+
+            SelectSpeed(previousRate);
+            MessageBox.Show($"O formato deste vídeo não aceita {rate:0.##}x. A velocidade anterior foi mantida.",
+                "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
-        SelectSpeed(previousRate);
-        MessageBox.Show($"O formato deste vídeo não aceita {rate:0.##}x. A velocidade anterior foi mantida.",
-            "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Warning);
+        catch (Exception ex)
+        {
+            SelectSpeed(previousRate);
+            LogPlayerControlFailure("alteração de velocidade", ex);
+            MessageBox.Show("Não foi possível alterar a velocidade deste vídeo.",
+                "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private bool TryApplyPlaybackRate(float rate) =>
@@ -2693,7 +2874,7 @@ public partial class MainWindow : Window
             var reached = Math.Max(0, _mediaPlayer.Time);
             if (Math.Abs(reached - target) > 80)
                 throw new InvalidOperationException("O timestamp final não corresponde ao destino solicitado.");
-            RefreshPlayerPosition();
+            RefreshPlayerPositionUnsafe();
             return reached;
         }
         finally { _mediaPlayer.SetRate(_selectedPlaybackRate); }
@@ -2847,7 +3028,7 @@ public partial class MainWindow : Window
             var content = (UIElement)editor.Content;
             editor.Content = null;
             OccurrenceEditorHost.Content = content;
-            HideVideoSurfaceForOverlay();
+            await HideVideoSurfaceForOverlayAsync();
             OccurrenceEditorOverlay.Visibility = Visibility.Visible;
         }
         catch (Exception ex)
@@ -2855,7 +3036,7 @@ public partial class MainWindow : Window
             if (automaticCapture is { Status: CaptureStatus.Pending } && _currentProject is not null &&
                 _currentProject.Captures.Contains(automaticCapture))
                 _frameCaptureService.DeletePending(_currentProject, automaticCapture, IsReadOnly);
-            RestoreVideoSurfaceAfterOverlay();
+            await RestoreVideoSurfaceAfterOverlayAsync();
             _logger.Error("Falha ao salvar anomalia técnica.", ex);
             ShowError("Não foi possível salvar a anomalia.", ex);
         }
@@ -2868,7 +3049,7 @@ public partial class MainWindow : Window
         OccurrenceEditorOverlay.Visibility = Visibility.Collapsed;
         OccurrenceEditorHost.Content = null;
         _embeddedOccurrenceEditor = null;
-        RestoreVideoSurfaceAfterOverlay();
+        await RestoreVideoSurfaceAfterOverlayAsync();
         try
         {
             if (editor.RequestedVideoReferenceId is Guid videoId && editor.RequestedVideoTimestamp is not null)
@@ -2889,7 +3070,7 @@ public partial class MainWindow : Window
             RefreshCaptures();
             RefreshOccurrences();
             await SaveInspectionChangesAsync();
-            if (editor.ResumeVideoAfterSave && _currentMedia is not null) _mediaPlayer.Play();
+            if (editor.ResumeVideoAfterSave && _currentMedia is not null) await ResumePlaybackAsync();
         }
         catch (Exception ex)
         {
@@ -2939,25 +3120,47 @@ public partial class MainWindow : Window
         await Task.Delay(45);
     }
 
-    private void HideVideoSurfaceForOverlay()
+    private async Task HideVideoSurfaceForOverlayAsync()
     {
-        if (_currentMedia is not null) _mediaPlayer.SetPause(true);
-        VideoOverlayLayer.Visibility = Visibility.Collapsed;
-        PlayerControlsLayer.Visibility = Visibility.Collapsed;
-        VideoOverlayLayer.UpdateLayout();
-        VideoView.Visibility = Visibility.Collapsed;
-        VideoView.MediaPlayer = null;
-        VideoView.UpdateLayout();
+        await _playerLifecycleGate.WaitAsync();
+        try
+        {
+            if (_playerDisposed) return;
+            if (_currentMedia is not null) await PauseOnDisplayedFrameAsync();
+            VideoOverlayLayer.Visibility = Visibility.Collapsed;
+            PlayerControlsLayer.Visibility = Visibility.Collapsed;
+            VideoOverlayLayer.UpdateLayout();
+            VideoView.Visibility = Visibility.Collapsed;
+            VideoView.MediaPlayer = null;
+            VideoView.UpdateLayout();
+        }
+        finally { _playerLifecycleGate.Release(); }
     }
 
-    private void RestoreVideoSurfaceAfterOverlay()
+    private async Task RestoreVideoSurfaceAfterOverlayAsync()
     {
-        if (_playerDisposed) return;
-        VideoView.MediaPlayer = _mediaPlayer;
-        VideoView.Visibility = Visibility.Visible;
-        VideoOverlayLayer.Visibility = Visibility.Visible;
-        PlayerControlsLayer.Visibility = Visibility.Visible;
-        VideoView.UpdateLayout();
+        await _playerLifecycleGate.WaitAsync();
+        try
+        {
+            if (_playerDisposed) return;
+            VideoView.MediaPlayer = _mediaPlayer;
+            VideoView.Visibility = Visibility.Visible;
+            VideoOverlayLayer.Visibility = Visibility.Visible;
+            PlayerControlsLayer.Visibility = Visibility.Visible;
+            VideoView.UpdateLayout();
+        }
+        finally { _playerLifecycleGate.Release(); }
+    }
+
+    private async Task ResumePlaybackAsync()
+    {
+        await _playerLifecycleGate.WaitAsync();
+        try
+        {
+            if (!_playerDisposed && _currentMedia is not null && !_mediaPlayer.Play())
+                throw new InvalidOperationException("O LibVLC não conseguiu retomar a reprodução.");
+        }
+        finally { _playerLifecycleGate.Release(); }
     }
 
     private async Task<long> WaitForDisplayedFrameAsync(TimeSpan target)
@@ -3137,7 +3340,19 @@ public partial class MainWindow : Window
 
     private void RefreshPlayerPosition()
     {
-        if (_playerDisposed) return;
+        if (_playerDisposed || !_playerLifecycleGate.Wait(0)) return;
+        try { RefreshPlayerPositionUnsafe(); }
+        catch (Exception ex)
+        {
+            if (_playerTelemetryErrorNotified) return;
+            _playerTelemetryErrorNotified = true;
+            LogPlayerControlFailure("leitura da posição", ex);
+        }
+        finally { _playerLifecycleGate.Release(); }
+    }
+
+    private void RefreshPlayerPositionUnsafe()
+    {
         var duration = Math.Max(0, _mediaPlayer.Length);
         var current = _mediaPlayer.State == VLCState.Ended && duration > 0
             ? duration : Math.Max(0, _mediaPlayer.Time);
@@ -3152,11 +3367,14 @@ public partial class MainWindow : Window
 
     private void HandlePlayerError()
     {
-        if (_playerErrorNotified) return;
+        if (_playerErrorNotified || _playerDisposed || _currentMedia is null) return;
         _playerErrorNotified = true;
         ShowVideoState("Verifique o arquivo, codec ou acesso ao local de armazenamento.", false,
             VideoSurfaceState.Error);
-        _logger.Error($"Erro de codec, rede ou leitura. Caminho='{_currentVideo?.FilePath}', extensão='{Path.GetExtension(_currentVideo?.FilePath)}', backend='LibVLC'.",
+        _logger.Error(
+            $"Erro de codec, rede ou leitura. Caminho='{_currentVideo?.FilePath}', " +
+            $"extensão='{Path.GetExtension(_currentVideo?.FilePath)}', backend='LibVLC', " +
+            $"geracao={Volatile.Read(ref _activeMediaGeneration)}.",
             new IOException("O LibVLC informou falha durante a reprodução."));
     }
 
@@ -3168,6 +3386,7 @@ public partial class MainWindow : Window
         await _playerLifecycleGate.WaitAsync(cancellationToken);
         try
         {
+            Interlocked.Exchange(ref _activeMediaGeneration, 0);
             try { _mediaPlayer.Stop(); }
             catch (Exception ex) { _logger.Error("Falha ao interromper o player.", ex); }
             var media = _currentMedia;
@@ -3175,6 +3394,8 @@ public partial class MainWindow : Window
             try { media?.Dispose(); }
             catch (Exception ex) { _logger.Error("Falha ao descartar a mídia atual.", ex); }
             _lastKnownPlayerTime = 0;
+            _videoLoadInProgress = false;
+            _playerTelemetryErrorNotified = false;
             if (_currentSection is null)
                 ShowVideoState("Escolha um local e um trecho para continuar.", false);
             else if (_currentSection.VideoReferences.Count == 0)
@@ -3223,30 +3444,42 @@ public partial class MainWindow : Window
         VideoEmptyState.Visibility = Visibility.Visible;
     }
 
-    private void DisposePlayer()
+    private async Task DisposePlayerAsync()
     {
-        if (_playerDisposed) return;
+        if (_playerDisposed || _playerDisposeInProgress) return;
+        _playerDisposeInProgress = true;
         _inspectionLoadCts?.Cancel();
         _mediaLoadCts?.Cancel();
-        _playerDisposed = true;
         _playerTimer.Stop();
         _overviewRefreshTimer.Stop();
-        _playerLifecycleGate.Wait();
         try
         {
-            try { _mediaPlayer.Stop(); }
-            catch (Exception ex) { _logger.Error("Falha ao interromper o player durante o fechamento.", ex); }
-            try { _currentMedia?.Dispose(); }
-            catch (Exception ex) { _logger.Error("Falha ao descartar a mídia durante o fechamento.", ex); }
-            _currentMedia = null;
-            _mediaPlayer.Dispose();
-            _libVlc.Dispose();
+            await _playerLifecycleGate.WaitAsync();
+            try
+            {
+                _playerDisposed = true;
+                Interlocked.Increment(ref _mediaGeneration);
+                Interlocked.Exchange(ref _activeMediaGeneration, 0);
+                VideoView.MediaPlayer = null;
+                try { _mediaPlayer.Stop(); }
+                catch (Exception ex) { _logger.Error("Falha ao interromper o player durante o fechamento.", ex); }
+                try { _currentMedia?.Dispose(); }
+                catch (Exception ex) { _logger.Error("Falha ao descartar a mídia durante o fechamento.", ex); }
+                _currentMedia = null;
+                _libVlc.Log -= OnLibVlcLog;
+                try { _mediaPlayer.Dispose(); }
+                catch (Exception ex) { _logger.Error("Falha ao descartar o MediaPlayer.", ex); }
+                try { _libVlc.Dispose(); }
+                catch (Exception ex) { _logger.Error("Falha ao descartar o LibVLC.", ex); }
+            }
+            finally { _playerLifecycleGate.Release(); }
+
+            _inspectionLoadCts?.Dispose();
+            _inspectionLoadCts = null;
+            _mediaLoadCts?.Dispose();
+            _mediaLoadCts = null;
         }
-        finally { _playerLifecycleGate.Release(); }
-        _inspectionLoadCts?.Dispose();
-        _inspectionLoadCts = null;
-        _mediaLoadCts?.Dispose();
-        _mediaLoadCts = null;
+        finally { _playerDisposeInProgress = false; }
     }
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)

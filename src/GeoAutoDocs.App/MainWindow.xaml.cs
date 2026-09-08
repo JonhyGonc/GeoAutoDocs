@@ -2117,10 +2117,10 @@ public partial class MainWindow : Window
     private async void AddLocation_Click(object sender, RoutedEventArgs e)
     {
         if (_currentProject is null || IsReadOnly) return;
-        HideVideoSurfaceForOverlay();
+        await HideVideoSurfaceForOverlayAsync();
         string? name;
         try { name = NewLocationWindow.Show(this); }
-        finally { RestoreVideoSurfaceAfterOverlay(); }
+        finally { await RestoreVideoSurfaceAfterOverlayAsync(); }
         if (name is null) return;
 
         var location = new Location
@@ -2156,10 +2156,10 @@ public partial class MainWindow : Window
     private async void AddSection_Click(object sender, RoutedEventArgs e)
     {
         if (_currentProject is null || _currentLocation is null || IsReadOnly) return;
-        HideVideoSurfaceForOverlay();
+        await HideVideoSurfaceForOverlayAsync();
         NewSectionDraft? draft;
         try { draft = NewSectionWindow.Show(this); }
-        finally { RestoreVideoSurfaceAfterOverlay(); }
+        finally { await RestoreVideoSurfaceAfterOverlayAsync(); }
         if (draft is null) return;
 
         var section = new InspectionSection
@@ -2218,10 +2218,10 @@ public partial class MainWindow : Window
             MessageBox.Show("Reabra o trecho para editar.", "Trecho concluído", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        HideVideoSurfaceForOverlay();
+        await HideVideoSurfaceForOverlayAsync();
         NewSectionDraft? draft;
         try { draft = NewSectionWindow.Show(this, _currentSection); }
-        finally { RestoreVideoSurfaceAfterOverlay(); }
+        finally { await RestoreVideoSurfaceAfterOverlayAsync(); }
         if (draft is null) return;
 
         _currentSection.Name = draft.Name;
@@ -2299,7 +2299,7 @@ public partial class MainWindow : Window
         InspectionFormOverlay.Visibility = Visibility.Collapsed;
         NewLocationPanel.Visibility = Visibility.Collapsed;
         NewSectionPanel.Visibility = Visibility.Collapsed;
-        RestoreVideoSurfaceAfterOverlay();
+        QueueRestoreVideoSurfaceAfterOverlay();
     }
 
     private async void LocationsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -3150,6 +3150,15 @@ public partial class MainWindow : Window
             VideoView.UpdateLayout();
         }
         finally { _playerLifecycleGate.Release(); }
+    }
+
+    private void QueueRestoreVideoSurfaceAfterOverlay()
+    {
+        Dispatcher.BeginInvoke(new Action(async () =>
+        {
+            try { await RestoreVideoSurfaceAfterOverlayAsync(); }
+            catch (Exception ex) { LogPlayerControlFailure("restauração da superfície de vídeo", ex); }
+        }));
     }
 
     private async Task ResumePlaybackAsync()

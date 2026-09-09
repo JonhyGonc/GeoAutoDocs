@@ -18,14 +18,29 @@ public partial class AnomalyCatalogWindow : Window
         _readOnly = readOnly;
         EditorPanel.IsEnabled = !readOnly;
         NewButton.IsEnabled = UpButton.IsEnabled = DownButton.IsEnabled = !readOnly;
-        Loaded += async (_, _) => await ReloadAsync();
+        Loaded += CatalogWindow_Loaded;
+    }
+
+    private async void CatalogWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            ShowCatalogError("carregar o catálogo", ex);
+        }
     }
 
     private async Task ReloadAsync(Guid? select = null)
     {
+        var selectedId = select ?? _selected?.Id;
         _items = (await _service.ListAsync()).ToList();
         ApplyFilter();
-        if (select is not null) CatalogList.SelectedItem = _items.FirstOrDefault(x => x.Id == select);
+        var visibleItems = CatalogList.ItemsSource as IEnumerable<AnomalyDefinition> ?? [];
+        CatalogList.SelectedItem = visibleItems.FirstOrDefault(x => x.Id == selectedId) ??
+                                   visibleItems.FirstOrDefault();
     }
 
     private void ApplyFilter()
@@ -77,7 +92,12 @@ public partial class AnomalyCatalogWindow : Window
     private async void Active_Click(object sender, RoutedEventArgs e)
     {
         if (_selected is null || _readOnly) return;
-        await _service.SetActiveAsync(_selected.Id, !_selected.IsActive); await ReloadAsync(_selected.Id);
+        try
+        {
+            await _service.SetActiveAsync(_selected.Id, !_selected.IsActive);
+            await ReloadAsync(_selected.Id);
+        }
+        catch (Exception ex) { ShowCatalogError("alterar o estado da anomalia", ex); }
     }
 
     private async Task MoveAsync(int direction)
@@ -86,11 +106,21 @@ public partial class AnomalyCatalogWindow : Window
         var index = _items.FindIndex(x => x.Id == _selected.Id); var target = index + direction;
         if (index < 0 || target < 0 || target >= _items.Count) return;
         (_items[index], _items[target]) = (_items[target], _items[index]);
-        await _service.ReorderAsync(_items.Select(x => x.Id).ToList()); await ReloadAsync(_selected.Id);
+        await _service.ReorderAsync(_items.Select(x => x.Id).ToList());
+        await ReloadAsync(_selected.Id);
     }
 
-    private async void Up_Click(object sender, RoutedEventArgs e) => await MoveAsync(-1);
-    private async void Down_Click(object sender, RoutedEventArgs e) => await MoveAsync(1);
+    private async void Up_Click(object sender, RoutedEventArgs e)
+    {
+        try { await MoveAsync(-1); }
+        catch (Exception ex) { ShowCatalogError("reordenar o catálogo", ex); }
+    }
+
+    private async void Down_Click(object sender, RoutedEventArgs e)
+    {
+        try { await MoveAsync(1); }
+        catch (Exception ex) { ShowCatalogError("reordenar o catálogo", ex); }
+    }
     private void Template_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) => UpdatePreview();
     private void UpdatePreview()
     {
@@ -98,4 +128,8 @@ public partial class AnomalyCatalogWindow : Window
         try { _selected.Name = NameBox.Text; _selected.DescriptionTemplate = TemplateBox.Text; PreviewText.Text = AnomalyTemplate.Preview(_selected); }
         catch (Exception ex) { PreviewText.Text = ex.Message; }
     }
+
+    private static void ShowCatalogError(string operation, Exception exception) =>
+        MessageBox.Show($"Não foi possível {operation}.\n\n{exception.Message}",
+            "Catálogo de anomalias", MessageBoxButton.OK, MessageBoxImage.Warning);
 }

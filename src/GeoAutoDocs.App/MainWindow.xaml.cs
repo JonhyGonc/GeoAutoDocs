@@ -1580,8 +1580,29 @@ public partial class MainWindow : Window
 
     private bool IsReadOnly => _sharedSession?.IsReadOnly == true;
 
-    private void AnomalyCatalog_Click(object sender, RoutedEventArgs e) =>
-        new AnomalyCatalogWindow(_anomalyCatalogService, IsReadOnly) { Owner = this }.ShowDialog();
+    private async void AnomalyCatalog_Click(object sender, RoutedEventArgs e)
+    {
+        if (_playerDisposed || _playerDisposeInProgress) return;
+        AnomalyCatalogButton.IsEnabled = false;
+        HideVideoSurfaceForOverlay();
+        try
+        {
+            await Dispatcher.Yield(DispatcherPriority.Render);
+            var catalog = new AnomalyCatalogWindow(_anomalyCatalogService, IsReadOnly) { Owner = this };
+            catalog.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Falha ao abrir o catálogo de anomalias.", ex);
+            MessageBox.Show("Não foi possível abrir o catálogo de anomalias. Consulte o log.",
+                "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            RestoreVideoSurfaceAfterOverlay();
+            AnomalyCatalogButton.IsEnabled = true;
+        }
+    }
 
     private void RefreshOverview()
     {

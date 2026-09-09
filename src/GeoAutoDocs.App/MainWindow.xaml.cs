@@ -75,6 +75,7 @@ public partial class MainWindow : Window
     private long _inspectionLoadGeneration;
     private long _mediaGeneration;
     private long _activeMediaGeneration;
+    private long _videoSurfaceGeneration;
     private string _inspectionLoadStage = "idle";
     private readonly ConcurrentDictionary<string, byte> _reportedLibVlcLogs = new(StringComparer.Ordinal);
     private bool _playerErrorNotified;
@@ -2117,10 +2118,10 @@ public partial class MainWindow : Window
     private async void AddLocation_Click(object sender, RoutedEventArgs e)
     {
         if (_currentProject is null || IsReadOnly) return;
-        await HideVideoSurfaceForOverlayAsync();
+        HideVideoSurfaceForOverlay();
         string? name;
         try { name = NewLocationWindow.Show(this); }
-        finally { await RestoreVideoSurfaceAfterOverlayAsync(); }
+        finally { RestoreVideoSurfaceAfterOverlay(); }
         if (name is null) return;
 
         var location = new Location
@@ -2156,10 +2157,10 @@ public partial class MainWindow : Window
     private async void AddSection_Click(object sender, RoutedEventArgs e)
     {
         if (_currentProject is null || _currentLocation is null || IsReadOnly) return;
-        await HideVideoSurfaceForOverlayAsync();
+        HideVideoSurfaceForOverlay();
         NewSectionDraft? draft;
         try { draft = NewSectionWindow.Show(this); }
-        finally { await RestoreVideoSurfaceAfterOverlayAsync(); }
+        finally { RestoreVideoSurfaceAfterOverlay(); }
         if (draft is null) return;
 
         var section = new InspectionSection
@@ -2218,10 +2219,10 @@ public partial class MainWindow : Window
             MessageBox.Show("Reabra o trecho para editar.", "Trecho concluído", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        await HideVideoSurfaceForOverlayAsync();
+        HideVideoSurfaceForOverlay();
         NewSectionDraft? draft;
         try { draft = NewSectionWindow.Show(this, _currentSection); }
-        finally { await RestoreVideoSurfaceAfterOverlayAsync(); }
+        finally { RestoreVideoSurfaceAfterOverlay(); }
         if (draft is null) return;
 
         _currentSection.Name = draft.Name;
@@ -2299,7 +2300,7 @@ public partial class MainWindow : Window
         InspectionFormOverlay.Visibility = Visibility.Collapsed;
         NewLocationPanel.Visibility = Visibility.Collapsed;
         NewSectionPanel.Visibility = Visibility.Collapsed;
-        QueueRestoreVideoSurfaceAfterOverlay();
+        RestoreVideoSurfaceAfterOverlay();
     }
 
     private async void LocationsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -2963,31 +2964,42 @@ public partial class MainWindow : Window
     {
         if (_currentProject is null || _currentSection is null || IsReadOnly || IsSectionReviewLocked) return;
         Capture? automaticCapture = null;
+        var captureGateTaken = false;
         try
         {
-            if (_currentVideo is not null && _currentMedia is not null)
+            if (_currentVideo is not null && _currentMedia is not null &&
+                !_videoLoadInProgress && !_playerOperationInProgress)
             {
-                await _playerLifecycleGate.WaitAsync();
-                try
+                captureGateTaken = _playerLifecycleGate.Wait(0);
+                if (captureGateTaken && _currentMedia is not null)
                 {
-                    if (_currentMedia is not null)
-                    {
-                        await PauseOnDisplayedFrameAsync();
-                        var draft = await _frameCaptureService.CaptureCurrentFrameAsync(
-                            _currentProject, _currentSection, _currentVideo, _mediaPlayer, IsReadOnly);
-                        automaticCapture = _frameCaptureService.Accept(_currentProject, draft, IsReadOnly);
-                    }
+                    using var captureTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    await PauseOnDisplayedFrameAsync();
+                    var draft = await _frameCaptureService.CaptureCurrentFrameAsync(
+                        _currentProject, _currentSection, _currentVideo, _mediaPlayer, IsReadOnly,
+                        captureTimeout.Token);
+                    automaticCapture = _frameCaptureService.Accept(_currentProject, draft, IsReadOnly);
                 }
-                finally { _playerLifecycleGate.Release(); }
+                else if (!captureGateTaken)
+                {
+                    _logger.Info("Captura automática ignorada porque o player estava ocupado; " +
+                                 "o cadastro da anomalia será aberto sem imagem inicial.");
+                }
             }
-            await OpenOccurrenceEditorAsync(null, automaticCapture, automaticCapture);
         }
         catch (Exception ex)
         {
             if (automaticCapture is not null && automaticCapture.Status == CaptureStatus.Pending)
                 _frameCaptureService.DeletePending(_currentProject, automaticCapture, IsReadOnly);
-            ShowError("Não foi possível iniciar o cadastro no frame atual do vídeo.", ex);
+            automaticCapture = null;
+            _logger.Error("Falha na captura automática; o cadastro da anomalia continuará sem imagem inicial.", ex);
         }
+        finally
+        {
+            if (captureGateTaken) _playerLifecycleGate.Release();
+        }
+
+        await OpenOccurrenceEditorAsync(null, automaticCapture, automaticCapture);
     }
 
     private async void CreateOccurrenceFromPending_Click(object sender, RoutedEventArgs e)
@@ -3028,7 +3040,7 @@ public partial class MainWindow : Window
             var content = (UIElement)editor.Content;
             editor.Content = null;
             OccurrenceEditorHost.Content = content;
-            await HideVideoSurfaceForOverlayAsync();
+            HideVideoSurfaceForOverlay();
             OccurrenceEditorOverlay.Visibility = Visibility.Visible;
         }
         catch (Exception ex)
@@ -3036,7 +3048,7 @@ public partial class MainWindow : Window
             if (automaticCapture is { Status: CaptureStatus.Pending } && _currentProject is not null &&
                 _currentProject.Captures.Contains(automaticCapture))
                 _frameCaptureService.DeletePending(_currentProject, automaticCapture, IsReadOnly);
-            await RestoreVideoSurfaceAfterOverlayAsync();
+            RestoreVideoSurfaceAfterOverlay();
             _logger.Error("Falha ao salvar anomalia técnica.", ex);
             ShowError("Não foi possível salvar a anomalia.", ex);
         }
@@ -3049,7 +3061,7 @@ public partial class MainWindow : Window
         OccurrenceEditorOverlay.Visibility = Visibility.Collapsed;
         OccurrenceEditorHost.Content = null;
         _embeddedOccurrenceEditor = null;
-        await RestoreVideoSurfaceAfterOverlayAsync();
+        RestoreVideoSurfaceAfterOverlay();
         try
         {
             if (editor.RequestedVideoReferenceId is Guid videoId && editor.RequestedVideoTimestamp is not null)
@@ -3120,45 +3132,57 @@ public partial class MainWindow : Window
         await Task.Delay(45);
     }
 
-    private async Task HideVideoSurfaceForOverlayAsync()
+    private void HideVideoSurfaceForOverlay()
     {
-        await _playerLifecycleGate.WaitAsync();
-        try
-        {
-            if (_playerDisposed) return;
-            if (_currentMedia is not null) await PauseOnDisplayedFrameAsync();
-            VideoOverlayLayer.Visibility = Visibility.Collapsed;
-            PlayerControlsLayer.Visibility = Visibility.Collapsed;
-            VideoOverlayLayer.UpdateLayout();
-            VideoView.Visibility = Visibility.Collapsed;
-            VideoView.MediaPlayer = null;
-            VideoView.UpdateLayout();
-        }
-        finally { _playerLifecycleGate.Release(); }
+        var generation = Interlocked.Increment(ref _videoSurfaceGeneration);
+        VideoOverlayLayer.Visibility = Visibility.Collapsed;
+        PlayerControlsLayer.Visibility = Visibility.Collapsed;
+        VideoView.Visibility = Visibility.Collapsed;
+        VideoView.UpdateLayout();
+        _ = PauseAndDetachVideoSurfaceAsync(generation);
     }
 
-    private async Task RestoreVideoSurfaceAfterOverlayAsync()
+    private async Task PauseAndDetachVideoSurfaceAsync(long generation)
     {
-        await _playerLifecycleGate.WaitAsync();
         try
         {
-            if (_playerDisposed) return;
-            VideoView.MediaPlayer = _mediaPlayer;
-            VideoView.Visibility = Visibility.Visible;
-            VideoOverlayLayer.Visibility = Visibility.Visible;
-            PlayerControlsLayer.Visibility = Visibility.Visible;
-            VideoView.UpdateLayout();
+            await _playerLifecycleGate.WaitAsync();
+            try
+            {
+                if (_playerDisposed || generation != Volatile.Read(ref _videoSurfaceGeneration)) return;
+                if (_currentMedia is not null) _mediaPlayer.SetPause(true);
+                VideoView.MediaPlayer = null;
+                VideoView.UpdateLayout();
+            }
+            finally { _playerLifecycleGate.Release(); }
         }
-        finally { _playerLifecycleGate.Release(); }
+        catch (Exception ex) { LogPlayerControlFailure("ocultação da superfície de vídeo", ex); }
     }
 
-    private void QueueRestoreVideoSurfaceAfterOverlay()
+    private void RestoreVideoSurfaceAfterOverlay()
     {
-        Dispatcher.BeginInvoke(new Action(async () =>
+        var generation = Interlocked.Increment(ref _videoSurfaceGeneration);
+        VideoView.Visibility = Visibility.Visible;
+        VideoOverlayLayer.Visibility = Visibility.Visible;
+        PlayerControlsLayer.Visibility = Visibility.Visible;
+        VideoView.UpdateLayout();
+        _ = AttachVideoSurfaceAsync(generation);
+    }
+
+    private async Task AttachVideoSurfaceAsync(long generation)
+    {
+        try
         {
-            try { await RestoreVideoSurfaceAfterOverlayAsync(); }
-            catch (Exception ex) { LogPlayerControlFailure("restauração da superfície de vídeo", ex); }
-        }));
+            await _playerLifecycleGate.WaitAsync();
+            try
+            {
+                if (_playerDisposed || generation != Volatile.Read(ref _videoSurfaceGeneration)) return;
+                VideoView.MediaPlayer = _mediaPlayer;
+                VideoView.UpdateLayout();
+            }
+            finally { _playerLifecycleGate.Release(); }
+        }
+        catch (Exception ex) { LogPlayerControlFailure("restauração da superfície de vídeo", ex); }
     }
 
     private async Task ResumePlaybackAsync()

@@ -549,7 +549,59 @@
                     <Grid Margin="0,6,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="260"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <StackPanel Margin="0,0,14,0"><DockPanel Margin="0,0,0,10"><Button x:Name="NewReportButton" DockPanel.Dock="Right" Content="+  Novo relatório" Style="{StaticResource PrimaryButtonStyle}" Click="NewReport_Click"/><TextBlock Text="Relatórios" Style="{StaticResource SectionTitleTextStyle}" FontSize="13" VerticalAlignment="Center"/></DockPanel>
                             <ComboBox x:Name="ReportsCombo" Visibility="Collapsed" DisplayMemberPath="DisplayCode" SelectionChanged="ReportsCombo_SelectionChanged"/>
-                            <Grid><ListBox x:Name="ReportsList" SelectionChanged="ReportsList_SelectionChanged" BorderThickness="0"><ListBox.ItemTemplate><DataTemplate><Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="7" Padding="13" Margin="0,0,0,8"><StackPanel><TextBlock Text="{Binding DisplayCode}" FontSize="16" FontWeight="SemiBold"/><TextBlock Text="{Binding ReportDate, StringFormat={}{0:dd/MM/yyyy}, TargetNullValue='Data não informada'}" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0"/><TextBlock Text="{Binding SectionLinks.Count, StringFormat={}{0} trecho(s)}" Foreground="{StaticResource TextMutedBrush}"/><TextBlock Margin="0,5,0,0"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Text" Value="Finalizado"/><Setter Property="Foreground" Value="{StaticResource SuccessBrush}"/><Style.Triggers><DataTrigger Binding="{Binding GeneratedReportPath}" Value="{x:Null}"><Setter Property="Text" Value="Em andamento"/><Setter Property="Foreground" Value="{StaticResource WarningBrush}"/></DataTrigger><DataTrigger Binding="{Binding GeneratedReportPath}" Value=""><Setter Property="Text" Value="Em andamento"/><Setter Property="Foreground" Value="{StaticResource WarningBrush}"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock><TextBlock Text="Abrir preparação" Foreground="{StaticResource PrimaryBrush}" Margin="0,7,0,0"/></StackPanel></Border></DataTemplate></ListBox.ItemTemplate></ListBox>
+                            <Grid>
+                                <ListBox x:Name="ReportsList" SelectionChanged="ReportsList_SelectionChanged" BorderThickness="0">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="7" Padding="13" Margin="0,0,0,8">
+                                                <Grid>
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                    </Grid.RowDefinitions>
+                                                    <TextBlock Text="{Binding DisplayCode}" FontSize="16" FontWeight="SemiBold"/>
+                                                    <TextBlock Grid.Row="1" Text="{Binding ReportDate, StringFormat={}{0:dd/MM/yyyy}, TargetNullValue='Data não informada'}"
+                                                               Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0"/>
+                                                    <TextBlock Grid.Row="2" Text="{Binding SectionLinks.Count, StringFormat={}{0} trecho(s)}"
+                                                               Foreground="{StaticResource TextMutedBrush}"/>
+                                                    <TextBlock Grid.Row="3" Margin="0,5,0,0">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Text" Value="Finalizado"/>
+                                                                <Setter Property="Foreground" Value="{StaticResource SuccessBrush}"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding GeneratedReportPath}" Value="{x:Null}">
+                                                                        <Setter Property="Text" Value="Em andamento"/>
+                                                                        <Setter Property="Foreground" Value="{StaticResource WarningBrush}"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding GeneratedReportPath}" Value="">
+                                                                        <Setter Property="Text" Value="Em andamento"/>
+                                                                        <Setter Property="Foreground" Value="{StaticResource WarningBrush}"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                    <Grid Grid.Row="4" Margin="0,7,0,0">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="Abrir preparação" Foreground="{StaticResource PrimaryBrush}"
+                                                                   VerticalAlignment="Center"/>
+                                                        <Button Grid.Column="1" Content="Excluir" Style="{StaticResource DangerButtonStyle}"
+                                                                Tag="{Binding Id}" Click="DeleteReportCard_Click"
+                                                                MinWidth="68" Height="26" Padding="8,2" Margin="8,0,0,0"
+                                                                ToolTip="Excluir este relatório"/>
+                                                    </Grid>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
                                 <StackPanel x:Name="ReportsEmptyState" VerticalAlignment="Center" Visibility="Collapsed"><TextBlock Text="Nenhum relatório criado" FontWeight="SemiBold" HorizontalAlignment="Center"/><TextBlock Text="Crie o primeiro relatório para preparar o documento." Foreground="{StaticResource TextMutedBrush}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,4,0,0"/><Button Content="Novo relatório" HorizontalAlignment="Center" Margin="0,10,0,0" Click="NewReport_Click"/></StackPanel>
                             </Grid>
                         </StackPanel>

@@ -32,6 +32,9 @@ public partial class MainWindow : Window
     private readonly IAnomalyCatalogService _anomalyCatalogService;
     private readonly InspectionExchangeService _inspectionExchangeService;
     private readonly IInspectionTransport _geoAutoEngineTransport;
+    private readonly IInspectionCorrectionChannel? _correctionChannel;
+    private readonly InspectionCorrectionService _correctionService = new();
+    private readonly SemaphoreSlim _correctionReviewGate = new(1, 1);
     private BackupStatus _backupStatus;
     private readonly LibVLC _libVlc;
     private readonly MediaPlayer _mediaPlayer;
@@ -115,6 +118,8 @@ public partial class MainWindow : Window
         _anomalyCatalogService = anomalyCatalogService;
         _inspectionExchangeService = inspectionExchangeService;
         _geoAutoEngineTransport = geoAutoEngineTransport;
+        _correctionChannel = geoAutoEngineTransport as IInspectionCorrectionChannel;
+        _correctionChannel?.SetCorrectionHandler(ReceiveCorrectionsAsync);
         _backupStatus = backupStatus;
         LibVLCSharp.Shared.Core.Initialize();
         _libVlc = new LibVLC(MediaPlaybackSafety.LibVlcOptions.ToArray());
@@ -1213,6 +1218,8 @@ public partial class MainWindow : Window
         {
             if ((_currentProject is not null || _hasPendingChanges) &&
                 !await FinalizeCurrentProjectAsync()) return;
+            if (_correctionChannel is not null)
+                await _correctionChannel.StopCorrectionSessionAsync();
             await DisposePlayerAsync();
             _closingAfterSave = true;
             _ = Dispatcher.BeginInvoke(Close);
@@ -1685,6 +1692,191 @@ public partial class MainWindow : Window
     }
 
     private bool IsReadOnly => _sharedSession?.IsReadOnly == true;
+
+    private Task<InspectionCorrectionAcknowledgement> ReceiveCorrectionsAsync(
+        InspectionCorrectionPackage package, CancellationToken cancellationToken)
+    {
+        if (Dispatcher.CheckAccess())
+            return ReviewAndApplyCorrectionsAsync(package, cancellationToken);
+
+        return Dispatcher.InvokeAsync(
+            () => ReviewAndApplyCorrectionsAsync(package, cancellationToken),
+            DispatcherPriority.Normal, cancellationToken).Task.Unwrap();
+    }
+
+    private async Task<InspectionCorrectionAcknowledgement> ReviewAndApplyCorrectionsAsync(
+        InspectionCorrectionPackage package, CancellationToken cancellationToken)
+    {
+        await _correctionReviewGate.WaitAsync(cancellationToken);
+        try
+        {
+            var requestedCount = package.Corrections?.Count ?? 0;
+            _logger.Info($"CorrectionPush recebido. ReportId='{package.ReportId}'; " +
+                         $"Correções={requestedCount}.");
+
+            if (_closingAfterSave || _finalizationInProgress)
+                return CorrectionFailure(package, "O GeoAutoDocs está finalizando o projeto.");
+            if (_currentProject is null)
+            {
+                MessageBox.Show("Foram recebidas correções do GeoAutoEngine, mas nenhum projeto está aberto.",
+                    "Correções do GeoAutoEngine", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return CorrectionFailure(package, "Nenhum projeto está aberto no GeoAutoDocs.");
+            }
+            if (IsReadOnly)
+            {
+                MessageBox.Show("Foram recebidas correções, mas o projeto está aberto somente para leitura.",
+                    "Correções do GeoAutoEngine", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return CorrectionFailure(package, "O projeto está aberto somente para leitura.");
+            }
+
+            InspectionCorrectionPlan plan;
+            try
+            {
+                plan = _correctionService.Prepare(_currentProject, package);
+            }
+            catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException)
+            {
+                _logger.Error("Pacote de correções rejeitado durante a validação.", ex);
+                MessageBox.Show(ex.Message, "Correções do GeoAutoEngine",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return CorrectionFailure(package, ex.Message);
+            }
+
+            if (plan.Items.Count == 0)
+            {
+                MessageBox.Show("O GeoAutoEngine enviou um pacote sem ocorrências alteradas.",
+                    "Correções do GeoAutoEngine", MessageBoxButton.OK, MessageBoxImage.Information);
+                return CorrectionFailure(package, "O pacote não contém correções.");
+            }
+
+            if (plan.Items.All(x => x.Status == InspectionCorrectionResolutionStatus.Unchanged))
+            {
+                MessageBox.Show("As correções recebidas já estão aplicadas neste projeto.",
+                    "Correções do GeoAutoEngine", MessageBoxButton.OK, MessageBoxImage.Information);
+                return CorrectionAcknowledgement(plan, "Success", 0,
+                    "Os valores recebidos já estavam atualizados.");
+            }
+
+            HideVideoSurfaceForOverlay();
+            bool approved;
+            try
+            {
+                await Dispatcher.Yield(DispatcherPriority.Render);
+                var review = new CorrectionReviewWindow(plan.Items) { Owner = this };
+                approved = review.ShowDialog() == true;
+            }
+            finally
+            {
+                RestoreVideoSurfaceAfterOverlay();
+            }
+
+            if (!approved)
+                return CorrectionAcknowledgement(plan, "Failure", 0,
+                    "As correções foram canceladas pelo usuário.", cancelled: true);
+            if (plan.ApplicableCount == 0)
+                return CorrectionAcknowledgement(plan, "Failure", 0,
+                    "Nenhuma correção válida pôde ser aplicada.");
+
+            var snapshots = _correctionService.Apply(plan);
+            MarkPendingChanges();
+            if (!await SavePendingAsync())
+            {
+                _correctionService.Rollback(snapshots);
+                MarkPendingChanges();
+                RefreshCorrectionAffectedViews(plan);
+                _logger.Info($"CorrectionPush revertido após falha de salvamento. " +
+                             $"ReportId='{package.ReportId}'; Correções={requestedCount}.");
+                return CorrectionAcknowledgement(plan, "Failure", 0,
+                    "As correções foram revertidas porque o projeto não pôde ser salvo.",
+                    saveFailed: true);
+            }
+
+            RefreshCorrectionAffectedViews(plan);
+            var status = plan.InvalidCount > 0 ? "Partial" : "Success";
+            var message = status == "Partial"
+                ? $"{snapshots.Count} correção(ões) aplicada(s); {plan.InvalidCount} item(ns) não foi(ram) localizado(s) ou validado(s)."
+                : $"{snapshots.Count} correção(ões) aplicada(s) e salva(s).";
+            _logger.Info($"Correções do GeoAutoEngine aplicadas. ReportId='{package.ReportId}'; " +
+                         $"Status='{status}'; Aplicadas={snapshots.Count}; Inválidas={plan.InvalidCount}.");
+            return CorrectionAcknowledgement(plan, status, snapshots.Count, message);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return CorrectionFailure(package, "A revisão foi cancelada porque o canal foi encerrado.");
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            _logger.Error("Falha ao revisar ou aplicar correções do GeoAutoEngine.", ex);
+            return CorrectionFailure(package, "O GeoAutoDocs falhou ao revisar ou aplicar as correções.");
+        }
+        finally
+        {
+            _correctionReviewGate.Release();
+        }
+    }
+
+    private void RefreshCorrectionAffectedViews(InspectionCorrectionPlan plan)
+    {
+        if (_currentSection is not null &&
+            plan.Items.Any(x => x.CanApply && x.Correction.SectionId == _currentSection.Id))
+            RefreshOccurrences();
+        ReportsList.Items.Refresh();
+        RefreshReportReview();
+        ScheduleOverviewRefresh();
+    }
+
+    private static InspectionCorrectionAcknowledgement CorrectionFailure(
+        InspectionCorrectionPackage package, string message) => new()
+    {
+        Accepted = false,
+        Status = "Failure",
+        Message = message,
+        RequestedCount = package.Corrections?.Count ?? 0,
+        AppliedCount = 0,
+        Results = (package.Corrections ?? []).Select(x => new InspectionCorrectionItemAcknowledgement
+        {
+            SectionId = x.SectionId,
+            OccurrenceId = x.OccurrenceId,
+            Applied = false,
+            Status = "Failure",
+            Message = message
+        }).ToList()
+    };
+
+    private static InspectionCorrectionAcknowledgement CorrectionAcknowledgement(
+        InspectionCorrectionPlan plan, string status, int appliedCount, string message,
+        bool cancelled = false, bool saveFailed = false) => new()
+    {
+        Accepted = status is "Success" or "Partial",
+        Status = status,
+        Message = message,
+        RequestedCount = plan.Items.Count,
+        AppliedCount = appliedCount,
+        Results = plan.Items.Select(item =>
+        {
+            var applied = status is "Success" or "Partial" && item.CanApply;
+            var itemStatus = applied ? "Applied" : item.Status switch
+            {
+                InspectionCorrectionResolutionStatus.Unchanged => "Unchanged",
+                InspectionCorrectionResolutionStatus.NotFound => "NotFound",
+                InspectionCorrectionResolutionStatus.Invalid => "Invalid",
+                _ when cancelled => "Cancelled",
+                _ when saveFailed => "SaveFailed",
+                _ => "NotApplied"
+            };
+            return new InspectionCorrectionItemAcknowledgement
+            {
+                SectionId = item.Correction.SectionId,
+                OccurrenceId = item.Correction.OccurrenceId,
+                Applied = applied,
+                Status = itemStatus,
+                Message = applied ? "Correção aplicada." :
+                    cancelled ? "Cancelada pelo usuário." :
+                    saveFailed && item.CanApply ? "Revertida após falha de salvamento." :
+                    item.Message
+            };
+        }).ToList()
+    };
 
     private async void AnomalyCatalog_Click(object sender, RoutedEventArgs e)
     {

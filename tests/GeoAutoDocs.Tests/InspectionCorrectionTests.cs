@@ -129,8 +129,8 @@ public sealed class InspectionCorrectionTests : IAsyncLifetime
         Assert.Single(snapshots);
         Assert.Equal("TEXTO CORRIGIDO", occurrence.EffectiveDescription);
         Assert.Single(section.Occurrences);
-        var missing = Assert.Single(plan.Items.Where(x =>
-            x.Status == InspectionCorrectionResolutionStatus.NotFound));
+        var missing = Assert.Single(plan.Items, x =>
+            x.Status == InspectionCorrectionResolutionStatus.NotFound);
         Assert.Equal(missingId, missing.Correction.OccurrenceId);
     }
 

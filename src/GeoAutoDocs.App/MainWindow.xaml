@@ -538,7 +538,25 @@
                                 </Grid>
                             </Border>
 
-                            <Expander Grid.Row="1" Margin="0,10,0,0" Padding="10,6" Background="{StaticResource SurfaceMutedBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" IsExpanded="False"><Expander.Header><StackPanel Orientation="Horizontal"><TextBlock Text="Capturas pendentes" FontWeight="SemiBold"/><TextBlock x:Name="PendingCapturesSummary" Foreground="{StaticResource TextMutedBrush}" Margin="8,0,0,0"/></StackPanel></Expander.Header>
+                            <Expander x:Name="PendingCapturesExpander" Grid.Row="1" Margin="0,10,0,0" Padding="10,6" Background="{StaticResource SurfaceMutedBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" IsExpanded="False" ToolTip="Clique no cabeçalho para mostrar ou abaixar a tela de capturas">
+                                <Expander.Header>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Capturas pendentes" FontWeight="SemiBold"/>
+                                        <TextBlock x:Name="PendingCapturesSummary" Foreground="{StaticResource TextMutedBrush}" Margin="8,0,0,0"/>
+                                        <TextBlock Margin="14,0,0,0" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Text" Value="Mostrar"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsExpanded, ElementName=PendingCapturesExpander}" Value="True">
+                                                            <Setter Property="Text" Value="Abaixar"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Expander.Header>
                                 <ListBox x:Name="CapturesList" MaxHeight="160" ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"><ListBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ListBox.ItemsPanel><ListBox.ItemTemplate><DataTemplate><Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="6" Padding="6" Margin="4" Width="180"><StackPanel><Image Source="{Binding Thumbnail}" Height="80" Stretch="Uniform" Loaded="ThumbnailImage_Loaded"/><TextBlock Text="{Binding Timestamp}" FontFamily="Consolas" FontWeight="SemiBold"/><TextBlock Text="{Binding VideoName}" TextTrimming="CharacterEllipsis" Foreground="{StaticResource TextSecondaryBrush}"/><WrapPanel><Button Content="Cadastrar" Tag="{Binding Id}" Click="CreateOccurrenceFromPending_Click"/><Button Content="Ir ao vídeo" Tag="{Binding Id}" Click="GoToCapture_Click"/><Button Content="Excluir" Style="{StaticResource DangerButtonStyle}" Tag="{Binding Id}" Click="DeleteCapture_Click"/></WrapPanel></StackPanel></Border></DataTemplate></ListBox.ItemTemplate></ListBox>
                             </Expander>
                             </Grid>

@@ -52,7 +52,7 @@ public partial class App : Application
             }
             var exchangeSerializer = new InspectionExchangeSerializer();
             var exchangeService = new InspectionExchangeService(exchangeSerializer);
-            var geoAutoEngineTransport = new NamedPipeInspectionTransport(exchangeSerializer);
+            var geoAutoEngineTransport = new NamedPipeInspectionTransport(exchangeSerializer, logger: _logger);
             var window = new MainWindow(store, new WordReportService(paths, exchangeService), new SharedProjectService(paths), _logger,
                 new FrameCaptureService(paths, _logger), new OccurrenceService(paths, _logger),
                 new AnomalyCatalogService(paths), exchangeService, geoAutoEngineTransport, availableBackup);

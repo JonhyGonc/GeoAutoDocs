@@ -170,6 +170,8 @@ public sealed class InspectionTransportTests : IDisposable
     public async Task CancellationTokenInterruptsPendingAcknowledgement()
     {
         var pipeName = NewPipeName();
+        var pushReceived = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
         await using var server = CreateServer(pipeName);
         var serverTask = Task.Run(async () =>
         {
@@ -177,12 +179,16 @@ public sealed class InspectionTransportTests : IDisposable
             var hello = await InspectionPipeProtocol.ReadFrameAsync(server);
             await WriteHelloAckAsync(server, hello.RequestId);
             _ = await InspectionPipeProtocol.ReadFrameAsync(server);
+            pushReceived.SetResult();
             await Task.Delay(300);
         });
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(75));
+        using var cancellation = new CancellationTokenSource();
 
-        var result = await NewTransport(pipeName, responseMilliseconds: 1000)
+        var sendTask = NewTransport(pipeName, responseMilliseconds: 1000)
             .SendAsync(NewDocument(), cancellation.Token);
+        await pushReceived.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        cancellation.Cancel();
+        var result = await sendTask;
         await serverTask;
 
         Assert.Equal(InspectionTransportStatus.Cancelled, result.Status);

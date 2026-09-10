@@ -58,6 +58,7 @@ public partial class MainWindow : Window
     private bool _finalizationInProgress;
     private bool _closingAfterSave;
     private bool _saveErrorNotified;
+    private bool _reportDeletionInProgress;
     private bool _seeking;
     private bool _playerOperationInProgress;
     private bool _videoLoadInProgress;
@@ -867,22 +868,127 @@ public partial class MainWindow : Window
 
     private async void DeleteReport_Click(object sender, RoutedEventArgs e)
     {
-        if (_currentProject is null || _currentReport is null || IsReadOnly) return;
-        var report = _currentReport;
-        if (MessageBox.Show($"Excluir o relatório '{report.DisplayCode}'? O arquivo DOCX já gerado será preservado.",
-                "Excluir relatório", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        _currentProject.Reports.Remove(report);
-        _currentReport = _currentProject.Reports.OrderBy(x => x.Order).FirstOrDefault();
-        _loadingFields = true;
+        try
+        {
+            if (_currentReport is not null) await DeleteReportAsync(_currentReport);
+        }
+        catch (Exception ex)
+        {
+            ShowError("Não foi possível excluir o relatório.", ex);
+        }
+    }
+
+    private async void DeleteReportCard_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        try
+        {
+            if (_currentProject is null || sender is not Button { Tag: Guid reportId }) return;
+            var report = _currentProject.Reports.SingleOrDefault(x => x.Id == reportId);
+            if (report is not null) await DeleteReportAsync(report);
+        }
+        catch (Exception ex)
+        {
+            ShowError("Não foi possível excluir o relatório selecionado.", ex);
+        }
+    }
+
+    private async Task DeleteReportAsync(Report report)
+    {
+        var project = _currentProject;
+        if (project is null || _reportDeletionInProgress || !project.Reports.Contains(report)) return;
+        if (IsReadOnly)
+        {
+            MessageBox.Show("Este projeto está aberto somente para leitura. Não é possível excluir relatórios.",
+                "Excluir relatório", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (MessageBox.Show($"Excluir o relatório '{report.DisplayCode}'?\n\n" +
+                            "Os dados de preparação serão removidos do projeto. O arquivo DOCX já gerado será preservado.",
+                "Excluir relatório", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        ApplyFieldsToModel();
+        var originalIndex = project.Reports.IndexOf(report);
+        var originalSelection = _currentReport;
+        _reportDeletionInProgress = true;
+        ReportsList.IsEnabled = false;
+        NewReportButton.IsEnabled = false;
+        HeaderNewReportButton.IsEnabled = false;
+        DeleteReportButton.IsEnabled = false;
+
+        try
+        {
+            project.Reports.RemoveAt(originalIndex);
+            var remaining = project.Reports.OrderBy(x => x.Order).ToList();
+            var nextSelection = originalSelection is not null && originalSelection.Id != report.Id &&
+                                remaining.Contains(originalSelection)
+                ? originalSelection
+                : remaining.ElementAtOrDefault(Math.Min(originalIndex, Math.Max(0, remaining.Count - 1)));
+            RefreshReportListSelection(nextSelection);
+            DeleteReportButton.IsEnabled = false;
+
+            MarkPendingChanges();
+            if (await SavePendingAsync())
+            {
+                _logger.Info($"Relatório excluído. ProjetoId='{project.Id}'; RelatórioId='{report.Id}'; " +
+                             $"Código='{report.DisplayCode}'; ArquivoGeradoPreservado='{report.GeneratedReportPath}'.");
+                return;
+            }
+
+            project.Reports.Insert(Math.Min(originalIndex, project.Reports.Count), report);
+            RefreshReportListSelection(originalSelection ?? report);
+            MarkPendingChanges();
+            _logger.Error($"Exclusão do relatório revertida após falha de salvamento. " +
+                          $"ProjetoId='{project.Id}'; RelatórioId='{report.Id}'.");
+            MessageBox.Show("A exclusão não foi concluída porque o projeto não pôde ser salvo. " +
+                            "O relatório foi restaurado na lista.",
+                "Excluir relatório", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        catch
+        {
+            if (!project.Reports.Contains(report))
+                project.Reports.Insert(Math.Min(originalIndex, project.Reports.Count), report);
+            RefreshReportListSelection(originalSelection ?? report);
+            MarkPendingChanges();
+            throw;
+        }
+        finally
+        {
+            _reportDeletionInProgress = false;
+            ReportsList.IsEnabled = true;
+            var canEdit = _currentProject is not null && !IsReadOnly;
+            NewReportButton.IsEnabled = canEdit;
+            HeaderNewReportButton.IsEnabled = canEdit;
+            DeleteReportButton.IsEnabled = canEdit && _currentReport is not null;
+        }
+    }
+
+    private void RefreshReportListSelection(Report? selectedReport)
+    {
+        if (_currentProject is null) return;
         var reports = _currentProject.Reports.OrderBy(x => x.Order).ToList();
-        ReportsCombo.ItemsSource = reports;
-        ReportsList.ItemsSource = reports;
-        ReportsCombo.SelectedItem = _currentReport;
-        ReportsList.SelectedItem = _currentReport;
-        ReportsEmptyState.Visibility = reports.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        _loadingFields = false;
+        _currentReport = selectedReport is not null && reports.Contains(selectedReport)
+            ? selectedReport
+            : reports.FirstOrDefault();
+
+        _loadingFields = true;
+        try
+        {
+            ReportsCombo.ItemsSource = reports;
+            ReportsList.ItemsSource = reports;
+            ReportsCombo.SelectedItem = _currentReport;
+            ReportsList.SelectedItem = _currentReport;
+            ReportsEmptyState.Visibility = reports.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        finally
+        {
+            _loadingFields = false;
+        }
+
         LoadReport(_currentReport);
-        await SaveInspectionChangesAsync();
+        RefreshOverview();
     }
 
     private void ContinueInspection_Click(object sender, RoutedEventArgs e) => InspectionsTab.IsSelected = true;

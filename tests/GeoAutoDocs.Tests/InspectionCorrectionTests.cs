@@ -101,6 +101,148 @@ public sealed class InspectionCorrectionTests : IAsyncLifetime
     }
 
     [Fact]
+    public void EngineRangePayloadUpdatesStartEndAndDescription()
+    {
+        var (project, report, section, occurrence) = NewProject(OccurrenceLocationMode.Range);
+        occurrence.Meterage = 10m;
+        occurrence.EndMeterage = 20m;
+        var json = $$"""
+        {
+          "reportId": "{{report.Id}}",
+          "generatedAtUtc": "2026-09-10T12:00:00Z",
+          "corrections": [
+            {
+              "sectionId": "{{section.Id}}",
+              "occurrenceId": "{{occurrence.Id}}",
+              "locationMode": "Range",
+              "meterage": 11.25,
+              "endMeterage": 22.5,
+              "meteragePoints": [],
+              "description": "INTERVALO CORRIGIDO"
+            }
+          ]
+        }
+        """;
+
+        var package = InspectionPipeProtocol.DeserializePayload<InspectionCorrectionPackage>(
+            Encoding.UTF8.GetBytes(json));
+        var correction = Assert.Single(package.Corrections);
+        Assert.True(correction.HasMeterage);
+        Assert.True(correction.HasEndMeterage);
+        Assert.True(correction.HasMeteragePoints);
+        Assert.True(correction.HasDescription);
+
+        var service = new InspectionCorrectionService();
+        var plan = service.Prepare(project, package);
+        var item = Assert.Single(plan.Items);
+        Assert.True(item.CanApply);
+        Assert.Equal(OccurrenceLocationMode.Range, item.LocationMode);
+        Assert.Equal(11.25m, item.ProposedMeterage);
+        Assert.Equal(22.5m, item.ProposedEndMeterage);
+
+        var snapshots = service.Apply(plan);
+
+        Assert.Single(snapshots);
+        Assert.Equal(occurrence.Id, Assert.Single(section.Occurrences).Id);
+        Assert.Equal(11.25m, occurrence.Meterage);
+        Assert.Equal(22.5m, occurrence.EndMeterage);
+        Assert.Equal("INTERVALO CORRIGIDO", occurrence.EffectiveDescription);
+    }
+
+    [Fact]
+    public void MultiPointCorrectionPreservesPointIdentityAndRollbackRestoresValues()
+    {
+        var (project, report, _, occurrence) = NewProject(OccurrenceLocationMode.MultiPoint);
+        occurrence.Meterage = null;
+        var firstId = Guid.NewGuid();
+        var secondId = Guid.NewGuid();
+        occurrence.MeteragePoints =
+        [
+            new OccurrenceMeteragePoint
+            {
+                Id = firstId,
+                OccurrenceId = occurrence.Id,
+                Meterage = 2m,
+                Order = 0
+            },
+            new OccurrenceMeteragePoint
+            {
+                Id = secondId,
+                OccurrenceId = occurrence.Id,
+                Meterage = 4m,
+                Order = 1
+            }
+        ];
+
+        var service = new InspectionCorrectionService();
+        var plan = service.Prepare(project, new InspectionCorrectionPackage
+        {
+            ReportId = report.Id,
+            Corrections =
+            [
+                new InspectionCorrection
+                {
+                    SectionId = occurrence.InspectionSectionId,
+                    OccurrenceId = occurrence.Id,
+                    LocationMode = "MultiPoint",
+                    MeteragePoints = [2.75m, 5.50m],
+                    Description = "PONTOS CORRIGIDOS"
+                }
+            ]
+        });
+
+        var snapshots = service.Apply(plan);
+        var points = occurrence.MeteragePoints.OrderBy(x => x.Order).ToArray();
+        Assert.Single(snapshots);
+        Assert.Equal(2, points.Length);
+        Assert.Equal(firstId, points[0].Id);
+        Assert.Equal(secondId, points[1].Id);
+        Assert.Equal(2.75m, points[0].Meterage);
+        Assert.Equal(5.50m, points[1].Meterage);
+        Assert.Equal("PONTOS CORRIGIDOS", occurrence.EffectiveDescription);
+
+        service.Rollback(snapshots);
+
+        points = occurrence.MeteragePoints.OrderBy(x => x.Order).ToArray();
+        Assert.Equal(firstId, points[0].Id);
+        Assert.Equal(secondId, points[1].Id);
+        Assert.Equal(2m, points[0].Meterage);
+        Assert.Equal(4m, points[1].Meterage);
+        Assert.Equal("ORIGINAL", occurrence.EffectiveDescription);
+    }
+
+    [Fact]
+    public void LocationModeMismatchIsRejectedWithoutChangingOccurrence()
+    {
+        var (project, report, section, occurrence) = NewProject(OccurrenceLocationMode.Point);
+        var service = new InspectionCorrectionService();
+
+        var plan = service.Prepare(project, new InspectionCorrectionPackage
+        {
+            ReportId = report.Id,
+            Corrections =
+            [
+                new InspectionCorrection
+                {
+                    SectionId = section.Id,
+                    OccurrenceId = occurrence.Id,
+                    LocationMode = "Range",
+                    Meterage = 2m,
+                    EndMeterage = 3m,
+                    Description = "NÃO DEVE APLICAR"
+                }
+            ]
+        });
+
+        var item = Assert.Single(plan.Items);
+        Assert.Equal(InspectionCorrectionResolutionStatus.Invalid, item.Status);
+        Assert.Contains("LocationMode", item.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(service.Apply(plan));
+        Assert.Equal(1m, occurrence.Meterage);
+        Assert.Equal("ORIGINAL", occurrence.EffectiveDescription);
+    }
+
+    [Fact]
     public void MissingOccurrenceIsReportedAndNeverCreated()
     {
         var (project, report, section, occurrence) = NewProject();
@@ -159,6 +301,8 @@ public sealed class InspectionCorrectionTests : IAsyncLifetime
         var correction = Assert.Single(package.Corrections);
 
         Assert.True(correction.HasMeterage);
+        Assert.False(correction.HasEndMeterage);
+        Assert.False(correction.HasMeteragePoints);
         Assert.False(correction.HasDescription);
         Assert.Equal(13.75m, correction.Meterage);
     }
@@ -197,8 +341,52 @@ public sealed class InspectionCorrectionTests : IAsyncLifetime
         Assert.Equal("ORIGINAL", occurrence.EffectiveDescription);
     }
 
+    [Fact]
+    public void AcknowledgementCountsAppliedAndUnchangedAsConfirmed()
+    {
+        var acknowledgement = new InspectionCorrectionAcknowledgement
+        {
+            Accepted = true,
+            Status = "Partial",
+            RequestedCount = 3,
+            AppliedCount = 1,
+            Results =
+            [
+                new InspectionCorrectionItemAcknowledgement { Applied = true, Status = "Applied" },
+                new InspectionCorrectionItemAcknowledgement { Applied = false, Status = "Unchanged" },
+                new InspectionCorrectionItemAcknowledgement { Applied = false, Status = "Invalid" }
+            ]
+        };
+
+        Assert.Equal(2, acknowledgement.AppliedCount);
+        Assert.Equal(1, acknowledgement.RejectedCount);
+        var json = Encoding.UTF8.GetString(InspectionPipeProtocol.SerializePayload(acknowledgement));
+        Assert.Contains("\"appliedCount\":2", json, StringComparison.Ordinal);
+        Assert.Contains("\"rejectedCount\":1", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AllUnchangedAcknowledgementIsFullyConfirmedForEngine()
+    {
+        var acknowledgement = new InspectionCorrectionAcknowledgement
+        {
+            Accepted = true,
+            Status = "Success",
+            RequestedCount = 2,
+            AppliedCount = 0,
+            Results =
+            [
+                new InspectionCorrectionItemAcknowledgement { Status = "Unchanged" },
+                new InspectionCorrectionItemAcknowledgement { Status = "Unchanged" }
+            ]
+        };
+
+        Assert.Equal(2, acknowledgement.AppliedCount);
+        Assert.Equal(0, acknowledgement.RejectedCount);
+    }
+
     private static (Project Project, Report Report, InspectionSection Section, Occurrence Occurrence)
-        NewProject()
+        NewProject(OccurrenceLocationMode mode = OccurrenceLocationMode.Point)
     {
         var project = new Project { Id = Guid.NewGuid(), Name = "Projeto" };
         var location = new Location { ProjectId = project.Id, Name = "PV 07" };
@@ -206,8 +394,8 @@ public sealed class InspectionCorrectionTests : IAsyncLifetime
         var occurrence = new Occurrence
         {
             InspectionSectionId = section.Id,
-            LocationMode = OccurrenceLocationMode.Point,
-            Meterage = 1m,
+            LocationMode = mode,
+            Meterage = mode is OccurrenceLocationMode.Point or OccurrenceLocationMode.From ? 1m : null,
             GeneratedDescription = "ORIGINAL"
         };
         section.Occurrences.Add(occurrence);

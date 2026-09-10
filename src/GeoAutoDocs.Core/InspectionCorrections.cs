@@ -16,6 +16,7 @@ public sealed class InspectionCorrection
     public Guid SectionId { get; set; }
     public Guid OccurrenceId { get; set; }
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public decimal? Meterage
     {
         get => _meterage;
@@ -26,6 +27,7 @@ public sealed class InspectionCorrection
         }
     }
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public string? Description
     {
         get => _description;

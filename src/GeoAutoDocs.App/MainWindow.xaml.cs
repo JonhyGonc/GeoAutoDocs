@@ -2447,7 +2447,7 @@ public partial class MainWindow : Window
         {
             ProjectId = _currentProject.Id,
             Name = name,
-            Order = _currentProject.Locations.Count
+            Order = NextOrder(_currentProject.Locations.Select(x => x.Order))
         };
         _currentProject.Locations.Add(location);
         _currentLocation = location;
@@ -2465,7 +2465,7 @@ public partial class MainWindow : Window
             NewLocationNameBox.Focus();
             return;
         }
-        var location = new Location { ProjectId = _currentProject.Id, Name = name, Order = _currentProject.Locations.Count };
+        var location = new Location { ProjectId = _currentProject.Id, Name = name, Order = NextOrder(_currentProject.Locations.Select(x => x.Order)) };
         _currentProject.Locations.Add(location);
         _currentLocation = location;
         CloseInspectionForm();
@@ -2492,7 +2492,7 @@ public partial class MainWindow : Window
             EndPoint = draft.EndPoint,
             Reference = draft.Reference,
             InvestigatedMeters = draft.InvestigatedMeters,
-            Order = _currentLocation.Sections.Count
+            Order = NextOrder(_currentLocation.Sections.Select(x => x.Order))
         };
         _currentLocation.Sections.Add(section);
         _currentSection = section;
@@ -2603,7 +2603,7 @@ public partial class MainWindow : Window
             StartPoint = EmptyToNull(NewSectionStartBox.Text),
             EndPoint = EmptyToNull(NewSectionEndBox.Text),
             Reference = EmptyToNull(NewSectionReferenceBox.Text),
-            Order = _currentLocation.Sections.Count
+            Order = NextOrder(_currentLocation.Sections.Select(x => x.Order))
         };
         _currentLocation.Sections.Add(section);
         _currentSection = section;
@@ -4166,6 +4166,8 @@ public partial class MainWindow : Window
     {
         _logger.Error(message, ex); MessageBox.Show(message, "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
     }
+
+    private static int NextOrder(IEnumerable<int> orders) => orders.DefaultIfEmpty(-1).Max() + 1;
 
     private static string? EmptyToNull(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

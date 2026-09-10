@@ -51,6 +51,66 @@ public sealed class InspectionExchangeTests : IDisposable
     }
 
     [Fact]
+    public void ExportGroupsSectionsByLocationAndPreservesCreationOrder()
+    {
+        var project = new Project { Id = Guid.NewGuid(), Name = "Ordem de criação" };
+        var report = project.CreateReport("Relatório ordenado");
+
+        var firstLocation = new Location
+        {
+            ProjectId = project.Id,
+            Name = "PVAP09",
+            Order = 0
+        };
+        var secondLocation = new Location
+        {
+            ProjectId = project.Id,
+            Name = "PVAP01",
+            Order = 1
+        };
+        var firstSection = new InspectionSection
+        {
+            LocationId = firstLocation.Id,
+            Name = "Trecho criado primeiro",
+            Order = 0
+        };
+        var secondSection = new InspectionSection
+        {
+            LocationId = firstLocation.Id,
+            Name = "Trecho criado depois",
+            Order = 1
+        };
+        var thirdSection = new InspectionSection
+        {
+            LocationId = secondLocation.Id,
+            Name = "Trecho do segundo local",
+            Order = 0
+        };
+
+        firstLocation.Sections.Add(secondSection);
+        firstLocation.Sections.Add(firstSection);
+        secondLocation.Sections.Add(thirdSection);
+        project.Locations.Add(secondLocation);
+        project.Locations.Add(firstLocation);
+
+        report.SelectSection(thirdSection);
+        report.SelectSection(secondSection);
+        report.SelectSection(firstSection);
+
+        var document = new InspectionExchangeService().Build(project, report);
+
+        Assert.Equal(
+            new[] { firstLocation.Id, secondLocation.Id },
+            document.Locations.Select(x => x.LocationId));
+        Assert.Equal(
+            new[] { firstSection.Id, secondSection.Id, thirdSection.Id },
+            document.Sections.Select(x => x.SectionId));
+        Assert.Equal(
+            new[] { firstLocation.Id, firstLocation.Id, secondLocation.Id },
+            document.Sections.Select(x => x.LocationId));
+    }
+
+    [Fact]
     public async Task GeneratedDocxContainsReadableManifestAndMatchingSidecar()
     {
         var (project, report, _) = CreateInspection();

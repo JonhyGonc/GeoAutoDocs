@@ -112,8 +112,7 @@ public sealed class InspectionCorrectionPlan
 public sealed record InspectionCorrectionSnapshot(
     Occurrence Occurrence,
     decimal? Meterage,
-    string? ManualDescriptionOverride,
-    DateTime UpdatedAt);
+    string? ManualDescriptionOverride);
 
 public sealed class InspectionCorrectionService
 {
@@ -153,20 +152,18 @@ public sealed class InspectionCorrectionService
     {
         ArgumentNullException.ThrowIfNull(plan);
         var snapshots = new List<InspectionCorrectionSnapshot>();
-        var now = DateTime.UtcNow;
 
         foreach (var item in plan.Items.Where(x => x.CanApply))
         {
             var occurrence = item.Target!;
             snapshots.Add(new InspectionCorrectionSnapshot(
-                occurrence, occurrence.Meterage, occurrence.ManualDescriptionOverride, occurrence.UpdatedAt));
+                occurrence, occurrence.Meterage, occurrence.ManualDescriptionOverride));
 
             if (item.Correction.HasMeterage)
                 occurrence.Meterage = item.Correction.Meterage;
             if (item.Correction.HasDescription)
                 occurrence.ManualDescriptionOverride = NormalizeDescription(
                     item.Correction.Description, occurrence.GeneratedDescription);
-            occurrence.UpdatedAt = now;
         }
 
         return snapshots;
@@ -179,7 +176,6 @@ public sealed class InspectionCorrectionService
         {
             snapshot.Occurrence.Meterage = snapshot.Meterage;
             snapshot.Occurrence.ManualDescriptionOverride = snapshot.ManualDescriptionOverride;
-            snapshot.Occurrence.UpdatedAt = snapshot.UpdatedAt;
         }
     }
 

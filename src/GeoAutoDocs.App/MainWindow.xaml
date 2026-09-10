@@ -395,7 +395,7 @@
                                         <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                             <ComboBox x:Name="SectionsList" SelectionChanged="SectionsList_SelectionChanged" PreviewMouseMove="SectionsList_PreviewMouseMove" Margin="0,0,6,0" MinWidth="80" TextSearch.TextPath="Name" ToolTip="Selecione o trecho; com a lista aberta, arraste pelo puxador para reordenar">
                                                 <ComboBox.ItemContainerStyle>
-                                                    <Style TargetType="ComboBoxItem">
+                                                    <Style TargetType="ComboBoxItem" BasedOn="{StaticResource {x:Type ComboBoxItem}}">
                                                         <Setter Property="AllowDrop" Value="True"/>
                                                         <EventSetter Event="DragOver" Handler="SectionsList_DragOver"/>
                                                         <EventSetter Event="Drop" Handler="SectionsList_Drop"/>

@@ -338,4 +338,37 @@ public sealed class ProjectStoreTests : IAsyncLifetime
         Assert.Equal("Nome atualizado", Assert.Single(Assert.Single(recovered.Locations).Sections).Name);
     }
 
+    [Fact]
+    public async Task DeletingReportPersistsAndPreservesOtherReportsAndGeneratedFile()
+    {
+        var project = await _store.CreateAsync("Exclusão de relatório");
+        var location = new Location { ProjectId = project.Id, Name = "PV 7" };
+        var section = new InspectionSection { LocationId = location.Id, Name = "Trecho 01" };
+        location.Sections.Add(section);
+        project.Locations.Add(location);
+
+        var first = project.CreateReport();
+        var removed = project.CreateReport();
+        var last = project.CreateReport();
+        first.ReportCode = "REL-001";
+        removed.ReportCode = "REL-002";
+        last.ReportCode = "REL-003";
+        removed.SelectSection(section);
+
+        var generatedPath = Path.Combine(_root, "REL-002.docx");
+        await File.WriteAllTextAsync(generatedPath, "arquivo gerado preservado");
+        removed.GeneratedReportPath = generatedPath;
+        await _store.SaveAsync(project);
+
+        project.Reports.Remove(removed);
+        await _store.SaveAsync(project);
+
+        var recovered = await _store.GetAsync(project.Id);
+        Assert.Equal(new[] { first.Id, last.Id },
+            recovered!.Reports.OrderBy(x => x.Order).Select(x => x.Id));
+        Assert.DoesNotContain(recovered.Reports, x => x.Id == removed.Id);
+        Assert.Single(Assert.Single(recovered.Locations).Sections);
+        Assert.True(File.Exists(generatedPath));
+    }
+
 }

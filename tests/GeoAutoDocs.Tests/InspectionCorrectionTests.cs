@@ -41,6 +41,7 @@ public sealed class InspectionCorrectionTests : IAsyncLifetime
             DisplayName = "Vídeo 01",
             FilePath = @"C:\videos\pv07.avi"
         };
+        var originalUpdatedAt = DateTime.UtcNow.AddDays(-1);
         var occurrence = new Occurrence
         {
             InspectionSectionId = section.Id,
@@ -49,7 +50,7 @@ public sealed class InspectionCorrectionTests : IAsyncLifetime
             Meterage = 12.50m,
             GeneratedDescription = "DESLOCAMENTO DE JUNTA",
             CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
+            UpdatedAt = originalUpdatedAt
         };
         var evidence = new Evidence
         {
@@ -91,6 +92,7 @@ public sealed class InspectionCorrectionTests : IAsyncLifetime
         var savedOccurrence = Assert.Single(savedSection.Occurrences);
         Assert.Equal(occurrence.Id, savedOccurrence.Id);
         Assert.Equal(13.75m, savedOccurrence.Meterage);
+        Assert.Equal(originalUpdatedAt, savedOccurrence.UpdatedAt);
         Assert.Equal("DESLOCAMENTO DE JUNTA", savedOccurrence.EffectiveDescription);
         Assert.Equal(video.Id, savedOccurrence.VideoReferenceId);
         Assert.Equal(evidence.Id, Assert.Single(savedOccurrence.Evidence).Id);

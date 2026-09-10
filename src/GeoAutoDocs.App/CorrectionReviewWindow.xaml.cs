@@ -16,9 +16,9 @@ public partial class CorrectionReviewWindow : Window
             x.Status.ToString(),
             StatusText(x.Status),
             SectionLabel(x),
-            x.Correction.HasMeterage,
-            FormatMeterage(x.CurrentMeterage),
-            FormatMeterage(x.ProposedMeterage),
+            x.HasPositionChange,
+            FormatPosition(x, proposed: false),
+            FormatPosition(x, proposed: true),
             x.Correction.HasDescription,
             DisplayDescription(x.CurrentDescription),
             DisplayDescription(x.ProposedDescription),
@@ -67,9 +67,32 @@ public partial class CorrectionReviewWindow : Window
         _ => "Inválida"
     };
 
+    private static string FormatPosition(InspectionCorrectionResolution item, bool proposed)
+    {
+        var meterage = proposed ? item.ProposedMeterage : item.CurrentMeterage;
+        var endMeterage = proposed ? item.ProposedEndMeterage : item.CurrentEndMeterage;
+        var points = proposed ? item.ProposedMeteragePoints : item.CurrentMeteragePoints;
+
+        return item.LocationMode switch
+        {
+            OccurrenceLocationMode.Point => FormatMeterage(meterage),
+            OccurrenceLocationMode.Range =>
+                $"{FormatMeterage(meterage)} → {FormatMeterage(endMeterage)}",
+            OccurrenceLocationMode.From => $"A partir de {FormatMeterage(meterage)}",
+            OccurrenceLocationMode.MultiPoint => FormatMeteragePoints(points),
+            OccurrenceLocationMode.EntireSection => "Todo o trecho",
+            OccurrenceLocationMode.NotApplicable => "Sem posição CAD",
+            _ => FormatMeterage(meterage)
+        };
+    }
+
     private static string FormatMeterage(decimal? value) => value is null
         ? "Não informada"
         : $"{value.Value.ToString("0.##", CultureInfo.CurrentCulture)} m";
+
+    private static string FormatMeteragePoints(IReadOnlyList<decimal> points) => points.Count == 0
+        ? "Nenhum ponto informado"
+        : string.Join("; ", points.Select(value => FormatMeterage(value)));
 
     private static string DisplayDescription(string? value) =>
         string.IsNullOrWhiteSpace(value) ? "(sem texto)" : value;

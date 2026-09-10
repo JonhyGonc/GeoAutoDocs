@@ -1,0 +1,23 @@
+name: Validate correction receiver strict
+
+on:
+  push:
+    branches:
+      - fix/section-edit-save-stability
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Restore
+        run: dotnet restore GeoAutoDocs.sln
+      - name: Build Release
+        run: dotnet build GeoAutoDocs.sln --configuration Release --no-restore
+      - name: Test correction and transport
+        run: dotnet test GeoAutoDocs.sln --configuration Release --no-build --filter "FullyQualifiedName~InspectionCorrectionTests|FullyQualifiedName~InspectionTransportTests" --verbosity normal

@@ -940,8 +940,8 @@ public partial class MainWindow : Window
             project.Reports.Insert(Math.Min(originalIndex, project.Reports.Count), report);
             RefreshReportListSelection(originalSelection ?? report);
             MarkPendingChanges();
-            _logger.Error($"Exclusão do relatório revertida após falha de salvamento. " +
-                          $"ProjetoId='{project.Id}'; RelatórioId='{report.Id}'.");
+            _logger.Info($"Exclusão do relatório revertida após falha de salvamento. " +
+                         $"ProjetoId='{project.Id}'; RelatórioId='{report.Id}'.");
             MessageBox.Show("A exclusão não foi concluída porque o projeto não pôde ser salvo. " +
                             "O relatório foi restaurado na lista.",
                 "Excluir relatório", MessageBoxButton.OK, MessageBoxImage.Warning);

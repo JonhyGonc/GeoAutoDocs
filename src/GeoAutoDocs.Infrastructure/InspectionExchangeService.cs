@@ -18,12 +18,16 @@ public sealed class InspectionExchangeService
         if (report.ProjectId != project.Id)
             throw new InvalidOperationException("O relatório não pertence ao projeto selecionado.");
 
-        var selected = report.SectionLinks.OrderBy(x => x.Order).Select(x => x.SectionId).ToList();
+        var selected = report.SectionLinks.Select(x => x.SectionId).ToList();
         var selectedSet = selected.ToHashSet();
-        var locationBySection = project.Locations
-            .SelectMany(location => location.Sections.Select(section => (Location: location, Section: section)))
-            .Where(x => selectedSet.Contains(x.Section.Id))
-            .ToDictionary(x => x.Section.Id);
+        var orderedSections = project.Locations
+            .OrderBy(location => location.Order)
+            .SelectMany(location => location.Sections
+                .OrderBy(section => section.Order)
+                .Where(section => selectedSet.Contains(section.Id))
+                .Select(section => (Location: location, Section: section)))
+            .ToList();
+        var locationBySection = orderedSections.ToDictionary(x => x.Section.Id);
         var missing = selected.Where(id => !locationBySection.ContainsKey(id)).ToList();
         if (missing.Count > 0)
             throw new InvalidOperationException("Um ou mais trechos selecionados não pertencem ao projeto.");
@@ -45,13 +49,13 @@ public sealed class InspectionExchangeService
             }
         };
 
-        document.Locations = locationBySection.Values.Select(x => x.Location).DistinctBy(x => x.Id)
-            .OrderBy(x => x.Order).ThenBy(x => x.Name)
+        document.Locations = orderedSections.Select(x => x.Location).DistinctBy(x => x.Id)
             .Select(x => new InspectionExchangeLocation
             {
                 LocationId = x.Id, Type = x.Type.ToString(), Name = x.Name, Order = x.Order
             }).ToList();
-        document.Sections = selected.Select(id => MapSection(locationBySection[id].Location, locationBySection[id].Section))
+        document.Sections = orderedSections
+            .Select(x => MapSection(x.Location, x.Section))
             .ToList();
         Serializer.Validate(document);
         return document;

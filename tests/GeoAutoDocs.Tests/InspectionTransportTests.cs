@@ -188,6 +188,92 @@ public sealed class InspectionTransportTests : IDisposable
         Assert.Equal(InspectionTransportStatus.Cancelled, result.Status);
     }
 
+    [Fact]
+    public async Task CorrectionPushUsesExistingConnectionAndReturnsDetailedAck()
+    {
+        var pipeName = NewPipeName();
+        var correctionRequestId = 731;
+        InspectionCorrectionAcknowledgement? receivedAck = null;
+        await using var server = CreateServer(pipeName);
+        var serverTask = Task.Run(async () =>
+        {
+            await server.WaitForConnectionAsync();
+            var hello = await InspectionPipeProtocol.ReadFrameAsync(server);
+            await WriteHelloAckAsync(server, hello.RequestId);
+            var inspection = await InspectionPipeProtocol.ReadFrameAsync(server);
+            await InspectionPipeProtocol.WriteFrameAsync(server,
+                InspectionPipeMessageType.InspectionAck, inspection.RequestId,
+                InspectionPipeProtocol.SerializePayload(new InspectionAcknowledgement
+                {
+                    Accepted = true,
+                    Status = "Success",
+                    Message = "Inspeção recebida."
+                }));
+
+            var correction = new InspectionCorrectionPackage
+            {
+                ReportId = NewDocument().Report.ReportId,
+                Corrections =
+                [
+                    new InspectionCorrection
+                    {
+                        SectionId = NewDocument().Sections[0].SectionId,
+                        OccurrenceId = NewDocument().Sections[0].Occurrences[0].OccurrenceId,
+                        Meterage = 13.75m
+                    }
+                ]
+            };
+            await InspectionPipeProtocol.WriteFrameAsync(server,
+                InspectionPipeMessageType.CorrectionPush, correctionRequestId,
+                InspectionPipeProtocol.SerializePayload(correction));
+
+            var ackFrame = await InspectionPipeProtocol.ReadFrameAsync(server);
+            Assert.Equal(InspectionPipeMessageType.CorrectionAck, ackFrame.MessageType);
+            Assert.Equal(correctionRequestId, ackFrame.RequestId);
+            receivedAck = InspectionPipeProtocol
+                .DeserializePayload<InspectionCorrectionAcknowledgement>(ackFrame.Payload);
+        });
+
+        var transport = NewTransport(pipeName);
+        transport.SetCorrectionHandler((package, _) =>
+        {
+            var item = Assert.Single(package.Corrections);
+            Assert.True(item.HasMeterage);
+            Assert.False(item.HasDescription);
+            Assert.Equal(13.75m, item.Meterage);
+            return Task.FromResult(new InspectionCorrectionAcknowledgement
+            {
+                Accepted = true,
+                Status = "Partial",
+                Message = "Uma correção aplicada.",
+                RequestedCount = 1,
+                AppliedCount = 1,
+                Results =
+                [
+                    new InspectionCorrectionItemAcknowledgement
+                    {
+                        SectionId = item.SectionId,
+                        OccurrenceId = item.OccurrenceId,
+                        Applied = true,
+                        Status = "Applied",
+                        Message = "Correção aplicada."
+                    }
+                ]
+            });
+        });
+
+        var result = await transport.SendAsync(NewDocument());
+        await serverTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await transport.StopCorrectionSessionAsync();
+
+        Assert.True(result.Success, result.Message);
+        Assert.NotNull(receivedAck);
+        Assert.True(receivedAck!.Accepted);
+        Assert.Equal("Partial", receivedAck.Status);
+        Assert.Equal(1, receivedAck.AppliedCount);
+        Assert.True(Assert.Single(receivedAck.Results).Applied);
+    }
+
     private NamedPipeInspectionTransport NewTransport(string pipeName, int connectMilliseconds = 500,
         int responseMilliseconds = 500) => new(_serializer, pipeName,
         TimeSpan.FromMilliseconds(connectMilliseconds), TimeSpan.FromMilliseconds(responseMilliseconds));

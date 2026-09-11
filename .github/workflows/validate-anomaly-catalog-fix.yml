@@ -1,0 +1,20 @@
+name: Validate anomaly catalog fix
+on:
+  pull_request:
+    branches:
+      - main
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Restore
+        run: dotnet restore GeoAutoDocs.sln
+      - name: Build Release
+        run: dotnet build GeoAutoDocs.sln --configuration Release --no-restore
+      - name: Test
+        run: dotnet test GeoAutoDocs.sln --configuration Release --no-build --no-restore

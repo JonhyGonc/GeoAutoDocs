@@ -403,7 +403,7 @@
                                                     </DataTemplate>
                                                 </ComboBox.ItemTemplate>
                                             </ComboBox>
-                                            <Button x:Name="ReorderSectionsButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Content="↕" FontSize="18" Margin="0,0,4,0" Click="ReorderSections_Click" ToolTip="Ordenar trechos arrastando para cima ou para baixo" ToolTipService.ShowOnDisabled="True"/>
+                                            <Button x:Name="ReorderSectionsButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Content="Ordenar" FontFamily="{StaticResource AppFont}" FontSize="12" Foreground="{StaticResource PrimaryBrush}" Padding="10,0" Margin="0,0,4,0" Click="ReorderSections_Click" ToolTip="Ordenar trechos arrastando para cima ou para baixo" ToolTipService.ShowOnDisabled="True"/>
                                             <Button x:Name="EditSectionButton" Grid.Column="2" Style="{StaticResource IconButtonStyle}" Content="&#xE70F;" Margin="0,0,4,0" Click="EditSection_Click" ToolTip="Editar trecho" ToolTipService.ShowOnDisabled="True"/>
                                             <Button x:Name="DeleteSectionButton" Grid.Column="3" Style="{StaticResource IconButtonStyle}" Content="&#xE74D;" Foreground="{StaticResource DangerBrush}" Click="DeleteSection_Click" ToolTip="Excluir trecho"/>
                                         </Grid>

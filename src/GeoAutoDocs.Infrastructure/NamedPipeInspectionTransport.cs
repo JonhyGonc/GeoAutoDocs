@@ -7,14 +7,17 @@ public sealed class NamedPipeInspectionTransport : IInspectionTransport, IInspec
 {
     public static readonly TimeSpan DefaultConnectTimeout = TimeSpan.FromSeconds(1.5);
     public static readonly TimeSpan DefaultResponseTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan CorrectionReconnectDelay = TimeSpan.FromSeconds(2);
     private readonly InspectionExchangeSerializer _serializer;
     private readonly TimeSpan _connectTimeout;
     private readonly TimeSpan _responseTimeout;
     private readonly LocalLogger? _logger;
     private readonly SemaphoreSlim _sendGate = new(1, 1);
     private readonly SemaphoreSlim _correctionSessionGate = new(1, 1);
+    private readonly CancellationTokenSource _correctionLifetime = new();
     private Func<InspectionCorrectionPackage, CancellationToken, Task<InspectionCorrectionAcknowledgement>>? _correctionHandler;
     private CorrectionSession? _correctionSession;
+    private Task? _correctionReconnectTask;
     private bool _stopped;
 
     public string PipeName { get; }
@@ -36,6 +39,11 @@ public sealed class NamedPipeInspectionTransport : IInspectionTransport, IInspec
     public async Task<InspectionTransportResult> CheckAvailabilityAsync(
         CancellationToken cancellationToken = default)
     {
+        var activeRemote = await GetActiveCorrectionRemoteAsync(cancellationToken);
+        if (activeRemote is not null)
+            return RemoteResult(InspectionTransportStatus.Success,
+                "GeoAutoEngine disponível e canal de correções conectado.", activeRemote);
+
         var handshake = await ConnectAndHandshakeAsync(cancellationToken);
         handshake.Pipe?.Dispose();
         return handshake.Result;
@@ -78,6 +86,12 @@ public sealed class NamedPipeInspectionTransport : IInspectionTransport, IInspec
         {
             return Result(InspectionTransportStatus.InvalidPayload, ex.Message);
         }
+
+        // O GeoAutoEngine aceita uma conexão ativa por vez. Se o canal persistente de
+        // correções já estiver conectado, libere-o antes de abrir a conexão usada para
+        // reenviar a inspeção. Após o InspectionAck esta nova conexão volta a ser o canal
+        // persistente de correções.
+        await StopCurrentCorrectionSessionAsync();
 
         var handshake = await ConnectAndHandshakeAsync(cancellationToken);
         if (!handshake.Result.Success || handshake.Pipe is null) return handshake.Result;
@@ -149,15 +163,149 @@ public sealed class NamedPipeInspectionTransport : IInspectionTransport, IInspec
         ArgumentNullException.ThrowIfNull(handler);
         if (_stopped) throw new ObjectDisposedException(nameof(NamedPipeInspectionTransport));
         _correctionHandler = handler;
+        StartCorrectionReconnectLoop();
     }
 
     public async Task StopCorrectionSessionAsync()
+    {
+        if (_stopped) return;
+        _stopped = true;
+        _correctionLifetime.Cancel();
+
+        await _sendGate.WaitAsync();
+        try
+        {
+            await StopCurrentCorrectionSessionAsync();
+        }
+        finally
+        {
+            _sendGate.Release();
+        }
+
+        var reconnectTask = _correctionReconnectTask;
+        if (reconnectTask is not null)
+        {
+            try
+            {
+                await reconnectTask;
+            }
+            catch (OperationCanceledException) when (_correctionLifetime.IsCancellationRequested)
+            {
+            }
+        }
+
+        _correctionLifetime.Dispose();
+    }
+
+    private void StartCorrectionReconnectLoop()
+    {
+        if (_correctionReconnectTask is not null || _stopped) return;
+        _correctionReconnectTask = Task.Run(() => MaintainCorrectionSessionAsync(_correctionLifetime.Token));
+    }
+
+    private async Task MaintainCorrectionSessionAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                if (!await HasActiveCorrectionSessionAsync(cancellationToken))
+                {
+                    await _sendGate.WaitAsync(cancellationToken);
+                    try
+                    {
+                        if (_stopped) return;
+                        if (!await HasActiveCorrectionSessionAsync(cancellationToken))
+                            await TryConnectCorrectionSessionAsync(cancellationToken);
+                    }
+                    finally
+                    {
+                        _sendGate.Release();
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+            {
+                _logger?.Error("Falha ao restabelecer o canal de correções com o GeoAutoEngine.", ex);
+            }
+
+            try
+            {
+                await Task.Delay(CorrectionReconnectDelay, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+        }
+    }
+
+    private async Task<bool> TryConnectCorrectionSessionAsync(CancellationToken cancellationToken)
+    {
+        var handshake = await ConnectAndHandshakeAsync(cancellationToken);
+        if (!handshake.Result.Success || handshake.Pipe is null || handshake.Ack is null)
+            return false;
+
+        var pipe = handshake.Pipe;
+        var transferred = false;
+        try
+        {
+            transferred = await StartCorrectionSessionAsync(pipe, handshake.Ack, cancellationToken);
+            if (transferred)
+                _logger?.Info("Canal de correções conectado automaticamente ao GeoAutoEngine.");
+            return transferred;
+        }
+        finally
+        {
+            if (!transferred) pipe.Dispose();
+        }
+    }
+
+    private async Task<bool> HasActiveCorrectionSessionAsync(CancellationToken cancellationToken)
+    {
+        await _correctionSessionGate.WaitAsync(cancellationToken);
+        try
+        {
+            return _correctionSession is { } session &&
+                   !session.Cancellation.IsCancellationRequested &&
+                   session.Pipe.IsConnected &&
+                   !session.ListenerTask.IsCompleted;
+        }
+        finally
+        {
+            _correctionSessionGate.Release();
+        }
+    }
+
+    private async Task<InspectionHelloAck?> GetActiveCorrectionRemoteAsync(CancellationToken cancellationToken)
+    {
+        await _correctionSessionGate.WaitAsync(cancellationToken);
+        try
+        {
+            var session = _correctionSession;
+            return session is not null &&
+                   !session.Cancellation.IsCancellationRequested &&
+                   session.Pipe.IsConnected &&
+                   !session.ListenerTask.IsCompleted
+                ? session.Remote
+                : null;
+        }
+        finally
+        {
+            _correctionSessionGate.Release();
+        }
+    }
+
+    private async Task StopCurrentCorrectionSessionAsync()
     {
         CorrectionSession? session;
         await _correctionSessionGate.WaitAsync();
         try
         {
-            _stopped = true;
             session = _correctionSession;
             _correctionSession = null;
             StopSession(session);
@@ -194,7 +342,7 @@ public sealed class NamedPipeInspectionTransport : IInspectionTransport, IInspec
         {
             if (_stopped) return false;
             var cancellation = new CancellationTokenSource();
-            var session = new CorrectionSession(pipe, cancellation);
+            var session = new CorrectionSession(pipe, cancellation, remote);
             session.ListenerTask = ListenForCorrectionsAsync(session, remote);
             _correctionSession = session;
             _logger?.Info($"Canal de correções aguardando mensagens do GeoAutoEngine. " +
@@ -469,14 +617,19 @@ public sealed class NamedPipeInspectionTransport : IInspectionTransport, IInspec
 
     private sealed class CorrectionSession
     {
-        public CorrectionSession(NamedPipeClientStream pipe, CancellationTokenSource cancellation)
+        public CorrectionSession(
+            NamedPipeClientStream pipe,
+            CancellationTokenSource cancellation,
+            InspectionHelloAck remote)
         {
             Pipe = pipe;
             Cancellation = cancellation;
+            Remote = remote;
         }
 
         public NamedPipeClientStream Pipe { get; }
         public CancellationTokenSource Cancellation { get; }
+        public InspectionHelloAck Remote { get; }
         public Task ListenerTask { get; set; } = Task.CompletedTask;
     }
 

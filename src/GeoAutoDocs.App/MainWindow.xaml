@@ -407,12 +407,6 @@
                                             <Button x:Name="EditSectionButton" Grid.Column="2" Style="{StaticResource IconButtonStyle}" Content="&#xE70F;" Margin="0,0,4,0" Click="EditSection_Click" ToolTip="Editar trecho" ToolTipService.ShowOnDisabled="True"/>
                                             <Button x:Name="DeleteSectionButton" Grid.Column="3" Style="{StaticResource IconButtonStyle}" Content="&#xE74D;" Foreground="{StaticResource DangerBrush}" Click="DeleteSection_Click" ToolTip="Excluir trecho"/>
                                         </Grid>
-                                                    </DataTemplate>
-                                                </ComboBox.ItemTemplate>
-                                            </ComboBox>
-                                            <Button x:Name="EditSectionButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Content="&#xE70F;" Margin="0,0,4,0" Click="EditSection_Click" ToolTip="Editar trecho" ToolTipService.ShowOnDisabled="True"/>
-                                            <Button x:Name="DeleteSectionButton" Grid.Column="2" Style="{StaticResource IconButtonStyle}" Content="&#xE74D;" Foreground="{StaticResource DangerBrush}" Click="DeleteSection_Click" ToolTip="Excluir trecho"/>
-                                        </Grid>
                                     </Grid>
                                 </Border>
                                 <Border Grid.Column="2" Style="{StaticResource SubtleCardStyle}" Padding="12" Margin="6,0,0,0">

@@ -89,10 +89,6 @@ public partial class MainWindow : Window
     private bool _captureInProgress;
     private bool _loadingInspections;
     private bool _sectionReviewInProgress;
-    private const string SectionDragDataFormat = "GeoAutoDocs.InspectionSection";
-    private Point _sectionDragStart;
-    private Guid? _sectionDragId;
-    private Guid? _sectionDragSelectedId;
     private Point _occurrenceDragStart;
     private Guid? _occurrenceDragId;
     private Guid? _projectDialogProjectId;
@@ -2286,121 +2282,6 @@ public partial class MainWindow : Window
         return false;
     }
 
-    private void SectionsList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (!SectionsList.IsDropDownOpen || IsReadOnly ||
-            sender is not FrameworkElement { DataContext: InspectionSection section }) return;
-
-        _sectionDragStart = e.GetPosition(SectionsList);
-        _sectionDragId = section.Id;
-        _sectionDragSelectedId = _currentSection?.Id;
-        e.Handled = true;
-    }
-
-    private void SectionsList_PreviewMouseMove(object sender, MouseEventArgs e)
-    {
-        if (e.LeftButton != MouseButtonState.Pressed)
-        {
-            _sectionDragId = null;
-            _sectionDragSelectedId = null;
-            return;
-        }
-        if (!SectionsList.IsDropDownOpen || IsReadOnly || _sectionDragId is not Guid sectionId) return;
-
-        var position = e.GetPosition(SectionsList);
-        if (Math.Abs(position.X - _sectionDragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
-            Math.Abs(position.Y - _sectionDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
-
-        var data = new DataObject();
-        data.SetData(SectionDragDataFormat, sectionId);
-        _sectionDragId = null;
-        DragDrop.DoDragDrop(SectionsList, data, DragDropEffects.Move);
-    }
-
-    private void SectionsList_DragOver(object sender, DragEventArgs e)
-    {
-        e.Effects = !IsReadOnly && e.Data.GetDataPresent(SectionDragDataFormat)
-            ? DragDropEffects.Move
-            : DragDropEffects.None;
-        e.Handled = true;
-    }
-
-    private async void SectionsList_Drop(object sender, DragEventArgs e)
-    {
-        if (_currentLocation is null || IsReadOnly || !e.Data.GetDataPresent(SectionDragDataFormat))
-        {
-            e.Effects = DragDropEffects.None;
-            e.Handled = true;
-            return;
-        }
-
-        var location = _currentLocation;
-        var selectedId = _sectionDragSelectedId ?? _currentSection?.Id;
-        var ordered = location.Sections.OrderBy(x => x.Order).ToList();
-        var previousOrders = ordered.ToDictionary(x => x.Id, x => x.Order);
-        try
-        {
-            if (e.Data.GetData(SectionDragDataFormat) is not Guid sourceId) return;
-            var source = ordered.FirstOrDefault(x => x.Id == sourceId);
-            var target = (sender as FrameworkElement)?.DataContext as InspectionSection ??
-                         FindVisualParent<ComboBoxItem>(e.OriginalSource as DependencyObject)?.DataContext
-                             as InspectionSection;
-            if (source is null || target is null || target.Id == sourceId) return;
-
-            ordered.Remove(source);
-            var targetIndex = ordered.FindIndex(x => x.Id == target.Id);
-            if (targetIndex < 0) return;
-            var targetContainer = sender as ComboBoxItem ??
-                                  FindVisualParent<ComboBoxItem>(e.OriginalSource as DependencyObject);
-            if (targetContainer is not null &&
-                e.GetPosition(targetContainer).Y > targetContainer.ActualHeight / 2)
-                targetIndex++;
-            ordered.Insert(targetIndex, source);
-
-            for (var index = 0; index < ordered.Count; index++) ordered[index].Order = index;
-            MarkPendingChanges();
-            SaveStatus.Text = "Salvando nova ordem dos trechos...";
-
-            if (!await SavePendingAsync())
-            {
-                foreach (var section in ordered) section.Order = previousOrders[section.Id];
-                _logger.Info($"Reordenação de trechos revertida após falha de salvamento. LocalId='{location.Id}'.");
-            }
-            else
-            {
-                _logger.Info($"Trechos reordenados. LocalId='{location.Id}'; Ordem='{string.Join(",", ordered.Select(x => x.Id))}'.");
-            }
-
-            if (_currentLocation?.Id == location.Id)
-            {
-                _currentSection = location.Sections.FirstOrDefault(x => x.Id == selectedId)
-                                  ?? location.Sections.OrderBy(x => x.Order).FirstOrDefault();
-                _loadingInspections = true;
-                try { RefreshSectionSelector(); }
-                finally { _loadingInspections = false; }
-            }
-        }
-        catch (Exception ex)
-        {
-            foreach (var section in ordered)
-                if (previousOrders.TryGetValue(section.Id, out var order)) section.Order = order;
-            _logger.Error($"Falha ao reordenar trechos. LocalId='{location.Id}'.", ex);
-            ShowError("Não foi possível alterar a ordem dos trechos.", ex);
-            if (_currentLocation?.Id == location.Id)
-            {
-                _loadingInspections = true;
-                try { RefreshSectionSelector(); }
-                finally { _loadingInspections = false; }
-            }
-        }
-        finally
-        {
-            _sectionDragId = null;
-            _sectionDragSelectedId = null;
-            e.Handled = true;
-        }
-    }
-
     private void OccurrencesList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (sender is not FrameworkElement { DataContext: OccurrenceListItem { CanModify: true } item }) return;
@@ -2526,6 +2407,11 @@ public partial class MainWindow : Window
         AddSectionButton.IsEnabled = !IsReadOnly && !_captureInProgress && _currentLocation is not null;
         RenameLocationButton.IsEnabled = !IsReadOnly && !_captureInProgress && _currentLocation is not null;
         DeleteLocationButton.IsEnabled = !IsReadOnly && !_captureInProgress && _currentLocation is not null;
+        ReorderSectionsButton.IsEnabled = !IsReadOnly && !_captureInProgress &&
+                                          _currentLocation?.Sections.Count > 1;
+        ReorderSectionsButton.ToolTip = IsReadOnly ? "Projeto aberto somente para leitura."
+            : _currentLocation?.Sections.Count > 1 ? "Ordenar trechos arrastando para cima ou para baixo"
+            : "Crie pelo menos dois trechos para alterar a ordem.";
         EditSectionButton.IsEnabled = !IsReadOnly && !IsSectionReviewLocked && !_captureInProgress && _currentSection is not null;
         EditSectionButton.ToolTip = IsReadOnly ? "Projeto aberto somente para leitura."
             : IsSectionReviewLocked ? "Reabra o trecho para editar"
@@ -2647,6 +2533,89 @@ public partial class MainWindow : Window
         _currentVideo = null;
         RefreshInspectionTree();
         await SaveInspectionChangesAsync();
+    }
+
+    private async void ReorderSections_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentLocation is null || IsReadOnly || _currentLocation.Sections.Count < 2) return;
+
+        var location = _currentLocation;
+        var selectedId = _currentSection?.Id;
+        IReadOnlyList<Guid>? requestedOrder = null;
+        HideVideoSurfaceForOverlay();
+        try
+        {
+            var dialog = new SectionOrderWindow(location.Sections) { Owner = this };
+            if (dialog.ShowDialog() == true) requestedOrder = dialog.OrderedSectionIds;
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"Falha ao abrir a ordenação de trechos. LocalId='{location.Id}'.", ex);
+            ShowError("Não foi possível abrir a ordenação de trechos.", ex);
+        }
+        finally
+        {
+            RestoreVideoSurfaceAfterOverlay();
+        }
+
+        if (requestedOrder is null) return;
+        var previousOrder = location.Sections.ToDictionary(x => x.Id, x => x.Order);
+        var previousIds = location.Sections.OrderBy(x => x.Order).Select(x => x.Id).ToList();
+        if (previousIds.SequenceEqual(requestedOrder)) return;
+
+        try
+        {
+            var sectionsById = location.Sections.ToDictionary(x => x.Id);
+            if (requestedOrder.Count != sectionsById.Count ||
+                requestedOrder.Any(id => !sectionsById.ContainsKey(id)) ||
+                requestedOrder.Distinct().Count() != requestedOrder.Count)
+                throw new InvalidDataException("A ordenação retornada não corresponde aos trechos do Local.");
+
+            for (var index = 0; index < requestedOrder.Count; index++)
+                sectionsById[requestedOrder[index]].Order = index;
+
+            MarkPendingChanges();
+            SaveStatus.Text = "Salvando nova ordem dos trechos...";
+            if (!await SavePendingAsync())
+            {
+                foreach (var section in location.Sections)
+                    section.Order = previousOrder[section.Id];
+                _logger.Info($"Reordenação de trechos revertida após falha de salvamento. LocalId='{location.Id}'.");
+            }
+            else
+            {
+                _logger.Info($"Trechos reordenados. LocalId='{location.Id}'; Ordem='{string.Join(",", requestedOrder)}'.");
+            }
+
+            if (_currentLocation?.Id == location.Id)
+            {
+                _currentSection = location.Sections.FirstOrDefault(x => x.Id == selectedId)
+                                  ?? location.Sections.OrderBy(x => x.Order).FirstOrDefault();
+                _loadingInspections = true;
+                try
+                {
+                    RefreshSectionSelector();
+                    RefreshReportSectionSelection();
+                }
+                finally
+                {
+                    _loadingInspections = false;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            foreach (var section in location.Sections)
+                if (previousOrder.TryGetValue(section.Id, out var order)) section.Order = order;
+            _logger.Error($"Falha ao aplicar a ordenação de trechos. LocalId='{location.Id}'.", ex);
+            ShowError("Não foi possível alterar a ordem dos trechos.", ex);
+            if (_currentLocation?.Id == location.Id)
+            {
+                _loadingInspections = true;
+                try { RefreshSectionSelector(); }
+                finally { _loadingInspections = false; }
+            }
+        }
     }
 
     private async void EditSection_Click(object sender, RoutedEventArgs e)

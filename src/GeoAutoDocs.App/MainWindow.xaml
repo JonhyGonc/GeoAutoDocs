@@ -559,7 +559,7 @@
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="Capturas pendentes" FontWeight="SemiBold"/>
                                         <TextBlock x:Name="PendingCapturesSummary" Foreground="{StaticResource TextMutedBrush}" Margin="8,0,0,0"/>
-                                        <TextBlock Margin="14,0,0,0" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold">
+                                        <TextBlock Margin="14,0,0,0" Foreground="{StaticResource PrimaryBrush}" FontWeight="SemiBold">
                                             <TextBlock.Style>
                                                 <Style TargetType="TextBlock">
                                                     <Setter Property="Text" Value="Mostrar"/>

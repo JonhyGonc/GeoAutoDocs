@@ -68,7 +68,7 @@ public partial class AnomalyCatalogWindow : Window
     {
         if (_readOnly) return;
         _selected = new AnomalyDefinition { IsBuiltIn = false, SupportsPosition = true, IsActive = true };
-        NameBox.Text = string.Empty; TemplateBox.Text = "{nome}: {textoComplementar}.";
+        NameBox.Text = string.Empty; TemplateBox.Text = "{nome}.";
         PositionCheck.IsChecked = true; OrientationCheck.IsChecked = ExtensionCheck.IsChecked = DimensionCheck.IsChecked = false;
         ConditionCheck.IsChecked = InfiltrationCheck.IsChecked = PercentageCheck.IsChecked = ComplementCheck.IsChecked = false;
         ActiveButton.Content = "Desativar"; NameBox.Focus();

@@ -546,6 +546,7 @@ public sealed class OccurrenceTests : IAsyncLifetime
         }, primaryNames);
         Assert.Equal([
             AnomalyPosition.NotApplicable, AnomalyPosition.UpperGenerator, AnomalyPosition.LowerGenerator,
+            AnomalyPosition.UpperAndLowerGenerators,
             AnomalyPosition.LeftSide, AnomalyPosition.RightSide, AnomalyPosition.Circumferential
         ], OccurrenceRules.SelectablePositions);
     }

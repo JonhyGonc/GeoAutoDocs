@@ -57,6 +57,27 @@ public sealed class AnomalyCatalogTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task LiteralReportTextCanCompletelyReplaceCatalogText()
+    {
+        const string expected = "Texto completamente personalizado para esta patologia.";
+        var saved = await _service.SaveAsync(new AnomalyDefinition
+        {
+            Name = "Patologia personalizada",
+            DescriptionTemplate = expected
+        });
+
+        var reopened = Assert.Single(await _service.ListAsync(), x => x.Id == saved.Id);
+        var anomaly = new OccurrenceAnomaly
+        {
+            AnomalyTypeId = reopened.Id,
+            AnomalyType = reopened,
+            AnomalyName = reopened.Name
+        };
+
+        Assert.Equal(expected, AnomalyTemplate.Render(reopened.DescriptionTemplate, reopened, anomaly));
+    }
+
+    [Fact]
     public async Task SedimentAccumulationIsSeededOnceAndKeepsMaterialDeposited()
     {
         await new ProjectStore(_paths).InitializeAsync();

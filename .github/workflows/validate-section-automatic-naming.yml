@@ -1,9 +1,7 @@
 name: Validate section automatic naming
 
 on:
-  push:
-    branches:
-      - fix/section-edit-save-stability
+  pull_request:
 
 jobs:
   build-and-test:

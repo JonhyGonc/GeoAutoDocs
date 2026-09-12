@@ -44,7 +44,7 @@ public sealed class InspectionExchangeTests : IDisposable
         Assert.Equal("MultiPoint", exported.LocationMode);
         Assert.Equal([12m, 13m], exported.MeteragePoints);
         Assert.Equal(occurrence.EffectiveDescription, exported.EffectiveDescription);
-        Assert.Equal("LowerGenerator", Assert.Single(exported.Anomalies).Position);
+        Assert.Equal("UpperAndLowerGenerators", Assert.Single(exported.Anomalies).Position);
         Assert.Single(exported.Evidence);
         Assert.DoesNotContain(Path.GetFullPath(_root), json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("iVBOR", json, StringComparison.OrdinalIgnoreCase);
@@ -221,7 +221,7 @@ public sealed class InspectionExchangeTests : IDisposable
         occurrence.Anomalies.Add(new OccurrenceAnomaly
         {
             OccurrenceId = occurrence.Id, AnomalyTypeId = anomaly.Id, AnomalyType = anomaly,
-            AnomalyName = anomaly.Name, Position = AnomalyPosition.LowerGenerator, Order = 0
+            AnomalyName = anomaly.Name, Position = AnomalyPosition.UpperAndLowerGenerators, Order = 0
         });
         var evidencePath = Path.Combine(_root, "evidence-do-not-export.png");
         File.WriteAllBytes(evidencePath, Convert.FromBase64String(

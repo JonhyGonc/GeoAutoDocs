@@ -126,7 +126,7 @@ public sealed class InspectionExchangeTests : IDisposable
         using (var docx = WordprocessingDocument.Open(output, false))
         {
             var body = string.Concat(docx.MainDocumentPart!.Document.Body!.Descendants<Text>().Select(x => x.Text));
-            Assert.Contains("Infiltração na geratriz inferior a 12 e 13 metros do início da filmagem", body);
+            Assert.Contains("Infiltração nas geratrizes superior e inferior a 12 e 13 metros do início da filmagem", body);
         }
         var sidecar = serializer.Deserialize(await File.ReadAllTextAsync(sidecarPath));
         Assert.True(exchange.TryReadInspectionManifest(output, out var manifest, out var error), error);

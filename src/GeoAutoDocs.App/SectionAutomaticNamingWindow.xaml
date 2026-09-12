@@ -80,13 +80,11 @@
                                            FontWeight="Bold" HorizontalAlignment="Center"
                                            VerticalAlignment="Center"/>
                             </Border>
-                            <StackPanel Grid.Column="1" Margin="8,0,10,0">
-                                <TextBlock Text="{Binding LocationName}" FontSize="10"
-                                           Foreground="{StaticResource TextMutedBrush}"
-                                           TextTrimming="CharacterEllipsis"/>
-                                <TextBlock Text="{Binding CurrentName}" FontWeight="SemiBold"
-                                           TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
+                            <TextBlock Grid.Column="1" Margin="8,0,10,0"
+                                       Text="{Binding LocationName}" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center"/>
                             <TextBlock Grid.Column="2" Text="{Binding CurrentName}"
                                        Foreground="{StaticResource TextSecondaryBrush}"
                                        TextTrimming="CharacterEllipsis"

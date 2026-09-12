@@ -54,6 +54,7 @@ public partial class MainWindow : Window
     private Media? _currentMedia;
     private FrameCaptureDraft? _captureDraft;
     private bool _loadingFields;
+    private bool _refreshingReportSectionSelection;
     private bool _hasPendingChanges;
     private long _pendingSaveRevision;
     private bool _sharedDirty;
@@ -1629,22 +1630,33 @@ public partial class MainWindow : Window
 
     private void RefreshReportSectionSelection()
     {
-        if (_currentProject is null)
+        var wasRefreshing = _refreshingReportSectionSelection;
+        _refreshingReportSectionSelection = true;
+        try
         {
-            ReportSectionsList.ItemsSource = null;
-            return;
+            if (_currentProject is null)
+            {
+                ReportSectionsList.ItemsSource = null;
+                return;
+            }
+
+            var selectedIds = _currentReport?.SectionLinks.Select(x => x.SectionId).ToHashSet() ?? [];
+            ReportSectionsList.ItemsSource = _currentProject.Locations.OrderBy(x => x.Order).ThenBy(x => x.Name)
+                .SelectMany(location => location.Sections.OrderBy(x => x.Order).ThenBy(x => x.Name)
+                    .Select(section => new ReportSectionSelectionItem(section.Id,
+                        $"{location.Name} — {section.Name}", selectedIds.Contains(section.Id))))
+                .ToList();
         }
-        var selectedIds = _currentReport?.SectionLinks.Select(x => x.SectionId).ToHashSet() ?? [];
-        ReportSectionsList.ItemsSource = _currentProject.Locations.OrderBy(x => x.Order).ThenBy(x => x.Name)
-            .SelectMany(location => location.Sections.OrderBy(x => x.Order).ThenBy(x => x.Name)
-                .Select(section => new ReportSectionSelectionItem(section.Id,
-                    $"{location.Name} — {section.Name}", selectedIds.Contains(section.Id))))
-            .ToList();
+        finally
+        {
+            _refreshingReportSectionSelection = wasRefreshing;
+        }
     }
 
     private void ReportSectionSelectionChanged(object sender, RoutedEventArgs e)
     {
-        if (_loadingFields || _loadingInspections || _currentProject is null || _currentReport is null || IsReadOnly ||
+        if (_loadingFields || _loadingInspections || _refreshingReportSectionSelection ||
+            _currentProject is null || _currentReport is null || IsReadOnly ||
             sender is not CheckBox { Tag: Guid sectionId } checkBox) return;
         var section = _currentProject.Locations.SelectMany(x => x.Sections).SingleOrDefault(x => x.Id == sectionId);
         if (section is null) return;
@@ -1657,13 +1669,33 @@ public partial class MainWindow : Window
 
     private void SelectAllReportSections_Click(object sender, RoutedEventArgs e)
     {
-        if (_currentProject is null || _currentReport is null || IsReadOnly) return;
-        foreach (var section in _currentProject.Locations.OrderBy(x => x.Order).SelectMany(x => x.Sections.OrderBy(y => y.Order)))
-            _currentReport.SelectSection(section);
-        NormalizeReportSectionOrder();
-        RefreshReportSectionSelection();
-        RefreshReportReview();
-        ScheduleSave();
+        if (_currentProject is null || _currentReport is null) return;
+        if (IsReadOnly)
+        {
+            MessageBox.Show("Este projeto está aberto somente para leitura.",
+                "Selecionar trechos", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            var orderedSections = _currentProject.Locations.OrderBy(x => x.Order).ThenBy(x => x.Name)
+                .SelectMany(x => x.Sections.OrderBy(y => y.Order).ThenBy(y => y.Name))
+                .ToList();
+            foreach (var section in orderedSections)
+                _currentReport.SelectSection(section);
+
+            NormalizeReportSectionOrder();
+            RefreshReportSectionSelection();
+            RefreshReportReview();
+            ScheduleSave();
+            _logger.Info($"Todos os trechos do relatório foram selecionados. " +
+                         $"RelatórioId='{_currentReport.Id}'; Trechos={orderedSections.Count}.");
+        }
+        catch (Exception ex)
+        {
+            ShowError("Não foi possível selecionar todos os trechos do relatório.", ex);
+        }
     }
 
     private void ClearReportSections_Click(object sender, RoutedEventArgs e)

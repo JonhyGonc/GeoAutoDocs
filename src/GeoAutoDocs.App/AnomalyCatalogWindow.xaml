@@ -58,7 +58,7 @@
                             <CheckBox x:Name="ComplementCheck" Content="Texto complementar" Margin="0,0,18,8"/>
                         </WrapPanel>
                         <TextBlock Text="Variáveis disponíveis" FontWeight="SemiBold" Margin="0,8,0,4"/>
-                        <TextBlock Text="{nome}  {posicao}  {orientacao}  {extensao}  {dimensao}  {condicao}  {condicaoInfiltracao}  {percentual}  {textoComplementar}"
+                        <TextBlock Text="Use: {nome}  {posicao}  {orientacao}  {extensao}  {dimensao}  {condicao}  {condicaoInfiltracao}  {percentual}  {textoComplementar}"
                                    TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontFamily="Consolas" FontSize="11"/>
                     </StackPanel>
                 </Expander>

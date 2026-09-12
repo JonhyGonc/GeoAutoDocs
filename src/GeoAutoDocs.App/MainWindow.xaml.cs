@@ -2144,18 +2144,17 @@ public partial class MainWindow : Window
 
     private void RefreshCaptures()
     {
-        if (_currentProject is null || _currentSection is null)
+        var count = _currentProject is null || _currentSection is null
+            ? 0
+            : _currentProject.Captures.Count(x =>
+                x.SectionId == _currentSection.Id && x.Status == CaptureStatus.Pending);
+        PendingCapturesSummary.Text = count switch
         {
-            CapturesList.ItemsSource = null;
-            PendingCapturesSummary.Text = "(0)";
-            return;
-        }
-        CapturesList.ItemsSource = _currentProject.Captures
-            .Where(x => x.SectionId == _currentSection.Id && x.Status == CaptureStatus.Pending)
-            .OrderBy(x => x.Order)
-            .Select(x => new CaptureListItem(x, FindVideo(x.VideoReferenceId)?.DisplayName ?? Path.GetFileName(x.VideoFilePath)))
-            .ToList();
-        PendingCapturesSummary.Text = $"({_currentProject.Captures.Count(x => x.SectionId == _currentSection.Id && x.Status == CaptureStatus.Pending)})";
+            0 => "Nenhuma captura neste trecho",
+            1 => "1 captura aguardando cadastro",
+            _ => $"{count} capturas aguardando cadastro"
+        };
+        PendingCapturesButton.IsEnabled = _currentProject is not null && _currentSection is not null && count > 0;
     }
 
     private void RefreshOccurrences()
@@ -3550,10 +3549,63 @@ public partial class MainWindow : Window
         await OpenOccurrenceEditorAsync(null, automaticCapture, automaticCapture);
     }
 
-    private async void CreateOccurrenceFromPending_Click(object sender, RoutedEventArgs e)
+    private async void OpenPendingCaptures_Click(object sender, RoutedEventArgs e)
     {
-        if (_currentProject is null || ((Button)sender).Tag is not Guid id || IsReadOnly || IsSectionReviewLocked) return;
-        await OpenOccurrenceEditorAsync(null, _currentProject.Captures.SingleOrDefault(x => x.Id == id));
+        if (_currentProject is null || _currentSection is null) return;
+        var sectionId = _currentSection.Id;
+        var items = _currentProject.Captures
+            .Where(x => x.SectionId == sectionId && x.Status == CaptureStatus.Pending)
+            .OrderBy(x => x.Order)
+            .Select(x => new PendingCaptureListItem(
+                x.Id,
+                x.FilePath,
+                FormatTime(x.VideoTimestamp),
+                FindVideo(x.VideoReferenceId)?.DisplayName ?? Path.GetFileName(x.VideoFilePath),
+                !IsReadOnly && !IsSectionReviewLocked,
+                !IsReadOnly))
+            .ToList();
+        if (items.Count == 0)
+        {
+            RefreshCaptures();
+            return;
+        }
+
+        PendingCaptureAction action;
+        Guid? captureId;
+        HideVideoSurfaceForOverlay();
+        try
+        {
+            await Dispatcher.Yield(DispatcherPriority.Render);
+            var window = new PendingCapturesWindow(items, LoadThumbnailOnDemandAsync) { Owner = this };
+            window.ShowDialog();
+            action = window.SelectedAction;
+            captureId = window.SelectedCaptureId;
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Falha ao abrir a janela de capturas pendentes.", ex);
+            ShowError("Não foi possível abrir as capturas pendentes.", ex);
+            return;
+        }
+        finally
+        {
+            RestoreVideoSurfaceAfterOverlay();
+        }
+
+        if (captureId is not Guid id || _currentProject is null) return;
+        switch (action)
+        {
+            case PendingCaptureAction.Register:
+                if (!IsReadOnly && !IsSectionReviewLocked)
+                    await OpenOccurrenceEditorAsync(null, _currentProject.Captures.SingleOrDefault(x => x.Id == id));
+                break;
+            case PendingCaptureAction.Navigate:
+                await NavigateToCaptureAsync(id);
+                break;
+            case PendingCaptureAction.Delete:
+                await DeletePendingCaptureAsync(id);
+                break;
+        }
     }
 
     private async void EditOccurrence_Click(object sender, RoutedEventArgs e)
@@ -3805,22 +3857,35 @@ public partial class MainWindow : Window
         await LoadVideoAsync(video, MediaLoadIntent.NavigateToEvidence, timestamp);
     }
 
-    private async void DeleteCapture_Click(object sender, RoutedEventArgs e)
+    private async Task DeletePendingCaptureAsync(Guid id)
     {
-        if (_currentProject is null || ((Button)sender).Tag is not Guid id || IsReadOnly) return;
+        if (_currentProject is null || IsReadOnly) return;
         var capture = _currentProject.Captures.SingleOrDefault(x => x.Id == id);
-        if (capture is null || MessageBox.Show("Excluir esta captura pendente e seu arquivo PNG?", "Confirmar exclusão",
+        if (capture is null)
+        {
+            MessageBox.Show("A captura pendente não foi encontrada.", "GeoAutoDocs",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            RefreshCaptures();
+            return;
+        }
+        if (MessageBox.Show("Excluir esta captura pendente e seu arquivo PNG?", "Confirmar exclusão",
                 MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         _frameCaptureService.DeletePending(_currentProject, capture, IsReadOnly);
         RefreshCaptures();
         await SaveInspectionChangesAsync();
     }
 
-    private async void GoToCapture_Click(object sender, RoutedEventArgs e)
+    private async Task NavigateToCaptureAsync(Guid id)
     {
-        if (_currentProject is null || ((Button)sender).Tag is not Guid id) return;
+        if (_currentProject is null) return;
         var capture = _currentProject.Captures.SingleOrDefault(x => x.Id == id);
-        if (capture is null) return;
+        if (capture is null)
+        {
+            MessageBox.Show("A captura pendente não foi encontrada.", "GeoAutoDocs",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            RefreshCaptures();
+            return;
+        }
         var section = FindSection(capture.SectionId);
         var location = _currentProject.Locations.FirstOrDefault(x => x.Sections.Any(y => y.Id == capture.SectionId));
         var video = FindVideo(capture.VideoReferenceId);
@@ -4175,25 +4240,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void ThumbnailImage_Loaded(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Image { DataContext: CaptureListItem item } image || item.Thumbnail is not null) return;
-        var generation = Volatile.Read(ref _inspectionLoadGeneration);
-        var token = _inspectionLoadCts?.Token ?? CancellationToken.None;
-        try
-        {
-            var thumbnail = await LoadThumbnailOnDemandAsync(item.ThumbnailPath, token);
-            if (thumbnail is null || token.IsCancellationRequested ||
-                generation != Volatile.Read(ref _inspectionLoadGeneration) ||
-                !ReferenceEquals(image.DataContext, item)) return;
-            item.Thumbnail = thumbnail;
-        }
-        catch (OperationCanceledException) when (token.IsCancellationRequested)
-        {
-            _logger.Info($"Miniatura cancelada após troca de contexto. Caminho='{item.ThumbnailPath}'.");
-        }
-    }
-
     private async Task<BitmapImage?> LoadThumbnailOnDemandAsync(string? path, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(path)) return null;
@@ -4286,26 +4332,6 @@ public partial class MainWindow : Window
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Availability)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusColor)));
         }
-    }
-
-    private sealed class CaptureListItem(Capture capture, string? videoName) : INotifyPropertyChanged
-    {
-        private BitmapImage? _thumbnail;
-        public Guid Id => capture.Id;
-        public string ThumbnailPath => capture.FilePath;
-        public BitmapImage? Thumbnail
-        {
-            get => _thumbnail;
-            set
-            {
-                if (ReferenceEquals(_thumbnail, value)) return;
-                _thumbnail = value;
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Thumbnail)));
-            }
-        }
-        public string Timestamp => FormatTime(capture.VideoTimestamp);
-        public string VideoName => string.IsNullOrWhiteSpace(videoName) ? "Vídeo de origem" : videoName;
-        public event PropertyChangedEventHandler? PropertyChanged;
     }
 
     private sealed class DevelopmentImagePreviewItem(string filePath)

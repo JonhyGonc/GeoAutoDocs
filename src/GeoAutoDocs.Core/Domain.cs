@@ -217,7 +217,7 @@ public enum AnomalyPosition
     NotReported = 0, UpperGenerator = 1, LowerGenerator = 2, LeftSide = 3, RightSide = 4,
     Circumferential = 5, NotApplicable = 6, UpperLeft = 7, UpperRight = 8,
     LowerLeft = 9, LowerRight = 10, PipeBottom = 11, PipeWall = 12, Joint = 13,
-    Side = 14
+    Side = 14, UpperAndLowerGenerators = 15
 }
 
 public enum AnomalyOrientation

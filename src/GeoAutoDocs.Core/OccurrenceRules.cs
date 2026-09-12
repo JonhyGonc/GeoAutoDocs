@@ -60,6 +60,7 @@ public static class OccurrenceRules
         AnomalyPosition.NotApplicable,
         AnomalyPosition.UpperGenerator,
         AnomalyPosition.LowerGenerator,
+        AnomalyPosition.UpperAndLowerGenerators,
         AnomalyPosition.LeftSide,
         AnomalyPosition.RightSide,
         AnomalyPosition.Circumferential
@@ -187,6 +188,7 @@ public static class OccurrenceRules
     public static string FormatPosition(AnomalyPosition value) => value switch
     {
         AnomalyPosition.UpperGenerator => "Geratriz superior", AnomalyPosition.LowerGenerator => "Geratriz inferior",
+        AnomalyPosition.UpperAndLowerGenerators => "Geratriz superior e inferior",
         AnomalyPosition.LeftSide => "Lateral esquerda", AnomalyPosition.RightSide => "Lateral direita",
         AnomalyPosition.UpperLeft => "Superior esquerda", AnomalyPosition.UpperRight => "Superior direita",
         AnomalyPosition.LowerLeft => "Inferior esquerda", AnomalyPosition.LowerRight => "Inferior direita",
@@ -263,6 +265,7 @@ public static class OccurrenceRules
     {
         AnomalyPosition.UpperGenerator => " na geratriz superior",
         AnomalyPosition.LowerGenerator => " na geratriz inferior",
+        AnomalyPosition.UpperAndLowerGenerators => " nas geratrizes superior e inferior",
         AnomalyPosition.LeftSide => " na lateral esquerda da tubulação",
         AnomalyPosition.RightSide => " na lateral direita da tubulação",
         AnomalyPosition.Side => " na lateral da tubulação",

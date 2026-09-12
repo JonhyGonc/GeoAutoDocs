@@ -2444,6 +2444,11 @@ public partial class MainWindow : Window
         ReorderSectionsButton.ToolTip = IsReadOnly ? "Projeto aberto somente para leitura."
             : _currentLocation?.Sections.Count > 1 ? "Ordenar trechos arrastando para cima ou para baixo"
             : "Crie pelo menos dois trechos para alterar a ordem.";
+        var hasProjectSections = _currentProject?.Locations.Any(x => x.Sections.Count > 0) == true;
+        RenameSectionsButton.IsEnabled = !IsReadOnly && !_captureInProgress && hasProjectSections;
+        RenameSectionsButton.ToolTip = IsReadOnly ? "Projeto aberto somente para leitura."
+            : hasProjectSections ? "Renomear todos os trechos em sequência"
+            : "Crie pelo menos um trecho para usar a renomeação automática.";
         EditSectionButton.IsEnabled = !IsReadOnly && !IsSectionReviewLocked && !_captureInProgress && _currentSection is not null;
         EditSectionButton.ToolTip = IsReadOnly ? "Projeto aberto somente para leitura."
             : IsSectionReviewLocked ? "Reabra o trecho para editar"
@@ -2565,6 +2570,110 @@ public partial class MainWindow : Window
         _currentVideo = null;
         RefreshInspectionTree();
         await SaveInspectionChangesAsync();
+    }
+
+    private async void RenameSectionsAutomatically_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await RenameSectionsAutomaticallyAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Falha inesperada na renomeação automática dos trechos.", ex);
+            ShowError("Não foi possível renomear os trechos.", ex);
+        }
+    }
+
+    private async Task RenameSectionsAutomaticallyAsync()
+    {
+        if (_currentProject is null || IsReadOnly) return;
+
+        var project = _currentProject;
+        var selectedLocationId = _currentLocation?.Id;
+        var selectedSectionId = _currentSection?.Id;
+        IReadOnlyList<SectionRenamePlanItem>? requestedPlan = null;
+
+        HideVideoSurfaceForOverlay();
+        try
+        {
+            var dialog = new SectionAutomaticNamingWindow(project) { Owner = this };
+            if (dialog.ShowDialog() == true) requestedPlan = dialog.RenamePlan;
+        }
+        finally
+        {
+            RestoreVideoSurfaceAfterOverlay();
+        }
+
+        if (requestedPlan is null) return;
+
+        var sectionsById = project.Locations
+            .SelectMany(location => location.Sections)
+            .ToDictionary(section => section.Id);
+        if (requestedPlan.Count != sectionsById.Count ||
+            requestedPlan.Select(item => item.SectionId).Distinct().Count() != requestedPlan.Count ||
+            requestedPlan.Any(item => !sectionsById.ContainsKey(item.SectionId)))
+            throw new InvalidDataException("A prévia de renomeação não corresponde aos trechos atuais do projeto.");
+
+        var previousNames = sectionsById.ToDictionary(pair => pair.Key, pair => pair.Value.Name);
+        if (requestedPlan.All(item =>
+                string.Equals(sectionsById[item.SectionId].Name, item.ProposedName, StringComparison.Ordinal)))
+            return;
+
+        try
+        {
+            foreach (var item in requestedPlan)
+            {
+                if (string.IsNullOrWhiteSpace(item.ProposedName))
+                    throw new InvalidDataException($"O novo nome do trecho '{item.SectionId}' está vazio.");
+                sectionsById[item.SectionId].Name = item.ProposedName;
+            }
+
+            MarkPendingChanges();
+            SaveStatus.Text = "Salvando novos nomes dos trechos...";
+            if (!await SavePendingAsync())
+            {
+                foreach (var pair in previousNames)
+                    sectionsById[pair.Key].Name = pair.Value;
+                _logger.Info($"Renomeação automática revertida após falha de salvamento. ProjectId='{project.Id}'.");
+            }
+            else
+            {
+                _logger.Info(
+                    $"Trechos renomeados automaticamente. ProjectId='{project.Id}'; Quantidade='{requestedPlan.Count}'; " +
+                    $"PrimeiroNome='{requestedPlan.FirstOrDefault()?.ProposedName}'; UltimoNome='{requestedPlan.LastOrDefault()?.ProposedName}'.");
+            }
+        }
+        catch
+        {
+            foreach (var pair in previousNames)
+                sectionsById[pair.Key].Name = pair.Value;
+            throw;
+        }
+        finally
+        {
+            if (_currentProject?.Id == project.Id)
+            {
+                _loadingInspections = true;
+                try
+                {
+                    _currentLocation = project.Locations.FirstOrDefault(x => x.Id == selectedLocationId)
+                                       ?? project.Locations.OrderBy(x => x.Order).FirstOrDefault();
+                    _currentSection = _currentLocation?.Sections.FirstOrDefault(x => x.Id == selectedSectionId)
+                                      ?? _currentLocation?.Sections.OrderBy(x => x.Order).FirstOrDefault();
+                    LocationsList.Items.Refresh();
+                    RefreshSectionSelector();
+                    RefreshReportSectionSelection();
+                    RefreshReportReview();
+                    ScheduleOverviewRefresh();
+                }
+                finally
+                {
+                    _loadingInspections = false;
+                    UpdateInspectionWriteState();
+                }
+            }
+        }
     }
 
     private async void ReorderSections_Click(object sender, RoutedEventArgs e)

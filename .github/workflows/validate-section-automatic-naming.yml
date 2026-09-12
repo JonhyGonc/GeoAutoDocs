@@ -1,0 +1,22 @@
+name: Validate section automatic naming
+
+on:
+  push:
+    branches:
+      - fix/section-edit-save-stability
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Restore
+        run: dotnet restore GeoAutoDocs.sln
+      - name: Build Release
+        run: dotnet build GeoAutoDocs.sln --configuration Release --no-restore
+      - name: Run tests
+        run: dotnet test GeoAutoDocs.sln --configuration Release --no-build --logger "console;verbosity=normal"

@@ -55,6 +55,8 @@ public partial class MainWindow : Window
     private FrameCaptureDraft? _captureDraft;
     private bool _loadingFields;
     private bool _refreshingReportSectionSelection;
+    private bool _reportSectionBulkUpdateInProgress;
+    private readonly ObservableCollection<ReportSectionSelectionItem> _reportSectionItems = [];
     private bool _hasPendingChanges;
     private long _pendingSaveRevision;
     private bool _sharedDirty;
@@ -165,6 +167,7 @@ public partial class MainWindow : Window
             }));
         };
         ProjectsList.ItemsSource = _projects;
+        ReportSectionsList.ItemsSource = _reportSectionItems;
         _saveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
         _saveTimer.Tick += async (_, _) => { _saveTimer.Stop(); await SavePendingAsync(); };
         _syncTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
@@ -1634,23 +1637,32 @@ public partial class MainWindow : Window
         _refreshingReportSectionSelection = true;
         try
         {
+            _reportSectionItems.Clear();
             if (_currentProject is null)
             {
-                ReportSectionsList.ItemsSource = null;
+                UpdateReportSectionBulkButtons();
                 return;
             }
 
             var selectedIds = _currentReport?.SectionLinks.Select(x => x.SectionId).ToHashSet() ?? [];
-            ReportSectionsList.ItemsSource = _currentProject.Locations.OrderBy(x => x.Order).ThenBy(x => x.Name)
-                .SelectMany(location => location.Sections.OrderBy(x => x.Order).ThenBy(x => x.Name)
-                    .Select(section => new ReportSectionSelectionItem(section.Id,
-                        $"{location.Name} — {section.Name}", selectedIds.Contains(section.Id))))
-                .ToList();
+            foreach (var location in _currentProject.Locations.OrderBy(x => x.Order).ThenBy(x => x.Name))
+            foreach (var section in location.Sections.OrderBy(x => x.Order).ThenBy(x => x.Name))
+                _reportSectionItems.Add(new ReportSectionSelectionItem(
+                    section.Id, $"{location.Name} — {section.Name}", selectedIds.Contains(section.Id)));
+            UpdateReportSectionBulkButtons();
         }
         finally
         {
             _refreshingReportSectionSelection = wasRefreshing;
         }
+    }
+
+    private void UpdateReportSectionBulkButtons()
+    {
+        var canChange = !_reportSectionBulkUpdateInProgress && _currentReport is not null &&
+                        _currentProject is not null && !IsReadOnly && _reportSectionItems.Count > 0;
+        SelectAllReportSectionsButton.IsEnabled = canChange && _reportSectionItems.Any(x => !x.IsSelected);
+        ClearReportSectionsButton.IsEnabled = canChange && _reportSectionItems.Any(x => x.IsSelected);
     }
 
     private void ReportSectionSelectionChanged(object sender, RoutedEventArgs e)
@@ -1664,47 +1676,93 @@ public partial class MainWindow : Window
         else _currentReport.SectionLinks.RemoveAll(x => x.SectionId == sectionId);
         NormalizeReportSectionOrder();
         RefreshReportReview();
+        UpdateReportSectionBulkButtons();
         ScheduleSave();
     }
 
-    private void SelectAllReportSections_Click(object sender, RoutedEventArgs e)
+    private async void SelectAllReportSections_Click(object sender, RoutedEventArgs e) =>
+        await SetAllReportSectionsAsync(true);
+
+    private async void ClearReportSections_Click(object sender, RoutedEventArgs e) =>
+        await SetAllReportSectionsAsync(false);
+
+    private async Task SetAllReportSectionsAsync(bool selected)
     {
-        if (_currentProject is null || _currentReport is null) return;
+        if (_reportSectionBulkUpdateInProgress) return;
+        if (_currentProject is null || _currentReport is null)
+        {
+            MessageBox.Show("Selecione um relatório antes de alterar seus trechos.",
+                "Trechos do relatório", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
         if (IsReadOnly)
         {
             MessageBox.Show("Este projeto está aberto somente para leitura.",
-                "Selecionar trechos", MessageBoxButton.OK, MessageBoxImage.Information);
+                "Trechos do relatório", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
+        var project = _currentProject;
+        var report = _currentReport;
+        var previousLinks = report.SectionLinks.ToList();
+        var previousSelection = previousLinks.Select(x => x.SectionId).ToHashSet();
+        var orderedSections = project.Locations.OrderBy(x => x.Order).ThenBy(x => x.Name)
+            .SelectMany(x => x.Sections.OrderBy(y => y.Order).ThenBy(y => y.Name))
+            .ToList();
+        var expectedCount = selected ? orderedSections.Count : 0;
+        if (report.SectionLinks.Count == expectedCount &&
+            (!selected || orderedSections.All(x => previousSelection.Contains(x.Id))))
+        {
+            RefreshReportSectionSelection();
+            return;
+        }
+
+        _reportSectionBulkUpdateInProgress = true;
+        _refreshingReportSectionSelection = true;
+        UpdateReportSectionBulkButtons();
         try
         {
-            var orderedSections = _currentProject.Locations.OrderBy(x => x.Order).ThenBy(x => x.Name)
-                .SelectMany(x => x.Sections.OrderBy(y => y.Order).ThenBy(y => y.Name))
-                .ToList();
-            foreach (var section in orderedSections)
-                _currentReport.SelectSection(section);
-
-            NormalizeReportSectionOrder();
-            RefreshReportSectionSelection();
+            ReportSectionSelection.SetAll(report, orderedSections, selected);
+            foreach (var item in _reportSectionItems)
+                item.IsSelected = selected;
             RefreshReportReview();
-            ScheduleSave();
-            _logger.Info($"Todos os trechos do relatório foram selecionados. " +
-                         $"RelatórioId='{_currentReport.Id}'; Trechos={orderedSections.Count}.");
+
+            MarkPendingChanges();
+            SaveStatus.Text = selected ? "Selecionando todos os trechos..." : "Limpando trechos do relatório...";
+            if (!await SavePendingAsync())
+            {
+                report.SectionLinks.Clear();
+                report.SectionLinks.AddRange(previousLinks);
+                foreach (var item in _reportSectionItems)
+                    item.IsSelected = previousSelection.Contains(item.SectionId);
+                MarkPendingChanges();
+                RefreshReportReview();
+                _logger.Info($"Seleção em massa revertida após falha de salvamento. " +
+                             $"RelatórioId='{report.Id}'; Selecionar={selected}.");
+                return;
+            }
+
+            _logger.Info(selected
+                ? $"Todos os trechos do relatório foram selecionados e persistidos. RelatórioId='{report.Id}'; Trechos={expectedCount}."
+                : $"Todos os trechos do relatório foram removidos e a alteração foi persistida. RelatórioId='{report.Id}'.");
         }
         catch (Exception ex)
         {
-            ShowError("Não foi possível selecionar todos os trechos do relatório.", ex);
+            report.SectionLinks.Clear();
+            report.SectionLinks.AddRange(previousLinks);
+            foreach (var item in _reportSectionItems)
+                item.IsSelected = previousSelection.Contains(item.SectionId);
+            RefreshReportReview();
+            _logger.Error("Falha ao alterar todos os trechos do relatório.", ex);
+            MessageBox.Show("Não foi possível alterar os trechos do relatório. A seleção anterior foi restaurada.",
+                "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
         }
-    }
-
-    private void ClearReportSections_Click(object sender, RoutedEventArgs e)
-    {
-        if (_currentReport is null || IsReadOnly) return;
-        _currentReport.SectionLinks.Clear();
-        RefreshReportSectionSelection();
-        RefreshReportReview();
-        ScheduleSave();
+        finally
+        {
+            _refreshingReportSectionSelection = false;
+            _reportSectionBulkUpdateInProgress = false;
+            UpdateReportSectionBulkButtons();
+        }
     }
 
     private void NormalizeReportSectionOrder()
@@ -4388,7 +4446,28 @@ public partial class MainWindow : Window
         }
     }
 
-    private sealed record ReportSectionSelectionItem(Guid SectionId, string DisplayName, bool IsSelected);
+    private sealed class ReportSectionSelectionItem(
+        Guid sectionId,
+        string displayName,
+        bool isSelected) : INotifyPropertyChanged
+    {
+        private bool _isSelected = isSelected;
+
+        public Guid SectionId { get; } = sectionId;
+        public string DisplayName { get; } = displayName;
+        public bool IsSelected
+        {
+            get => _isSelected;
+            set
+            {
+                if (_isSelected == value) return;
+                _isSelected = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
+            }
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+    }
 
     private sealed record OverviewReportItem(Guid Id, string Title, string Detail, string Status, string StatusColor);
 

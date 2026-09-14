@@ -13,7 +13,7 @@ public sealed record ReviewOptions
     public bool CheckNamingConsistency { get; init; } = true;
 
     public IReadOnlySet<string> TextPlaceholders { get; init; } =
-        new HashSet<string>(StringComparer.CurrentCultureIgnoreCase)
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "teste",
             "xxx",

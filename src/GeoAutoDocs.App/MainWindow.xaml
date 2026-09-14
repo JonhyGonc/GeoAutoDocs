@@ -87,9 +87,10 @@
                     <StackPanel><TextBlock Text="&#xE8A5;" FontFamily="Segoe MDL2 Assets" FontSize="15" HorizontalAlignment="Center"/>
                         <TextBlock Text="Relatórios" FontSize="9" Margin="0,4,0,0" HorizontalAlignment="Center"/></StackPanel>
                 </Button>
-                <Button x:Name="SidebarConfigButton" Style="{StaticResource SidebarItemStyle}" IsEnabled="False" ToolTip="Configurações">
-                    <StackPanel><TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="15" HorizontalAlignment="Center"/>
-                        <TextBlock Text="Config." FontSize="9" Margin="0,4,0,0" HorizontalAlignment="Center"/></StackPanel>
+                <Button x:Name="SidebarReviewButton" Style="{StaticResource SidebarItemStyle}" Click="OpenReportReview_Click"
+                        IsEnabled="False" ToolTip="Revisão do relatório">
+                    <StackPanel><TextBlock Text="&#xE9D5;" FontFamily="Segoe MDL2 Assets" FontSize="15" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Revisão" FontSize="9" Margin="0,4,0,0" HorizontalAlignment="Center"/></StackPanel>
                 </Button>
             </StackPanel>
         </Border>
@@ -665,7 +666,19 @@
 
                                 <DockPanel Margin="0,18,0,8"><Button Content="+  Adicionar seção" DockPanel.Dock="Right" Click="AddCustomSection_Click"/><TextBlock Text="Etapas adicionais" Style="{StaticResource SectionTitleTextStyle}" VerticalAlignment="Center"/></DockPanel>
                                 <ItemsControl x:Name="CustomSectionsList"><ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="6" Padding="10" Margin="0,4"><DockPanel><Button Content="Remover" Style="{StaticResource DangerButtonStyle}" DockPanel.Dock="Right" Tag="{Binding Id}" Click="RemoveCustomSection_Click"/><StackPanel><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Text}" TextTrimming="CharacterEllipsis" MaxWidth="650" Foreground="{StaticResource TextSecondaryBrush}"/><TextBlock Text="{Binding Images.Count, StringFormat={}{0} imagem(ns)}" Foreground="{StaticResource TextMutedBrush}"/></StackPanel></DockPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
-                                <Border Style="{StaticResource SubtleCardStyle}" Margin="0,18,0,0"><StackPanel><TextBlock x:Name="ReportReviewTitle" Text="Revisão do relatório" FontWeight="SemiBold"/><TextBlock x:Name="ReportReviewSummary" Margin="0,7,0,0" TextWrapping="Wrap"/><TextBlock x:Name="ReportReviewIssues" Margin="0,7,0,0" Foreground="{StaticResource WarningBrush}" TextWrapping="Wrap"/></StackPanel></Border>
+                                <Border Style="{StaticResource SubtleCardStyle}" Margin="0,18,0,0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock x:Name="ReportReviewTitle" Text="Revisão do relatório" FontWeight="SemiBold"/>
+                                            <TextBlock x:Name="ReportReviewSummary" Margin="0,7,0,0" TextWrapping="Wrap"/>
+                                            <TextBlock x:Name="ReportReviewIssues" Margin="0,7,0,0" Foreground="{StaticResource WarningBrush}" TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                        <Button x:Name="OpenReportReviewButton" Grid.Column="1" Content="Revisar relatório"
+                                                Style="{StaticResource PrimaryButtonStyle}" Margin="18,0,0,0"
+                                                VerticalAlignment="Center" Click="OpenReportReview_Click"/>
+                                    </Grid>
+                                </Border>
                                 <WrapPanel HorizontalAlignment="Right" Margin="0,22,0,8"><Button x:Name="OpenReportButton" Content="Abrir arquivo" IsEnabled="False" Click="OpenReport_Click"/><Button x:Name="OpenReportFolderButton" Content="Abrir pasta" IsEnabled="False" Click="OpenReportFolder_Click"/><Button x:Name="ContinueReportButton" Content="Continuar relatório existente" Click="ContinueReport_Click" ToolTipService.ShowOnDisabled="True"/><Button x:Name="ExportInspectionButton" Content="Exportar .geoadocs.json" Click="ExportInspection_Click"/><Button x:Name="SendToGeoAutoEngineButton" Content="Enviar ao GeoAutoEngine" Click="SendToGeoAutoEngine_Click" MinWidth="175"/><Button x:Name="GenerateReportButton" Content="Gerar relatório" Style="{StaticResource PrimaryButtonStyle}" Click="GenerateReport_Click" MinWidth="170"/></WrapPanel>
                                 <TextBlock x:Name="GeoAutoEngineStatusText" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6" HorizontalAlignment="Right"/>
                                 <TextBlock x:Name="GeneratedReportText" TextWrapping="Wrap" Foreground="{StaticResource SuccessBrush}"/>

@@ -53,7 +53,8 @@ public partial class PendingCapturesWindow : Window
 
     public PendingCapturesWindow(
         IReadOnlyList<PendingCaptureListItem> items,
-        Func<string?, CancellationToken, Task<BitmapImage?>> thumbnailLoader)
+        Func<string?, CancellationToken, Task<BitmapImage?>> thumbnailLoader,
+        Guid? highlightedCaptureId = null)
     {
         InitializeComponent();
         WindowLayout.KeepInsideWorkArea(this, 1040, 700);
@@ -66,6 +67,18 @@ public partial class PendingCapturesWindow : Window
             _ => $"{items.Count} capturas aguardando revisão"
         };
         EmptyState.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        if (highlightedCaptureId is Guid captureId &&
+            items.FirstOrDefault(x => x.Id == captureId) is { } highlighted)
+        {
+            CapturesList.SelectedItem = highlighted;
+            Loaded += (_, _) =>
+            {
+                CapturesList.UpdateLayout();
+                CapturesList.ScrollIntoView(highlighted);
+                CapturesList.Focus();
+            };
+        }
     }
 
     private void Complete(PendingCaptureAction action, object? tag)

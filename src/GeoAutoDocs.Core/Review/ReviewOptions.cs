@@ -8,6 +8,9 @@ public sealed record ReviewOptions
     public int MinimumDescriptionLength { get; init; } = 10;
     public bool CheckDuplicateOccurrences { get; init; } = true;
     public bool CheckTextQuality { get; init; } = true;
+    public bool CheckSectionSequence { get; init; } = true;
+    public bool CheckSectionContinuity { get; init; } = true;
+    public bool CheckNamingConsistency { get; init; } = true;
 
     public IReadOnlySet<string> TextPlaceholders { get; init; } =
         new HashSet<string>(StringComparer.CurrentCultureIgnoreCase)

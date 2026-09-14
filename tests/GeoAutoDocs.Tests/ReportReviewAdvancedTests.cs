@@ -172,7 +172,7 @@ public sealed class NamingConsistencyRuleTests
         Assert.Equal(ReviewSeverity.Info, issue.Severity);
         Assert.Equal("Formatação de nome inconsistente", issue.Title);
         Assert.Equal(inconsistent.Id, issue.SectionId);
-        Assert.Contains("Trecho 02", issue.SuggestedFix);
+        Assert.Contains("Trecho 02", issue.SuggestedFix!);
     }
 
     [Fact]
@@ -198,7 +198,7 @@ public sealed class NamingConsistencyRuleTests
         Assert.Equal(ReviewSeverity.Info, issue.Severity);
         Assert.Equal("Nome de anomalia diferente do catálogo", issue.Title);
         Assert.Equal(occurrence.Id, issue.OccurrenceId);
-        Assert.Contains("Raiz", issue.SuggestedFix);
+        Assert.Contains("Raiz", issue.SuggestedFix!);
     }
 
     [Fact]

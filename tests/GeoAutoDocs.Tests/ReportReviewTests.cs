@@ -9,9 +9,9 @@ public sealed class ReviewStructureRuleTests
 {
     [Theory]
     [InlineData(null, 0)]
-    [InlineData(300, 0)]
-    [InlineData(0, 1)]
-    [InlineData(-300, 1)]
+    [InlineData(300.0, 0)]
+    [InlineData(0.0, 1)]
+    [InlineData(-300.0, 1)]
     public void OptionalDiameterOnlyFailsWhenProvidedValueIsInvalid(double? diameter, int expectedErrors)
     {
         var fixture = ReviewFixture.Create();
@@ -25,9 +25,9 @@ public sealed class ReviewStructureRuleTests
 
     [Theory]
     [InlineData(null, 0)]
-    [InlineData(20, 0)]
-    [InlineData(0, 1)]
-    [InlineData(-1, 1)]
+    [InlineData(20.0, 0)]
+    [InlineData(0.0, 1)]
+    [InlineData(-1.0, 1)]
     public void OptionalLengthOnlyFailsWhenProvidedValueIsInvalid(double? length, int expectedErrors)
     {
         var fixture = ReviewFixture.Create();
@@ -54,7 +54,7 @@ public sealed class ReviewStructureRuleTests
 
         var result = fixture.Review(new StructureRule());
 
-        var issue = Assert.Single(result.Issues.Where(x => x.Title == "Nome de trecho duplicado"));
+        var issue = Assert.Single(result.Issues, x => x.Title == "Nome de trecho duplicado");
         Assert.Equal(ReviewSeverity.Warning, issue.Severity);
         Assert.Equal(fixture.Location.Id, issue.LocationId);
     }
@@ -92,8 +92,9 @@ public sealed class ReviewOccurrenceRuleTests
         occurrence.Anomalies[0].Position = AnomalyPosition.NotReported;
         fixture.Section.Occurrences.Add(occurrence);
 
-        var issue = Assert.Single(fixture.Review(new OccurrenceValidityRule()).Issues
-            .Where(x => x.Description.Contains("Informe a posição", StringComparison.Ordinal)));
+        var issue = Assert.Single(
+            fixture.Review(new OccurrenceValidityRule()).Issues,
+            x => x.Description.Contains("Informe a posição", StringComparison.Ordinal));
 
         Assert.Equal(ReviewSeverity.Error, issue.Severity);
         Assert.Equal(occurrence.Id, issue.OccurrenceId);
@@ -112,8 +113,9 @@ public sealed class ReviewOccurrenceRuleTests
         occurrence.Anomalies[0].CustomText = " ";
         fixture.Section.Occurrences.Add(occurrence);
 
-        var issue = Assert.Single(fixture.Review(new OccurrenceValidityRule()).Issues
-            .Where(x => x.Description.Contains("Descreva a anomalia", StringComparison.Ordinal)));
+        var issue = Assert.Single(
+            fixture.Review(new OccurrenceValidityRule()).Issues,
+            x => x.Description.Contains("Descreva a anomalia", StringComparison.Ordinal));
 
         Assert.Equal(nameof(OccurrenceAnomaly.CustomText), issue.ReportField);
     }

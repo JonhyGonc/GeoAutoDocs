@@ -75,10 +75,9 @@ public sealed class ReportReviewService
     private static int OrderOf(ReportReviewContext context, Guid? id, bool location)
     {
         if (id is null) return int.MinValue;
-        var section = context.SelectedSections.FirstOrDefault(x =>
-            location ? x.Location.Id == id : x.Section.Id == id);
-        if (section is null) return int.MaxValue;
-        return location ? section.LocationOrder : section.SectionOrder;
+        return location
+            ? context.GetLocationOrder(id.Value)
+            : context.GetSectionOrder(id.Value);
     }
 }
 

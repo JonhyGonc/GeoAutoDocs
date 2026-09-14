@@ -39,6 +39,7 @@ public sealed class ReportRequirementsRule : IReportReviewRule
         Severity = ReviewSeverity.Error,
         Title = title,
         Description = description,
+        NavigationArea = ReviewNavigationArea.Report,
         ReportField = field
     };
 }

@@ -106,6 +106,9 @@ public sealed class FileReferenceRule : IReportReviewRule
         Severity = ReviewSeverity.Error,
         Title = title,
         Description = description,
+        NavigationArea = section is null && occurrence is null && evidence is null
+            ? ReviewNavigationArea.Report
+            : ReviewNavigationArea.Inspection,
         ReportField = field,
         LocationId = section?.Location.Id,
         SectionId = section?.Section.Id,

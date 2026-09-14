@@ -13,6 +13,9 @@ public sealed class ReportReviewContext
     private readonly IReadOnlyDictionary<Guid, Capture> _capturesById;
     private readonly IReadOnlyDictionary<Guid, AnomalyDefinition> _anomalyDefinitionsById;
     private readonly IReadOnlyDictionary<Guid, ReviewSectionContext> _occurrenceSectionsById;
+    private readonly IReadOnlyDictionary<Guid, Occurrence> _occurrencesById;
+    private readonly IReadOnlyDictionary<Guid, int> _locationOrdersById;
+    private readonly IReadOnlyDictionary<Guid, int> _sectionOrdersById;
 
     public ReportReviewContext(
         Project project,
@@ -30,24 +33,27 @@ public sealed class ReportReviewContext
 
         var selectedIds = report.SectionLinks.Select(x => x.SectionId).ToHashSet();
         SelectedSections = project.Locations
-            .Select((location, locationIndex) => (location, locationIndex))
-            .OrderBy(x => x.location.Order)
-            .ThenBy(x => x.location.Name, StringComparer.CurrentCulture)
-            .ThenBy(x => x.location.Id)
-            .SelectMany(location => location.location.Sections
-                .Select((section, sectionIndex) => (section, sectionIndex))
-                .Where(x => selectedIds.Contains(x.section.Id))
-                .OrderBy(x => x.section.Order)
-                .ThenBy(x => x.section.Name, StringComparer.CurrentCulture)
-                .ThenBy(x => x.section.Id)
-                .Select(x => new ReviewSectionContext(
-                    location.location,
-                    x.section,
-                    location.location.Order,
-                    x.section.Order)))
+            .OrderBy(location => location.Order)
+            .ThenBy(location => location.Name, StringComparer.CurrentCulture)
+            .ThenBy(location => location.Id)
+            .SelectMany(location => location.Sections
+                .Where(section => selectedIds.Contains(section.Id))
+                .OrderBy(section => section.Order)
+                .ThenBy(section => section.Name, StringComparer.CurrentCulture)
+                .ThenBy(section => section.Id)
+                .Select(section => new ReviewSectionContext(
+                    location,
+                    section,
+                    location.Order,
+                    section.Order)))
             .ToList();
 
         _sectionsById = SelectedSections.ToDictionary(x => x.Section.Id);
+        _locationOrdersById = SelectedSections
+            .GroupBy(x => x.Location.Id)
+            .ToDictionary(x => x.Key, x => x.First().LocationOrder);
+        _sectionOrdersById = SelectedSections
+            .ToDictionary(x => x.Section.Id, x => x.SectionOrder);
         _videosById = SelectedSections
             .SelectMany(x => x.Section.VideoReferences)
             .GroupBy(x => x.Id)
@@ -76,6 +82,9 @@ public sealed class ReportReviewContext
                 .ThenBy(occurrence => occurrence.Meterage)
                 .ThenBy(occurrence => occurrence.Id))
             .ToList();
+        _occurrencesById = Occurrences
+            .GroupBy(x => x.Id)
+            .ToDictionary(x => x.Key, x => x.First());
         Evidences = Occurrences.SelectMany(x => x.Evidence).ToList();
         PendingCaptures = project.Captures
             .Where(x => selectedIds.Contains(x.SectionId) && x.Status == CaptureStatus.Pending)
@@ -97,6 +106,15 @@ public sealed class ReportReviewContext
 
     public bool TryGetOccurrenceSection(Guid occurrenceId, out ReviewSectionContext section) =>
         _occurrenceSectionsById.TryGetValue(occurrenceId, out section!);
+
+    public bool TryGetOccurrence(Guid occurrenceId, out Occurrence occurrence) =>
+        _occurrencesById.TryGetValue(occurrenceId, out occurrence!);
+
+    public int GetLocationOrder(Guid id) =>
+        _locationOrdersById.TryGetValue(id, out var order) ? order : int.MaxValue;
+
+    public int GetSectionOrder(Guid id) =>
+        _sectionOrdersById.TryGetValue(id, out var order) ? order : int.MaxValue;
 
     public bool TryGetVideo(Guid id, out VideoReference video) =>
         _videosById.TryGetValue(id, out video!);

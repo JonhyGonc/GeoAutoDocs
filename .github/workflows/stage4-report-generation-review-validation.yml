@@ -1,0 +1,100 @@
+name: Stage 4 report generation review validation
+
+on:
+  push:
+    branches:
+      - fix/section-edit-save-stability
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore GeoAutoDocs.sln
+
+      - name: Build Release
+        run: dotnet build GeoAutoDocs.sln --configuration Release --no-restore
+
+      - name: Test all
+        run: dotnet test GeoAutoDocs.sln --configuration Release --no-build --logger "console;verbosity=normal"
+
+      - name: Instantiate Stage 4 windows
+        shell: pwsh
+        run: |
+          $smoke = Join-Path $env:RUNNER_TEMP "Stage4WindowSmoke"
+          New-Item -ItemType Directory -Path $smoke | Out-Null
+          @'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <OutputType>Exe</OutputType>
+              <TargetFramework>net8.0-windows</TargetFramework>
+              <UseWPF>true</UseWPF>
+              <EnableWindowsTargeting>true</EnableWindowsTargeting>
+              <ImplicitUsings>enable</ImplicitUsings>
+              <Nullable>enable</Nullable>
+            </PropertyGroup>
+            <ItemGroup>
+              <ProjectReference Include="$REPO_ROOT\src\GeoAutoDocs.App\GeoAutoDocs.App.csproj" />
+            </ItemGroup>
+          </Project>
+          '@.Replace('$REPO_ROOT', $env:GITHUB_WORKSPACE) | Set-Content (Join-Path $smoke "Stage4WindowSmoke.csproj")
+          @'
+          using System.Windows;
+          using GeoAutoDocs.App;
+
+          internal static class Program
+          {
+              [STAThread]
+              private static void Main()
+              {
+                  var application = new Application();
+                  application.Resources.MergedDictionaries.Add(new ResourceDictionary
+                  {
+                      Source = new Uri(
+                          "pack://application:,,,/GeoAutoDocs.App;component/Styles/GeoAutoDocsTheme.xaml",
+                          UriKind.Absolute)
+                  });
+                  Window[] windows =
+                  [
+                      new ReportReviewWindow(),
+                      new ReportGenerationReviewDialog(ReportGenerationReviewDialogMode.Errors, 3),
+                      new ReportGenerationReviewDialog(ReportGenerationReviewDialogMode.Warnings, 2),
+                      new ReportGenerationReviewDialog(ReportGenerationReviewDialogMode.Incomplete, failedRuleCount: 1)
+                  ];
+                  foreach (var window in windows)
+                  {
+                      window.Show();
+                      window.UpdateLayout();
+                      window.Close();
+                  }
+                  application.Shutdown();
+              }
+          }
+          '@ | Set-Content (Join-Path $smoke "Program.cs")
+          dotnet run --project (Join-Path $smoke "Stage4WindowSmoke.csproj") --configuration Release
+
+      - name: Start application smoke test
+        shell: pwsh
+        run: |
+          $env:GEOAUTODOCS_DATA_ROOT = Join-Path $env:RUNNER_TEMP "GeoAutoDocsStage4"
+          New-Item -ItemType Directory -Path $env:GEOAUTODOCS_DATA_ROOT -Force | Out-Null
+          $exe = Join-Path $env:GITHUB_WORKSPACE "src\GeoAutoDocs.App\bin\Release\net8.0-windows\GeoAutoDocs.App.exe"
+          $process = Start-Process $exe -PassThru
+          Start-Sleep -Seconds 10
+          if ($process.HasExited) {
+            throw "GeoAutoDocs encerrou durante a inicialização. ExitCode=$($process.ExitCode)"
+          }
+          $logPath = Join-Path $env:GEOAUTODOCS_DATA_ROOT "logs\GeoAutoDocs.log"
+          if (-not (Test-Path $logPath) -or
+              -not (Select-String -Path $logPath -Pattern "Janela principal exibida" -Quiet)) {
+            throw "O log não confirmou a exibição da janela principal em $logPath."
+          }
+          Stop-Process -Id $process.Id -Force

@@ -86,9 +86,11 @@ jobs:
           if ($process.HasExited) {
             throw "GeoAutoDocs encerrou durante a inicialização. ExitCode=$($process.ExitCode)"
           }
-          $log = Get-ChildItem $env:LOCALAPPDATA -Filter "GeoAutoDocs.log" -Recurse |
-            Select-Object -First 1
-          if ($null -eq $log -or -not (Select-String -Path $log.FullName -Pattern "Janela principal exibida" -Quiet)) {
-            throw "O log não confirmou a exibição da janela principal."
+          $actualLocalAppData = [Environment]::GetFolderPath(
+            [Environment+SpecialFolder]::LocalApplicationData)
+          $logPath = Join-Path $actualLocalAppData "GeoAutoDocs\logs\GeoAutoDocs.log"
+          if (-not (Test-Path $logPath) -or
+              -not (Select-String -Path $logPath -Pattern "Janela principal exibida" -Quiet)) {
+            throw "O log não confirmou a exibição da janela principal em $logPath."
           }
           Stop-Process -Id $process.Id -Force

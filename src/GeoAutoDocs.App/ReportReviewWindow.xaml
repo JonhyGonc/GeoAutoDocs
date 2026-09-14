@@ -4,6 +4,42 @@
         xmlns:review="clr-namespace:GeoAutoDocs.Core.Review;assembly=GeoAutoDocs.Core"
         Title="Revisão do Relatório" Width="920" Height="720" MinWidth="700" MinHeight="520"
         WindowStartupLocation="CenterOwner" Background="{StaticResource WindowBackgroundBrush}">
+    <Window.Resources>
+        <Style x:Key="ReviewFilterChipStyle" TargetType="ToggleButton">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="14,9"/>
+            <Setter Property="Margin" Value="0,0,8,8"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Chip" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="18" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chip" Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Chip" Property="Background" Value="{StaticResource PrimaryBrush}"/>
+                                <Setter TargetName="Chip" Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Chip" Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
     <Grid Margin="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -82,13 +118,13 @@
 
         <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,12">
             <ToggleButton x:Name="AllFilterButton" Content="Todos" Tag="All" IsChecked="True"
-                          Style="{StaticResource SelectionChipStyle}" Click="Filter_Click"/>
+                          Style="{StaticResource ReviewFilterChipStyle}" Click="Filter_Click"/>
             <ToggleButton x:Name="ErrorsFilterButton" Content="Erros" Tag="Errors"
-                          Style="{StaticResource SelectionChipStyle}" Click="Filter_Click"/>
+                          Style="{StaticResource ReviewFilterChipStyle}" Click="Filter_Click"/>
             <ToggleButton x:Name="WarningsFilterButton" Content="Avisos" Tag="Warnings"
-                          Style="{StaticResource SelectionChipStyle}" Click="Filter_Click"/>
+                          Style="{StaticResource ReviewFilterChipStyle}" Click="Filter_Click"/>
             <ToggleButton x:Name="InformationFilterButton" Content="Informações" Tag="Information"
-                          Style="{StaticResource SelectionChipStyle}" Click="Filter_Click"/>
+                          Style="{StaticResource ReviewFilterChipStyle}" Click="Filter_Click"/>
         </StackPanel>
 
         <Grid Grid.Row="4">

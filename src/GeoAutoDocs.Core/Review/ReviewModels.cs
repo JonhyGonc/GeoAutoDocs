@@ -7,12 +7,20 @@ public enum ReviewSeverity
     Info = 2
 }
 
+public enum ReviewNavigationArea
+{
+    Report,
+    Inspection,
+    PendingCaptures
+}
+
 public sealed record ReviewIssue
 {
     public required string RuleId { get; init; }
     public required ReviewSeverity Severity { get; init; }
     public required string Title { get; init; }
     public required string Description { get; init; }
+    public ReviewNavigationArea NavigationArea { get; init; } = ReviewNavigationArea.Report;
 
     public Guid? LocationId { get; init; }
     public Guid? SectionId { get; init; }

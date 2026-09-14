@@ -1818,12 +1818,14 @@ public partial class MainWindow : Window
                 switch (dialog.Choice)
                 {
                     case ReportGenerationReviewChoice.OpenReview:
+                        GeneratedReportText.Text = "Geração bloqueada: revisão incompleta.";
                         ShowReportReview(ReviewIssueFilter.All);
                         return null;
                     case ReportGenerationReviewChoice.Retry:
                         forceReview = true;
                         continue;
                     default:
+                        GeneratedReportText.Text = "Geração cancelada: revisão incompleta.";
                         return null;
                 }
             }
@@ -1835,7 +1837,14 @@ public partial class MainWindow : Window
                     snapshot.Result.ErrorCount) { Owner = this };
                 dialog.ShowDialog();
                 if (dialog.Choice == ReportGenerationReviewChoice.OpenReview)
+                {
+                    GeneratedReportText.Text = "Geração bloqueada: corrija os erros da revisão.";
                     ShowReportReview(ReviewIssueFilter.Errors);
+                }
+                else
+                {
+                    GeneratedReportText.Text = "Geração cancelada: a revisão possui erros.";
+                }
                 return null;
             }
 
@@ -1848,12 +1857,14 @@ public partial class MainWindow : Window
                 switch (dialog.Choice)
                 {
                     case ReportGenerationReviewChoice.OpenReview:
+                        GeneratedReportText.Text = "Geração pausada para revisão dos avisos.";
                         ShowReportReview(ReviewIssueFilter.Warnings);
                         return null;
                     case ReportGenerationReviewChoice.GenerateAnyway:
                         warningsAccepted = true;
                         continue;
                     default:
+                        GeneratedReportText.Text = "Geração cancelada pelo usuário.";
                         return null;
                 }
             }

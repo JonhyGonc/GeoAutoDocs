@@ -391,3 +391,91 @@ internal sealed class ReviewFixture
         public bool FileExists(string path) => true;
     }
 }
+
+
+public sealed class ReportReviewPresentationTests
+{
+    private static readonly ReviewIssue[] Issues =
+    [
+        Issue(ReviewSeverity.Error, "erro"),
+        Issue(ReviewSeverity.Warning, "aviso"),
+        Issue(ReviewSeverity.Info, "informação")
+    ];
+
+    [Theory]
+    [InlineData(ReviewIssueFilter.All, 3)]
+    [InlineData(ReviewIssueFilter.Errors, 1)]
+    [InlineData(ReviewIssueFilter.Warnings, 1)]
+    [InlineData(ReviewIssueFilter.Information, 1)]
+    public void FilterUsesExistingSnapshotWithoutReordering(
+        ReviewIssueFilter filter, int expectedCount)
+    {
+        var filtered = ReviewIssueFiltering.Apply(Issues, filter);
+
+        Assert.Equal(expectedCount, filtered.Count);
+        Assert.True(filtered.SequenceEqual(Issues.Where(issue => filter switch
+        {
+            ReviewIssueFilter.Errors => issue.Severity == ReviewSeverity.Error,
+            ReviewIssueFilter.Warnings => issue.Severity == ReviewSeverity.Warning,
+            ReviewIssueFilter.Information => issue.Severity == ReviewSeverity.Info,
+            _ => true
+        })));
+    }
+
+    [Fact]
+    public void SnapshotBecomesStaleOnlyAfterDataRevisionChanges()
+    {
+        var projectId = Guid.NewGuid();
+        var reportId = Guid.NewGuid();
+        var snapshot = new ReportReviewSnapshot(
+            projectId,
+            reportId,
+            14,
+            DateTimeOffset.UtcNow,
+            new ReviewResult([], [], new ReviewMetrics(0, 0, 0, 0)));
+
+        Assert.True(snapshot.AppliesTo(projectId, reportId));
+        Assert.False(snapshot.IsStale(projectId, reportId, 14));
+        Assert.True(snapshot.IsStale(projectId, reportId, 15));
+        Assert.False(snapshot.IsStale(projectId, Guid.NewGuid(), 15));
+    }
+
+    [Fact]
+    public void NavigationTargetCopiesStructuredIssueContext()
+    {
+        var locationId = Guid.NewGuid();
+        var sectionId = Guid.NewGuid();
+        var occurrenceId = Guid.NewGuid();
+        var captureId = Guid.NewGuid();
+        var issue = new ReviewIssue
+        {
+            RuleId = "test.navigation",
+            Severity = ReviewSeverity.Warning,
+            Title = "Captura pendente",
+            Description = "Revise a captura.",
+            NavigationArea = ReviewNavigationArea.PendingCaptures,
+            LocationId = locationId,
+            SectionId = sectionId,
+            OccurrenceId = occurrenceId,
+            CaptureId = captureId,
+            ReportField = "Evidence"
+        };
+
+        var target = ReviewNavigationTarget.FromIssue(issue);
+
+        Assert.Equal(ReviewNavigationArea.PendingCaptures, target.Area);
+        Assert.Equal(locationId, target.LocationId);
+        Assert.Equal(sectionId, target.SectionId);
+        Assert.Equal(occurrenceId, target.OccurrenceId);
+        Assert.Equal(captureId, target.CaptureId);
+        Assert.Equal("Evidence", target.ReportField);
+    }
+
+    private static ReviewIssue Issue(ReviewSeverity severity, string title) => new()
+    {
+        RuleId = "test." + title,
+        Severity = severity,
+        Title = title,
+        Description = title
+    };
+}

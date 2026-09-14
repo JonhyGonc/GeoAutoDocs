@@ -20,6 +20,7 @@ public sealed class EvidenceCoverageRule : IReportReviewRule
                 Severity = ReviewSeverity.Warning,
                 Title = "Anomalia sem evidência",
                 Description = $"{sectionName} possui anomalia sem evidência.",
+                NavigationArea = ReviewNavigationArea.Inspection,
                 LocationId = section?.Location.Id,
                 SectionId = section?.Section.Id ?? occurrence.InspectionSectionId,
                 OccurrenceId = occurrence.Id,
@@ -45,6 +46,7 @@ public sealed class EvidenceCoverageRule : IReportReviewRule
                 Title = "Capturas pendentes",
                 Description =
                     $"{section.Section.Name} possui {pending.Count} captura(s) pendente(s); elas não entrarão no relatório.",
+                NavigationArea = ReviewNavigationArea.PendingCaptures,
                 LocationId = section.Location.Id,
                 SectionId = section.Section.Id,
                 CaptureId = pending[0].Id,

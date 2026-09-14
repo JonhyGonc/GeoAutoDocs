@@ -70,6 +70,7 @@ public sealed class DuplicateOccurrenceRule : IReportReviewRule
                             Description =
                                 $"{cluster.Count} ocorrências do tipo “{first.AnomalyName}” foram encontradas " +
                                 $"entre {first.Meterage:0.##} m e {last.Meterage:0.##} m.",
+                            NavigationArea = ReviewNavigationArea.Inspection,
                             LocationId = section.Location.Id,
                             SectionId = section.Section.Id,
                             OccurrenceId = first.Occurrence.Id,

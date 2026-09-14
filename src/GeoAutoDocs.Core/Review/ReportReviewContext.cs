@@ -12,6 +12,7 @@ public sealed class ReportReviewContext
     private readonly IReadOnlyDictionary<Guid, VideoReference> _videosById;
     private readonly IReadOnlyDictionary<Guid, Capture> _capturesById;
     private readonly IReadOnlyDictionary<Guid, AnomalyDefinition> _anomalyDefinitionsById;
+    private readonly IReadOnlyDictionary<Guid, ReviewSectionContext> _occurrenceSectionsById;
 
     public ReportReviewContext(
         Project project,
@@ -42,8 +43,8 @@ public sealed class ReportReviewContext
                 .Select(x => new ReviewSectionContext(
                     location.location,
                     x.section,
-                    location.locationIndex,
-                    x.sectionIndex)))
+                    location.location.Order,
+                    x.section.Order)))
             .ToList();
 
         _sectionsById = SelectedSections.ToDictionary(x => x.Section.Id);
@@ -65,6 +66,10 @@ public sealed class ReportReviewContext
             .ToDictionary(x => x.Key, x => x.First());
         _anomalyDefinitionsById = knownDefinitions;
 
+        _occurrenceSectionsById = SelectedSections
+            .SelectMany(section => section.Section.Occurrences.Select(occurrence => (occurrence.Id, section)))
+            .GroupBy(x => x.Id)
+            .ToDictionary(x => x.Key, x => x.First().section);
         Occurrences = SelectedSections
             .SelectMany(x => x.Section.Occurrences
                 .OrderBy(occurrence => occurrence.Order)
@@ -89,6 +94,9 @@ public sealed class ReportReviewContext
 
     public bool TryGetSection(Guid id, out ReviewSectionContext section) =>
         _sectionsById.TryGetValue(id, out section!);
+
+    public bool TryGetOccurrenceSection(Guid occurrenceId, out ReviewSectionContext section) =>
+        _occurrenceSectionsById.TryGetValue(occurrenceId, out section!);
 
     public bool TryGetVideo(Guid id, out VideoReference video) =>
         _videosById.TryGetValue(id, out video!);

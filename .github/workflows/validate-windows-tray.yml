@@ -1,0 +1,52 @@
+name: Validate Windows tray behavior
+
+on:
+  push:
+    branches:
+      - fix/section-edit-save-stability
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Restore
+        run: dotnet restore GeoAutoDocs.sln
+      - name: Build
+        run: dotnet build GeoAutoDocs.sln --configuration Release --no-restore
+      - name: Smoke test startup and close-to-tray
+        shell: pwsh
+        run: |
+          $dataRoot = Join-Path $env:RUNNER_TEMP "GeoAutoDocsTraySmoke"
+          $env:GEOAUTODOCS_DATA_ROOT = $dataRoot
+          $exe = Join-Path $env:GITHUB_WORKSPACE "src\GeoAutoDocs.App\bin\Release\net8.0-windows\GeoAutoDocs.App.exe"
+          $process = Start-Process -FilePath $exe -PassThru
+          try {
+            $log = Join-Path $dataRoot "logs\GeoAutoDocs.log"
+            $deadline = (Get-Date).AddSeconds(20)
+            do {
+              Start-Sleep -Milliseconds 500
+              $process.Refresh()
+              if ($process.HasExited) {
+                if (Test-Path $log) { Get-Content $log }
+                throw "GeoAutoDocs encerrou durante a inicialização."
+              }
+              $opened = (Test-Path $log) -and ((Get-Content $log -Raw) -match "Janela principal exibida")
+            } while (-not $opened -and (Get-Date) -lt $deadline)
+            if (-not $opened) { throw "A janela principal não foi confirmada no log." }
+
+            $closeRequested = $process.CloseMainWindow()
+            if (-not $closeRequested) { throw "Não foi possível solicitar o fechamento da janela principal." }
+            Start-Sleep -Seconds 3
+            $process.Refresh()
+            if ($process.HasExited) { throw "O processo encerrou em vez de permanecer na bandeja." }
+          }
+          finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+      - name: Test
+        run: dotnet test GeoAutoDocs.sln --configuration Release --no-build --logger "console;verbosity=normal"

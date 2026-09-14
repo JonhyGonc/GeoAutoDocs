@@ -1441,6 +1441,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        _reportReviewCts?.Cancel();
         try
         {
             if ((_currentProject is not null || _hasPendingChanges) &&

@@ -198,7 +198,9 @@ public sealed class NamingConsistencyRuleTests
         Assert.Equal(ReviewSeverity.Info, issue.Severity);
         Assert.Equal("Nome de anomalia diferente do catálogo", issue.Title);
         Assert.Equal(occurrence.Id, issue.OccurrenceId);
-        Assert.Contains("Raiz", issue.SuggestedFix!);
+        Assert.Contains("Raízes", issue.Description);
+        Assert.Contains("Raiz", issue.Description);
+        Assert.False(string.IsNullOrWhiteSpace(issue.SuggestedFix));
     }
 
     [Fact]

@@ -49,8 +49,8 @@ public sealed class FileReferenceRule : IReportReviewRule
         foreach (var evidence in context.Evidences.OrderBy(x => x.Order).ThenBy(x => x.Id))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var occurrence = context.Occurrences.FirstOrDefault(x => x.Id == evidence.OccurrenceId);
-            context.TryGetSection(occurrence?.InspectionSectionId ?? Guid.Empty, out var section);
+            context.TryGetOccurrence(evidence.OccurrenceId, out var occurrence);
+            context.TryGetOccurrenceSection(evidence.OccurrenceId, out var section);
 
             if (string.IsNullOrWhiteSpace(evidence.FilePath) ||
                 !context.FileSystem.FileExists(evidence.FilePath))

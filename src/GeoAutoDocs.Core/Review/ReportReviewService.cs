@@ -96,6 +96,9 @@ public static class ReportReviewRules
         new Rules.StructureRule(),
         new Rules.OccurrenceValidityRule(),
         new Rules.DuplicateOccurrenceRule(),
-        new Rules.TextQualityRule()
+        new Rules.TextQualityRule(),
+        new Rules.SectionSequenceRule(),
+        new Rules.SectionContinuityRule(),
+        new Rules.NamingConsistencyRule()
     ];
 }

@@ -63,6 +63,7 @@ public sealed class StructureRule : IReportReviewRule
                     Title = "Nome de trecho duplicado",
                     Description =
                         $"O Local {DisplayLocation(location)} possui {duplicate.Count()} trechos chamados “{duplicate.Key}”.",
+                    NavigationArea = ReviewNavigationArea.Inspection,
                     LocationId = location.Id,
                     SectionId = first.Section.Id,
                     ReportField = "InspectionSection.Name"
@@ -82,6 +83,9 @@ public sealed class StructureRule : IReportReviewRule
         Severity = ReviewSeverity.Error,
         Title = title,
         Description = description,
+        NavigationArea = locationId is null && sectionId is null
+            ? ReviewNavigationArea.Report
+            : ReviewNavigationArea.Inspection,
         LocationId = locationId,
         SectionId = sectionId,
         ReportField = field

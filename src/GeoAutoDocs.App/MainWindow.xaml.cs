@@ -13,6 +13,7 @@ using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using GeoAutoDocs.Core;
+using GeoAutoDocs.Core.Review;
 using GeoAutoDocs.Infrastructure;
 using LibVLCSharp.Shared;
 using Microsoft.Win32;
@@ -37,6 +38,7 @@ public partial class MainWindow : Window
     private readonly IInspectionCorrectionChannel? _correctionChannel;
     private readonly InspectionCorrectionService _correctionService = new();
     private readonly SemaphoreSlim _correctionReviewGate = new(1, 1);
+    private readonly ReportReviewService _reportReviewService;
     private BackupStatus _backupStatus;
     private readonly LibVLC _libVlc;
     private readonly MediaPlayer _mediaPlayer;
@@ -76,6 +78,10 @@ public partial class MainWindow : Window
     private Drawing.Icon? _trayIconImage;
     private bool _saveErrorNotified;
     private bool _reportDeletionInProgress;
+    private ReportReviewWindow? _reportReviewWindow;
+    private ReportReviewSnapshot? _reportReviewSnapshot;
+    private ReportReviewContext? _reportReviewContext;
+    private CancellationTokenSource? _reportReviewCts;
     private bool _seeking;
     private bool _playerOperationInProgress;
     private bool _videoLoadInProgress;
@@ -130,6 +136,8 @@ public partial class MainWindow : Window
         _wordReportService = wordReportService;
         _sharedProjects = sharedProjects;
         _logger = logger;
+        _reportReviewService = new ReportReviewService(
+            ReportReviewRules.CreateDefault(), new LocalReportReviewLogger(logger));
         LoadTrayPreferences();
         InitializeTrayIcon();
         _frameCaptureService = frameCaptureService;
@@ -398,6 +406,7 @@ public partial class MainWindow : Window
         }
 
         if (_mediaPlayer.IsPlaying) _mediaPlayer.Pause();
+        _reportReviewWindow?.Hide();
         ShowInTaskbar = false;
         Hide();
         _logger.Info("Janela principal ocultada na bandeja do Windows.");
@@ -867,6 +876,7 @@ public partial class MainWindow : Window
     {
         if (!await FinalizeCurrentProjectAsync()) return;
         await StopAndReleaseCurrentMediaAsync();
+        ResetReportReviewState();
         _currentProject = null; _currentReport = null; _sharedSession = null;
         EditorView.Visibility = Visibility.Collapsed;
         HomeShell.Visibility = Visibility.Visible;
@@ -900,23 +910,28 @@ public partial class MainWindow : Window
     private void UpdateSidebarNavigation()
     {
         if (SidebarProjectsButton is null || SidebarInspectionButton is null || SidebarReportsButton is null ||
-            OverviewTab is null || InspectionsTab is null || WordConfigTab is null)
+            SidebarReviewButton is null || OverviewTab is null || InspectionsTab is null || WordConfigTab is null)
             return;
         var projectOpen = _currentProject is not null && EditorView.Visibility == Visibility.Visible;
+        var reviewActive = _reportReviewWindow?.IsVisible == true;
         SidebarInspectionButton.IsEnabled = projectOpen;
         SidebarReportsButton.IsEnabled = projectOpen;
+        SidebarReviewButton.IsEnabled = projectOpen;
 
-        var projectsActive = !projectOpen || OverviewTab.IsSelected;
+        var projectsActive = !reviewActive && (!projectOpen || OverviewTab.IsSelected);
         SidebarProjectsButton.Style = (Style)FindResource(
             projectsActive ? "SidebarItemActiveStyle" : "SidebarItemStyle");
         SidebarInspectionButton.Style = (Style)FindResource(
-            projectOpen && InspectionsTab.IsSelected ? "SidebarItemActiveStyle" : "SidebarItemStyle");
+            !reviewActive && projectOpen && InspectionsTab.IsSelected ? "SidebarItemActiveStyle" : "SidebarItemStyle");
         SidebarReportsButton.Style = (Style)FindResource(
-            projectOpen && WordConfigTab.IsSelected ? "SidebarItemActiveStyle" : "SidebarItemStyle");
+            !reviewActive && projectOpen && WordConfigTab.IsSelected ? "SidebarItemActiveStyle" : "SidebarItemStyle");
+        SidebarReviewButton.Style = (Style)FindResource(
+            reviewActive ? "SidebarItemActiveStyle" : "SidebarItemStyle");
     }
 
     private void LoadProject(Project project)
     {
+        ResetReportReviewState();
         _loadingFields = true;
         ProjectTitle.Text = project.Name;
         ProjectClientSummary.Text = string.IsNullOrWhiteSpace(project.DefaultClient)
@@ -2266,6 +2281,247 @@ public partial class MainWindow : Window
         OverviewUpdatedAt.Text = _currentProject.UpdatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
     }
 
+    private void OpenReportReview_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null)
+            return;
+        if (_currentReport is null)
+        {
+            WordConfigTab.IsSelected = true;
+            UpdateSidebarNavigation();
+            MessageBox.Show("Crie ou selecione um relatório antes de executar a revisão.",
+                "Revisão do relatório", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        ApplyFieldsToModel();
+        var window = EnsureReportReviewWindow();
+        RefreshReportReview();
+        if (!window.IsVisible) window.Show();
+        window.Activate();
+        UpdateSidebarNavigation();
+    }
+
+    private ReportReviewWindow EnsureReportReviewWindow()
+    {
+        if (_reportReviewWindow is not null) return _reportReviewWindow;
+        var window = new ReportReviewWindow { Owner = this };
+        window.ReviewRequested += ReportReviewWindow_ReviewRequested;
+        window.CancelRequested += ReportReviewWindow_CancelRequested;
+        window.NavigateRequested += ReportReviewWindow_NavigateRequested;
+        window.Closed += ReportReviewWindow_Closed;
+        _reportReviewWindow = window;
+        return window;
+    }
+
+    private async void ReportReviewWindow_ReviewRequested(object? sender, EventArgs e) =>
+        await ExecuteReportReviewAsync();
+
+    private void ReportReviewWindow_CancelRequested(object? sender, EventArgs e) =>
+        _reportReviewCts?.Cancel();
+
+    private async void ReportReviewWindow_NavigateRequested(
+        object? sender, ReviewIssueNavigationEventArgs e) =>
+        await NavigateToReviewIssueAsync(e.Issue);
+
+    private void ReportReviewWindow_Closed(object? sender, EventArgs e)
+    {
+        if (!ReferenceEquals(sender, _reportReviewWindow)) return;
+        _reportReviewCts?.Cancel();
+        _reportReviewWindow = null;
+        UpdateSidebarNavigation();
+    }
+
+    private async Task ExecuteReportReviewAsync()
+    {
+        if (_currentProject is null || _currentReport is null || _reportReviewCts is not null)
+            return;
+
+        ApplyFieldsToModel();
+        var project = _currentProject;
+        var report = _currentReport;
+        var revision = _pendingSaveRevision;
+        var configuredTemplate = string.IsNullOrWhiteSpace(report.TemplatePath)
+            ? _wordReportService.DefaultTemplatePath
+            : report.TemplatePath;
+        var context = new ReportReviewContext(
+            project, report, configuredTemplate, ReviewFileSystem.Instance);
+        var cancellation = new CancellationTokenSource();
+        _reportReviewCts = cancellation;
+        var window = EnsureReportReviewWindow();
+        window.SetRunning(true);
+        EditorView.IsEnabled = false;
+
+        try
+        {
+            var result = await Task.Run(
+                () => _reportReviewService.Review(context, cancellation.Token),
+                cancellation.Token);
+            if (!ReferenceEquals(project, _currentProject) || !ReferenceEquals(report, _currentReport))
+                return;
+
+            var snapshot = new ReportReviewSnapshot(
+                project.Id, report.Id, revision, DateTimeOffset.Now, result);
+            _reportReviewSnapshot = snapshot;
+            _reportReviewContext = context;
+            if (ReferenceEquals(window, _reportReviewWindow))
+                window.ShowSnapshot(snapshot, context,
+                    snapshot.IsStale(project.Id, report.Id, _pendingSaveRevision));
+            RefreshReportReview();
+            _logger.Info(
+                $"Revisão concluída. RelatorioId='{report.Id}'; Erros={result.ErrorCount}; " +
+                $"Avisos={result.WarningCount}; Informacoes={result.InfoCount}; Completa={result.IsComplete}.");
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            if (ReferenceEquals(window, _reportReviewWindow))
+                window.ShowCancelled();
+            _logger.Info($"Revisão cancelada. RelatorioId='{report.Id}'.");
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Falha ao executar a revisão do relatório.", ex);
+            if (ReferenceEquals(window, _reportReviewWindow))
+                window.ShowExecutionError();
+            MessageBox.Show("Não foi possível executar a revisão. Consulte o log.",
+                "Revisão do relatório", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            EditorView.IsEnabled = true;
+            if (ReferenceEquals(window, _reportReviewWindow))
+                window.SetRunning(false);
+            if (ReferenceEquals(_reportReviewCts, cancellation))
+                _reportReviewCts = null;
+            cancellation.Dispose();
+        }
+    }
+
+    private async Task NavigateToReviewIssueAsync(ReviewIssue issue)
+    {
+        if (_currentProject is null || _currentReport is null) return;
+        var target = ReviewNavigationTarget.FromIssue(issue);
+        _reportReviewWindow?.Hide();
+        UpdateSidebarNavigation();
+
+        try
+        {
+            if (target.Area == ReviewNavigationArea.Report)
+            {
+                NavigateToReportField(target.ReportField);
+                return;
+            }
+
+            var location = target.LocationId is Guid locationId
+                ? _currentProject.Locations.FirstOrDefault(x => x.Id == locationId)
+                : null;
+            var section = target.SectionId is Guid sectionId
+                ? _currentProject.Locations.SelectMany(x => x.Sections)
+                    .FirstOrDefault(x => x.Id == sectionId)
+                : null;
+
+            if (section is null && target.OccurrenceId is Guid occurrenceId)
+                section = _currentProject.Locations.SelectMany(x => x.Sections)
+                    .FirstOrDefault(x => x.Occurrences.Any(o => o.Id == occurrenceId));
+            if (section is null && target.CaptureId is Guid captureId)
+            {
+                var capture = _currentProject.Captures.FirstOrDefault(x => x.Id == captureId);
+                section = capture is null
+                    ? null
+                    : _currentProject.Locations.SelectMany(x => x.Sections)
+                        .FirstOrDefault(x => x.Id == capture.SectionId);
+            }
+            if (section is null && target.VideoReferenceId is Guid videoId)
+                section = _currentProject.Locations.SelectMany(x => x.Sections)
+                    .FirstOrDefault(x => x.VideoReferences.Any(v => v.Id == videoId));
+            if (section is null && target.EvidenceId is Guid evidenceId)
+                section = _currentProject.Locations.SelectMany(x => x.Sections)
+                    .FirstOrDefault(x => x.Occurrences.Any(o => o.Evidence.Any(ev => ev.Id == evidenceId)));
+            location ??= section is null
+                ? null
+                : _currentProject.Locations.FirstOrDefault(x => x.Sections.Contains(section));
+
+            if (location is null)
+            {
+                MessageBox.Show("O item indicado pela revisão não foi encontrado no projeto atual.",
+                    "Revisão do relatório", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            InspectionsTab.IsSelected = true;
+            UpdateSidebarNavigation();
+            await ChangeInspectionContextAsync(location, section, section is null);
+
+            if (target.OccurrenceId is Guid selectedOccurrenceId)
+            {
+                var item = OccurrencesList.Items.OfType<OccurrenceListItem>()
+                    .FirstOrDefault(x => x.Id == selectedOccurrenceId);
+                if (item is null)
+                {
+                    MessageBox.Show("A ocorrência indicada pela revisão não foi encontrada neste trecho.",
+                        "Revisão do relatório", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+                OccurrencesList.SelectedItem = item;
+                OccurrencesList.UpdateLayout();
+                OccurrencesList.ScrollIntoView(item);
+                OccurrencesList.Focus();
+            }
+
+            if (target.Area == ReviewNavigationArea.PendingCaptures &&
+                target.CaptureId is Guid highlightedCaptureId)
+                await OpenPendingCapturesAsync(highlightedCaptureId);
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Falha ao navegar para o item da revisão.", ex);
+            MessageBox.Show("Não foi possível abrir o item indicado pela revisão. Consulte o log.",
+                "Revisão do relatório", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void NavigateToReportField(string? reportField)
+    {
+        FrameworkElement? target = reportField switch
+        {
+            "Client" => DefaultClientBox,
+            "Cnpj" => DefaultCnpjBox,
+            "Area" => DefaultAreaBox,
+            "Contract" => DefaultContractBox,
+            "PurchaseOrder" => DefaultPurchaseOrderBox,
+            "LogoPath" => DefaultLogoBox,
+            "ReportCode" => ReportCodeBox,
+            "ReportDate" => ReportDatePicker,
+            "TotalInvestigatedMeters" => MetersBox,
+            "Diameters" or "CustomDiameters" => D300Check,
+            _ => null
+        };
+
+        if (target is DefaultClientBox or DefaultCnpjBox or DefaultAreaBox or
+            DefaultContractBox or DefaultPurchaseOrderBox or DefaultLogoBox ||
+            string.Equals(reportField, "Project.Name", StringComparison.Ordinal))
+            OverviewTab.IsSelected = true;
+        else
+            WordConfigTab.IsSelected = true;
+        UpdateSidebarNavigation();
+
+        if (target is null) return;
+        target.Focus();
+        if (target is TextBox textBox) textBox.SelectAll();
+    }
+
+    private void ResetReportReviewState()
+    {
+        _reportReviewCts?.Cancel();
+        _reportReviewSnapshot = null;
+        _reportReviewContext = null;
+        if (_reportReviewWindow is not null)
+        {
+            _reportReviewWindow.Close();
+            _reportReviewWindow = null;
+        }
+    }
+
     private void RefreshReportReview(ReportValidationResult? validation = null)
     {
         if (_currentProject is null || _currentReport is null)
@@ -2273,29 +2529,80 @@ public partial class MainWindow : Window
             ReportReviewTitle.Text = "Selecione um relatório";
             ReportReviewSummary.Text = "";
             ReportReviewIssues.Text = "";
+            OpenReportReviewButton.IsEnabled = false;
+            _reportReviewWindow?.ShowNoReview("Selecione um relatório para executar a revisão.");
             return;
         }
 
-        validation ??= _wordReportService.Validate(_currentProject, _currentReport);
-        var emissionReady = !string.IsNullOrWhiteSpace(_currentReport.ReportCode) &&
-                            _currentReport.ReportDate is not null && _currentReport.TotalInvestigatedMeters > 0;
-        var equipmentCount = Enum.GetValues<EquipmentSelection>()
-            .Count(x => x != EquipmentSelection.None && _currentReport.Equipments.HasFlag(x));
-        ReportReviewTitle.Text = validation.Errors.Count == 0
-            ? validation.Warnings.Count == 0 ? "Relatório pronto" : "Relatório pronto com avisos"
-            : "Revisão necessária";
+        OpenReportReviewButton.IsEnabled = true;
+        if (validation is not null)
+        {
+            var emissionReady = !string.IsNullOrWhiteSpace(_currentReport.ReportCode) &&
+                                _currentReport.ReportDate is not null && _currentReport.TotalInvestigatedMeters > 0;
+            var equipmentCount = Enum.GetValues<EquipmentSelection>()
+                .Count(x => x != EquipmentSelection.None && _currentReport.Equipments.HasFlag(x));
+            ReportReviewTitle.Text = validation.Errors.Count == 0
+                ? validation.Warnings.Count == 0 ? "Relatório pronto" : "Relatório pronto com avisos"
+                : "Revisão necessária";
+            ReportReviewSummary.Text =
+                $"Dados da emissão        {(emissionReady ? "✓" : "• pendente")}\n" +
+                $"Equipamentos            {(equipmentCount > 0 ? $"✓ {equipmentCount}" : "• nenhum selecionado")}\n" +
+                $"Desenvolvimento         ✓\n" +
+                $"Trechos                 ✓ {validation.SelectedSections}\n" +
+                $"Anomalias               ✓ {validation.Occurrences}\n" +
+                $"Imagens                 ✓ {validation.Evidences + _currentReport.DevelopmentImages.Count}";
+            var issues = validation.Errors.Select(x => "• " + x)
+                .Concat(validation.Warnings.Select(x => "⚠ " + x)).Take(6).ToList();
+            ReportReviewIssues.Text = issues.Count == 0
+                ? "Nenhuma pendência encontrada."
+                : string.Join("\n", issues);
+            ReportReviewIssues.Foreground = (System.Windows.Media.Brush)FindResource(
+                validation.Errors.Count == 0 && validation.Warnings.Count == 0
+                    ? "SuccessBrush"
+                    : "WarningBrush");
+            return;
+        }
+
+        var snapshot = _reportReviewSnapshot;
+        var context = _reportReviewContext;
+        if (snapshot is null || context is null ||
+            !snapshot.AppliesTo(_currentProject.Id, _currentReport.Id))
+        {
+            ReportReviewTitle.Text = "Revisão ainda não executada";
+            ReportReviewSummary.Text = "Execute uma auditoria do relatório atual antes da emissão.";
+            ReportReviewIssues.Text = "";
+            ReportReviewIssues.Foreground =
+                (System.Windows.Media.Brush)FindResource("TextSecondaryBrush");
+            _reportReviewWindow?.ShowNoReview(
+                "Execute a revisão para analisar o relatório selecionado.");
+            return;
+        }
+
+        var stale = snapshot.IsStale(
+            _currentProject.Id, _currentReport.Id, _pendingSaveRevision);
+        ReportReviewTitle.Text = !snapshot.Result.IsComplete
+            ? "Revisão incompleta"
+            : stale
+                ? "Revisão desatualizada"
+                : snapshot.Result.HasErrors
+                    ? "Revisão necessária"
+                    : "Revisão concluída";
         ReportReviewSummary.Text =
-            $"Dados da emissão        {(emissionReady ? "✓" : "• pendente")}\n" +
-            $"Equipamentos            {(equipmentCount > 0 ? $"✓ {equipmentCount}" : "• nenhum selecionado")}\n" +
-            $"Desenvolvimento         ✓\n" +
-            $"Trechos                 ✓ {validation.SelectedSections}\n" +
-            $"Anomalias               ✓ {validation.Occurrences}\n" +
-            $"Imagens                 ✓ {validation.Evidences + _currentReport.DevelopmentImages.Count}";
-        var issues = validation.Errors.Select(x => "• " + x)
-            .Concat(validation.Warnings.Select(x => "⚠ " + x)).Take(6).ToList();
-        ReportReviewIssues.Text = issues.Count == 0 ? "Nenhuma pendência encontrada." : string.Join("\n", issues);
+            $"{snapshot.Result.ErrorCount} erro(s) • {snapshot.Result.WarningCount} aviso(s) • " +
+            $"{snapshot.Result.InfoCount} informação(ões)\n" +
+            $"Concluída às {snapshot.CompletedAt.ToLocalTime():HH:mm}";
+        ReportReviewIssues.Text = stale
+            ? "⚠ O projeto foi alterado após a última revisão. Execute novamente."
+            : snapshot.Result.IsComplete
+                ? snapshot.Result.Issues.Count == 0
+                    ? "Nenhum problema foi encontrado."
+                    : "Abra a revisão para consultar e navegar pelos resultados."
+                : "⚠ Uma ou mais verificações não puderam ser executadas.";
         ReportReviewIssues.Foreground = (System.Windows.Media.Brush)FindResource(
-            validation.Errors.Count == 0 && validation.Warnings.Count == 0 ? "SuccessBrush" : "WarningBrush");
+            stale || !snapshot.Result.IsComplete || snapshot.Result.HasErrors
+                ? "WarningBrush"
+                : "SuccessBrush");
+        _reportReviewWindow?.ShowSnapshot(snapshot, context, stale);
     }
 
     private void RefreshInspectionTree()
@@ -3928,7 +4235,10 @@ public partial class MainWindow : Window
         await OpenOccurrenceEditorAsync(null, automaticCapture, automaticCapture);
     }
 
-    private async void OpenPendingCaptures_Click(object sender, RoutedEventArgs e)
+    private async void OpenPendingCaptures_Click(object sender, RoutedEventArgs e) =>
+        await OpenPendingCapturesAsync();
+
+    private async Task OpenPendingCapturesAsync(Guid? highlightedCaptureId = null)
     {
         if (_currentProject is null || _currentSection is null) return;
         var sectionId = _currentSection.Id;
@@ -3946,6 +4256,16 @@ public partial class MainWindow : Window
         if (items.Count == 0)
         {
             RefreshCaptures();
+            if (highlightedCaptureId is not null)
+                MessageBox.Show("A captura indicada pela revisão não está mais pendente.",
+                    "Revisão do relatório", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (highlightedCaptureId is Guid expectedId && items.All(x => x.Id != expectedId))
+        {
+            MessageBox.Show("A captura indicada pela revisão não foi encontrada neste trecho.",
+                "Revisão do relatório", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -3955,7 +4275,8 @@ public partial class MainWindow : Window
         try
         {
             await Dispatcher.Yield(DispatcherPriority.Render);
-            var window = new PendingCapturesWindow(items, LoadThumbnailOnDemandAsync) { Owner = this };
+            var window = new PendingCapturesWindow(
+                items, LoadThumbnailOnDemandAsync, highlightedCaptureId) { Owner = this };
             window.ShowDialog();
             action = window.SelectedAction;
             captureId = window.SelectedCaptureId;
@@ -4808,6 +5129,7 @@ public partial class MainWindow : Window
     {
         _hasPendingChanges = true;
         _pendingSaveRevision++;
+        RefreshReportReview();
     }
 
     private void ScheduleSave()

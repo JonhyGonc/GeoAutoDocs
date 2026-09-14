@@ -51,9 +51,9 @@ public sealed class StructureRule : IReportReviewRule
 
             foreach (var duplicate in group
                          .Where(x => !string.IsNullOrWhiteSpace(x.Section.Name))
-                         .GroupBy(x => x.Section.Name.Trim(), StringComparer.CurrentCultureIgnoreCase)
+                         .GroupBy(x => x.Section.Name.Trim(), StringComparer.OrdinalIgnoreCase)
                          .Where(x => x.Count() > 1)
-                         .OrderBy(x => x.Key, StringComparer.CurrentCultureIgnoreCase))
+                         .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
             {
                 var first = duplicate.First();
                 yield return new ReviewIssue

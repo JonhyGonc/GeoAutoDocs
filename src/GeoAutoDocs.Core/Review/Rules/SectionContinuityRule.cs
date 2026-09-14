@@ -75,10 +75,11 @@ public sealed class SectionContinuityRule : IReportReviewRule
         var result = new StringBuilder(decomposed.Length);
         foreach (var character in decomposed)
         {
-            if (CharUnicodeInfo.GetUnicodeCategory(character) == UnicodeCategory.NonSpacingMark)
+            if (CharUnicodeInfo.GetUnicodeCategory(character) == UnicodeCategory.NonSpacingMark ||
+                char.IsWhiteSpace(character) ||
+                character is '.' or '-')
                 continue;
-            if (char.IsLetterOrDigit(character))
-                result.Append(char.ToUpperInvariant(character));
+            result.Append(char.ToUpperInvariant(character));
         }
         return result.ToString();
     }

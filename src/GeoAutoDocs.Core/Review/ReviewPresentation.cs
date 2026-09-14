@@ -32,11 +32,102 @@ public sealed record ReportReviewSnapshot(
     DateTimeOffset CompletedAt,
     ReviewResult Result)
 {
+    public string SectionSelectionSignature { get; init; } = string.Empty;
+
     public bool AppliesTo(Guid projectId, Guid reportId) =>
         ProjectId == projectId && ReportId == reportId;
 
     public bool IsStale(Guid projectId, Guid reportId, long currentRevision) =>
         AppliesTo(projectId, reportId) && ProjectRevision != currentRevision;
+
+    public bool IsCurrent(
+        Guid projectId,
+        Guid reportId,
+        long currentRevision,
+        string sectionSelectionSignature) =>
+        AppliesTo(projectId, reportId) &&
+        ProjectRevision == currentRevision &&
+        string.Equals(
+            SectionSelectionSignature,
+            sectionSelectionSignature,
+            StringComparison.Ordinal);
+}
+
+public static class ReportReviewSelection
+{
+    public static string CreateSignature(Report report)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        return string.Join(
+            ";",
+            report.SectionLinks
+                .Select(x => x.SectionId)
+                .Distinct()
+                .OrderBy(x => x)
+                .Select(x => x.ToString("N")));
+    }
+}
+
+public enum ReportGenerationReviewDecision
+{
+    ExecuteReview,
+    AllowGeneration,
+    ConfirmWarnings,
+    BlockErrors,
+    BlockIncomplete
+}
+
+public static class ReportGenerationReviewPolicy
+{
+    public static ReportGenerationReviewDecision Evaluate(
+        ReportReviewSnapshot? snapshot,
+        Guid projectId,
+        Guid reportId,
+        long currentRevision,
+        string sectionSelectionSignature,
+        bool warningsAccepted = false)
+    {
+        if (snapshot is null ||
+            !snapshot.IsCurrent(
+                projectId,
+                reportId,
+                currentRevision,
+                sectionSelectionSignature))
+            return ReportGenerationReviewDecision.ExecuteReview;
+
+        if (!snapshot.Result.IsComplete)
+            return ReportGenerationReviewDecision.BlockIncomplete;
+        if (snapshot.Result.HasErrors)
+            return ReportGenerationReviewDecision.BlockErrors;
+        if (snapshot.Result.WarningCount > 0 && !warningsAccepted)
+            return ReportGenerationReviewDecision.ConfirmWarnings;
+        return ReportGenerationReviewDecision.AllowGeneration;
+    }
+}
+
+public enum ReportReviewExecutionStatus
+{
+    Completed,
+    Cancelled,
+    Failed,
+    Busy
+}
+
+public sealed record ReportReviewExecutionOutcome(
+    ReportReviewExecutionStatus Status,
+    ReportReviewSnapshot? Snapshot)
+{
+    public static ReportReviewExecutionOutcome Completed(ReportReviewSnapshot snapshot) =>
+        new(ReportReviewExecutionStatus.Completed, snapshot);
+
+    public static ReportReviewExecutionOutcome Cancelled() =>
+        new(ReportReviewExecutionStatus.Cancelled, null);
+
+    public static ReportReviewExecutionOutcome Failed() =>
+        new(ReportReviewExecutionStatus.Failed, null);
+
+    public static ReportReviewExecutionOutcome Busy() =>
+        new(ReportReviewExecutionStatus.Busy, null);
 }
 
 public sealed record ReviewNavigationTarget(

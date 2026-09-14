@@ -74,6 +74,17 @@ public partial class ReportReviewWindow : Window
     public void SetStale(bool isStale) =>
         StaleBanner.Visibility = isStale ? Visibility.Visible : Visibility.Collapsed;
 
+    public void SelectFilter(ReviewIssueFilter filter)
+    {
+        _filter = filter;
+        foreach (var button in FilterButtons())
+            button.IsChecked = string.Equals(
+                button.Tag as string,
+                filter.ToString(),
+                StringComparison.Ordinal);
+        ApplyFilter();
+    }
+
     public void ShowCancelled()
     {
         ReviewStatusText.Text = "Revisão cancelada. O resultado anterior foi preservado.";
@@ -138,9 +149,7 @@ public partial class ReportReviewWindow : Window
             !Enum.TryParse(value, out ReviewIssueFilter filter))
             return;
 
-        _filter = filter;
-        foreach (var button in FilterButtons()) button.IsChecked = ReferenceEquals(button, selected);
-        ApplyFilter();
+        SelectFilter(filter);
     }
 
     private IEnumerable<ToggleButton> FilterButtons()

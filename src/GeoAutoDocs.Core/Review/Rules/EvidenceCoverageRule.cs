@@ -32,11 +32,7 @@ public sealed class EvidenceCoverageRule : IReportReviewRule
         foreach (var section in context.SelectedSections)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var pending = context.PendingCaptures
-                .Where(x => x.SectionId == section.Section.Id)
-                .OrderBy(x => x.Order)
-                .ThenBy(x => x.Id)
-                .ToList();
+            var pending = context.GetPendingCaptures(section.Section.Id);
             if (pending.Count == 0) continue;
 
             yield return new ReviewIssue

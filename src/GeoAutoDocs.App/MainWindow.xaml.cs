@@ -63,6 +63,7 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<ReportSectionSelectionItem> _reportSectionItems = [];
     private bool _hasPendingChanges;
     private long _pendingSaveRevision;
+    private long _reportReviewRevision;
     private bool _sharedDirty;
     private bool _checkpointInProgress;
     private bool _finalizationInProgress;
@@ -78,6 +79,7 @@ public partial class MainWindow : Window
     private Drawing.Icon? _trayIconImage;
     private bool _saveErrorNotified;
     private bool _reportDeletionInProgress;
+    private bool _reportGenerationInProgress;
     private ReportReviewWindow? _reportReviewWindow;
     private ReportReviewSnapshot? _reportReviewSnapshot;
     private ReportReviewContext? _reportReviewContext;
@@ -1626,21 +1628,58 @@ public partial class MainWindow : Window
 
     private async void GenerateReport_Click(object sender, RoutedEventArgs e)
     {
-        if (_currentProject is null || _currentReport is null) return;
-        ApplyFieldsToModel();
-        if (!await SavePendingAsync()) return;
+        if (_currentProject is null || _currentReport is null || _reportGenerationInProgress)
+            return;
+
+        _reportGenerationInProgress = true;
+        var originalButtonContent = GenerateReportButton.Content;
+        GenerateReportButton.IsEnabled = false;
+        EditorView.IsEnabled = false;
         try
         {
-            var validation = _wordReportService.Validate(_currentProject, _currentReport);
-            RefreshReportReview(validation);
-            if (validation.Errors.Count > 0 || validation.Warnings.Count > 0)
+            ApplyFieldsToModel();
+            var approvedReview = await ApproveReviewForGenerationAsync();
+            if (approvedReview is null) return;
+
+            GenerateReportButton.Content = "Salvando...";
+            if (!await SavePendingAsync()) return;
+
+            var finalDecision = EvaluateCurrentReviewForGeneration(warningsAccepted: true);
+            if (finalDecision != ReportGenerationReviewDecision.AllowGeneration)
             {
-                var validationWindow = new ReportValidationWindow(validation) { Owner = this };
-                if (validationWindow.ShowDialog() != true) return;
+                _logger.Info(
+                    $"Revisão deixou de ser válida antes da geração. Decisao='{finalDecision}'.");
+                MessageBox.Show(
+                    "Os dados relevantes do relatório mudaram antes da geração. Execute a revisão novamente.",
+                    "Revisão do relatório", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
             }
 
+            var validation = _wordReportService.Validate(_currentProject, _currentReport);
+            if (validation.Errors.Count > 0)
+            {
+                _logger.Error(
+                    "Divergência entre a revisão estruturada e a validação defensiva. " +
+                    $"RelatorioId='{_currentReport.Id}'; " +
+                    $"ErrosEstruturados={approvedReview.Result.ErrorCount}; " +
+                    $"ErrosDefensivos={validation.Errors.Count}.",
+                    new InvalidOperationException(string.Join(" | ", validation.Errors)));
+                RefreshReportReview(validation);
+                var validationWindow = new ReportValidationWindow(validation) { Owner = this };
+                validationWindow.ShowDialog();
+                return;
+            }
+
+            if (validation.Warnings.Count != approvedReview.Result.WarningCount)
+                _logger.Info(
+                    "Diferença de contagem entre revisão estruturada e validação defensiva. " +
+                    $"RelatorioId='{_currentReport.Id}'; " +
+                    $"AvisosEstruturados={approvedReview.Result.WarningCount}; " +
+                    $"AvisosDefensivos={validation.Warnings.Count}.");
+
             var reportsDirectory = Path.Combine(_currentProject.ProjectPath ?? "", "reports");
-            if (!string.IsNullOrWhiteSpace(_currentProject.ProjectPath)) Directory.CreateDirectory(reportsDirectory);
+            if (!string.IsNullOrWhiteSpace(_currentProject.ProjectPath))
+                Directory.CreateDirectory(reportsDirectory);
             var fileName = SanitizeSuggestedFileName($"{_currentReport.DisplayCode}.docx");
             var dialog = new SaveFileDialog
             {
@@ -1654,18 +1693,21 @@ public partial class MainWindow : Window
             };
             if (dialog.ShowDialog(this) != true) return;
 
+            GenerateReportButton.Content = "Gerando...";
             GeneratedReportText.Text = "Preparando relatório... Processando trechos e inserindo imagens...";
-            var path = await _wordReportService.GenerateToAsync(_currentProject, _currentReport, dialog.FileName);
+            var path = await _wordReportService.GenerateToAsync(
+                _currentProject, _currentReport, dialog.FileName);
             var persisted = true;
             if (_sharedSession?.IsReadOnly != true)
             {
-                MarkPendingChanges();
+                MarkOperationalPendingChanges();
                 persisted = await SavePendingAsync();
             }
             GeneratedReportText.Text = persisted
                 ? $"✓ Relatório gerado\n{Path.GetFileName(path)}"
                 : $"⚠ Relatório gerado, mas o estado permanece pendente de salvamento\n{Path.GetFileName(path)}";
-            OpenReportButton.IsEnabled = true; OpenReportFolderButton.IsEnabled = true;
+            OpenReportButton.IsEnabled = true;
+            OpenReportFolderButton.IsEnabled = true;
             ReportsList.Items.Refresh();
             RefreshOverview();
             RefreshReportReview();
@@ -1675,7 +1717,7 @@ public partial class MainWindow : Window
             var persisted = true;
             if (_sharedSession?.IsReadOnly != true)
             {
-                MarkPendingChanges();
+                MarkOperationalPendingChanges();
                 persisted = await SavePendingAsync();
             }
             GeneratedReportText.Text = persisted
@@ -1687,7 +1729,130 @@ public partial class MainWindow : Window
             RefreshOverview();
             ShowError(ex.Message, ex);
         }
-        catch (Exception ex) { GeneratedReportText.Text = "Falha ao gerar relatório."; ShowError(ex.Message, ex); }
+        catch (Exception ex)
+        {
+            GeneratedReportText.Text = "Falha ao gerar relatório.";
+            ShowError(ex.Message, ex);
+        }
+        finally
+        {
+            EditorView.IsEnabled = true;
+            GenerateReportButton.Content = originalButtonContent;
+            GenerateReportButton.IsEnabled = _currentReport is not null && !IsReadOnly;
+            _reportGenerationInProgress = false;
+        }
+    }
+
+    private async Task<ReportReviewSnapshot?> ApproveReviewForGenerationAsync()
+    {
+        var forceReview = false;
+        var warningsAccepted = false;
+        while (_currentProject is not null && _currentReport is not null)
+        {
+            var decision = forceReview
+                ? ReportGenerationReviewDecision.ExecuteReview
+                : EvaluateCurrentReviewForGeneration(warningsAccepted);
+            forceReview = false;
+
+            if (decision == ReportGenerationReviewDecision.ExecuteReview)
+            {
+                GenerateReportButton.Content = "Revisando...";
+                GeneratedReportText.Text = "Revisando relatório antes da geração...";
+                var outcome = await ExecuteReportReviewAsync(showWindow: false);
+                if (outcome.Status == ReportReviewExecutionStatus.Cancelled)
+                {
+                    GeneratedReportText.Text = "Geração cancelada durante a revisão.";
+                    return null;
+                }
+                if (outcome.Status == ReportReviewExecutionStatus.Busy)
+                {
+                    GeneratedReportText.Text = "Aguarde a revisão em andamento.";
+                    return null;
+                }
+                if (outcome.Status != ReportReviewExecutionStatus.Completed ||
+                    outcome.Snapshot is null)
+                {
+                    GeneratedReportText.Text = "A revisão não pôde ser concluída.";
+                    MessageBox.Show(
+                        "Não foi possível concluir todas as verificações do relatório. " +
+                        "Consulte o log e tente novamente.",
+                        "Revisão do relatório", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return null;
+                }
+                warningsAccepted = false;
+                continue;
+            }
+
+            var snapshot = _reportReviewSnapshot;
+            if (snapshot is null) return null;
+
+            if (decision == ReportGenerationReviewDecision.BlockIncomplete)
+            {
+                var dialog = new ReportGenerationReviewDialog(
+                    ReportGenerationReviewDialogMode.Incomplete,
+                    failedRuleCount: snapshot.Result.RuleFailures.Count) { Owner = this };
+                dialog.ShowDialog();
+                switch (dialog.Choice)
+                {
+                    case ReportGenerationReviewChoice.OpenReview:
+                        ShowReportReview(ReviewIssueFilter.All);
+                        return null;
+                    case ReportGenerationReviewChoice.Retry:
+                        forceReview = true;
+                        continue;
+                    default:
+                        return null;
+                }
+            }
+
+            if (decision == ReportGenerationReviewDecision.BlockErrors)
+            {
+                var dialog = new ReportGenerationReviewDialog(
+                    ReportGenerationReviewDialogMode.Errors,
+                    snapshot.Result.ErrorCount) { Owner = this };
+                dialog.ShowDialog();
+                if (dialog.Choice == ReportGenerationReviewChoice.OpenReview)
+                    ShowReportReview(ReviewIssueFilter.Errors);
+                return null;
+            }
+
+            if (decision == ReportGenerationReviewDecision.ConfirmWarnings)
+            {
+                var dialog = new ReportGenerationReviewDialog(
+                    ReportGenerationReviewDialogMode.Warnings,
+                    snapshot.Result.WarningCount) { Owner = this };
+                dialog.ShowDialog();
+                switch (dialog.Choice)
+                {
+                    case ReportGenerationReviewChoice.OpenReview:
+                        ShowReportReview(ReviewIssueFilter.Warnings);
+                        return null;
+                    case ReportGenerationReviewChoice.GenerateAnyway:
+                        warningsAccepted = true;
+                        continue;
+                    default:
+                        return null;
+                }
+            }
+
+            return snapshot;
+        }
+
+        return null;
+    }
+
+    private ReportGenerationReviewDecision EvaluateCurrentReviewForGeneration(
+        bool warningsAccepted = false)
+    {
+        if (_currentProject is null || _currentReport is null)
+            return ReportGenerationReviewDecision.ExecuteReview;
+        return ReportGenerationReviewPolicy.Evaluate(
+            _reportReviewSnapshot,
+            _currentProject.Id,
+            _currentReport.Id,
+            _reportReviewRevision,
+            ReportReviewSelection.CreateSignature(_currentReport),
+            warningsAccepted);
     }
 
     private async void ExportInspection_Click(object sender, RoutedEventArgs e)
@@ -2315,8 +2480,13 @@ public partial class MainWindow : Window
         return window;
     }
 
-    private async void ReportReviewWindow_ReviewRequested(object? sender, EventArgs e) =>
-        await ExecuteReportReviewAsync();
+    private async void ReportReviewWindow_ReviewRequested(object? sender, EventArgs e)
+    {
+        var outcome = await ExecuteReportReviewAsync(showWindow: true);
+        if (outcome.Status == ReportReviewExecutionStatus.Failed)
+            MessageBox.Show("Não foi possível executar a revisão. Consulte o log.",
+                "Revisão do relatório", MessageBoxButton.OK, MessageBoxImage.Error);
+    }
 
     private void ReportReviewWindow_CancelRequested(object? sender, EventArgs e) =>
         _reportReviewCts?.Cancel();
@@ -2333,15 +2503,18 @@ public partial class MainWindow : Window
         UpdateSidebarNavigation();
     }
 
-    private async Task ExecuteReportReviewAsync()
+    private async Task<ReportReviewExecutionOutcome> ExecuteReportReviewAsync(bool showWindow)
     {
-        if (_currentProject is null || _currentReport is null || _reportReviewCts is not null)
-            return;
+        if (_currentProject is null || _currentReport is null)
+            return ReportReviewExecutionOutcome.Failed();
+        if (_reportReviewCts is not null)
+            return ReportReviewExecutionOutcome.Busy();
 
         ApplyFieldsToModel();
         var project = _currentProject;
         var report = _currentReport;
-        var revision = _pendingSaveRevision;
+        var revision = _reportReviewRevision;
+        var sectionSelectionSignature = ReportReviewSelection.CreateSignature(report);
         var configuredTemplate = string.IsNullOrWhiteSpace(report.TemplatePath)
             ? _wordReportService.DefaultTemplatePath
             : report.TemplatePath;
@@ -2349,8 +2522,9 @@ public partial class MainWindow : Window
             project, report, configuredTemplate, ReviewFileSystem.Instance);
         var cancellation = new CancellationTokenSource();
         _reportReviewCts = cancellation;
-        var window = EnsureReportReviewWindow();
-        window.SetRunning(true);
+        var window = showWindow ? EnsureReportReviewWindow() : _reportReviewWindow;
+        window?.SetRunning(true);
+        var editorWasEnabled = EditorView.IsEnabled;
         EditorView.IsEnabled = false;
 
         try
@@ -2358,44 +2532,65 @@ public partial class MainWindow : Window
             var result = await Task.Run(
                 () => _reportReviewService.Review(context, cancellation.Token),
                 cancellation.Token);
-            if (!ReferenceEquals(project, _currentProject) || !ReferenceEquals(report, _currentReport))
-                return;
+            if (!ReferenceEquals(project, _currentProject) ||
+                !ReferenceEquals(report, _currentReport))
+                return ReportReviewExecutionOutcome.Cancelled();
 
             var snapshot = new ReportReviewSnapshot(
-                project.Id, report.Id, revision, DateTimeOffset.Now, result);
+                project.Id, report.Id, revision, DateTimeOffset.Now, result)
+            {
+                SectionSelectionSignature = sectionSelectionSignature
+            };
             _reportReviewSnapshot = snapshot;
             _reportReviewContext = context;
             if (ReferenceEquals(window, _reportReviewWindow))
-                window.ShowSnapshot(snapshot, context,
-                    snapshot.IsStale(project.Id, report.Id, _pendingSaveRevision));
+                window.ShowSnapshot(
+                    snapshot,
+                    context,
+                    !snapshot.IsCurrent(
+                        project.Id,
+                        report.Id,
+                        _reportReviewRevision,
+                        ReportReviewSelection.CreateSignature(report)));
             RefreshReportReview();
             _logger.Info(
                 $"Revisão concluída. RelatorioId='{report.Id}'; Erros={result.ErrorCount}; " +
                 $"Avisos={result.WarningCount}; Informacoes={result.InfoCount}; Completa={result.IsComplete}.");
+            return ReportReviewExecutionOutcome.Completed(snapshot);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
             if (ReferenceEquals(window, _reportReviewWindow))
                 window.ShowCancelled();
             _logger.Info($"Revisão cancelada. RelatorioId='{report.Id}'.");
+            return ReportReviewExecutionOutcome.Cancelled();
         }
         catch (Exception ex)
         {
             _logger.Error("Falha ao executar a revisão do relatório.", ex);
             if (ReferenceEquals(window, _reportReviewWindow))
                 window.ShowExecutionError();
-            MessageBox.Show("Não foi possível executar a revisão. Consulte o log.",
-                "Revisão do relatório", MessageBoxButton.OK, MessageBoxImage.Error);
+            return ReportReviewExecutionOutcome.Failed();
         }
         finally
         {
-            EditorView.IsEnabled = true;
+            EditorView.IsEnabled = editorWasEnabled;
             if (ReferenceEquals(window, _reportReviewWindow))
                 window.SetRunning(false);
             if (ReferenceEquals(_reportReviewCts, cancellation))
                 _reportReviewCts = null;
             cancellation.Dispose();
         }
+    }
+
+    private void ShowReportReview(ReviewIssueFilter filter)
+    {
+        var window = EnsureReportReviewWindow();
+        RefreshReportReview();
+        window.SelectFilter(filter);
+        if (!window.IsVisible) window.Show();
+        window.Activate();
+        UpdateSidebarNavigation();
     }
 
     private async Task NavigateToReviewIssueAsync(ReviewIssue issue)
@@ -2584,8 +2779,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        var stale = snapshot.IsStale(
-            _currentProject.Id, _currentReport.Id, _pendingSaveRevision);
+        var stale = !snapshot.IsCurrent(
+            _currentProject.Id,
+            _currentReport.Id,
+            _reportReviewRevision,
+            ReportReviewSelection.CreateSignature(_currentReport));
         ReportReviewTitle.Text = !snapshot.Result.IsComplete
             ? "Revisão incompleta"
             : stale
@@ -5135,7 +5333,14 @@ public partial class MainWindow : Window
     {
         _hasPendingChanges = true;
         _pendingSaveRevision++;
+        _reportReviewRevision++;
         RefreshReportReview();
+    }
+
+    private void MarkOperationalPendingChanges()
+    {
+        _hasPendingChanges = true;
+        _pendingSaveRevision++;
     }
 
     private void ScheduleSave()

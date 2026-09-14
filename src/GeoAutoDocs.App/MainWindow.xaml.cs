@@ -2206,11 +2206,12 @@ public partial class MainWindow : Window
             ? 0
             : _currentProject.Captures.Count(x =>
                 x.SectionId == _currentSection.Id && x.Status == CaptureStatus.Pending);
-        PendingCapturesSummary.Text = count switch
+        PendingCapturesCountText.Text = count.ToString();
+        PendingCapturesButton.ToolTip = count switch
         {
-            0 => "Nenhuma captura neste trecho",
-            1 => "1 captura aguardando cadastro",
-            _ => $"{count} capturas aguardando cadastro"
+            0 => "Nenhuma captura pendente neste trecho",
+            1 => "Abrir 1 captura pendente",
+            _ => $"Abrir {count} capturas pendentes"
         };
         PendingCapturesButton.IsEnabled = _currentProject is not null && _currentSection is not null && count > 0;
     }
@@ -2265,16 +2266,13 @@ public partial class MainWindow : Window
             all = all.Where(x => x.Location.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
                                  x.Anomalies.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
                                  x.PositionSummary.Contains(query, StringComparison.CurrentCultureIgnoreCase)).ToList();
-        var status = (AnomalyStatusFilter?.SelectedItem as ComboBoxItem)?.Tag as string;
-        if (status == "Complete") all = all.Where(x => x.IsComplete).ToList();
-        if (status == "Incomplete") all = all.Where(x => !x.IsComplete).ToList();
         OccurrencesList.ItemsSource = all;
         OccurrencesEmptyTitle.Text = unfilteredCount == 0
             ? "Nenhuma anomalia registrada neste trecho."
             : "Nenhuma anomalia encontrada.";
         OccurrencesEmptyDescription.Text = unfilteredCount == 0
             ? "Durante a inspeção, capture um frame para começar."
-            : "Ajuste a pesquisa ou o filtro para ver outros registros.";
+            : "Ajuste a pesquisa para ver outros registros.";
         OccurrencesEmptyState.Visibility = all.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         UpdateSectionReviewState();
     }

@@ -2578,7 +2578,7 @@ public partial class MainWindow : Window
             _reportReviewSnapshot = snapshot;
             _reportReviewContext = context;
             if (ReferenceEquals(window, _reportReviewWindow))
-                window.ShowSnapshot(
+                window!.ShowSnapshot(
                     snapshot,
                     context,
                     !snapshot.IsCurrent(
@@ -2595,7 +2595,7 @@ public partial class MainWindow : Window
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
             if (ReferenceEquals(window, _reportReviewWindow))
-                window.ShowCancelled();
+                window!.ShowCancelled();
             _logger.Info($"Revisão cancelada. RelatorioId='{report.Id}'.");
             return ReportReviewExecutionOutcome.Cancelled();
         }
@@ -2603,14 +2603,14 @@ public partial class MainWindow : Window
         {
             _logger.Error("Falha ao executar a revisão do relatório.", ex);
             if (ReferenceEquals(window, _reportReviewWindow))
-                window.ShowExecutionError();
+                window!.ShowExecutionError();
             return ReportReviewExecutionOutcome.Failed();
         }
         finally
         {
             EditorView.IsEnabled = editorWasEnabled;
             if (ReferenceEquals(window, _reportReviewWindow))
-                window.SetRunning(false);
+                window!.SetRunning(false);
             if (ReferenceEquals(_reportReviewCts, cancellation))
                 _reportReviewCts = null;
             cancellation.Dispose();

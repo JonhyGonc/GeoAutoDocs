@@ -1632,6 +1632,7 @@ public partial class MainWindow : Window
             return;
 
         _reportGenerationInProgress = true;
+        _saveTimer.Stop();
         var originalButtonContent = GenerateReportButton.Content;
         GenerateReportButton.IsEnabled = false;
         EditorView.IsEnabled = false;
@@ -1763,6 +1764,11 @@ public partial class MainWindow : Window
             GenerateReportButton.Content = originalButtonContent;
             GenerateReportButton.IsEnabled = _currentReport is not null && !IsReadOnly;
             _reportGenerationInProgress = false;
+            if (_hasPendingChanges && !IsReadOnly)
+            {
+                _saveTimer.Stop();
+                _saveTimer.Start();
+            }
         }
     }
 
@@ -2559,6 +2565,8 @@ public partial class MainWindow : Window
         var window = showWindow ? EnsureReportReviewWindow() : _reportReviewWindow;
         window?.SetRunning(true);
         var editorWasEnabled = EditorView.IsEnabled;
+        var resumeScheduledSave = _saveTimer.IsEnabled;
+        _saveTimer.Stop();
         EditorView.IsEnabled = false;
 
         try
@@ -2614,6 +2622,8 @@ public partial class MainWindow : Window
             if (ReferenceEquals(_reportReviewCts, cancellation))
                 _reportReviewCts = null;
             cancellation.Dispose();
+            if (resumeScheduledSave && _hasPendingChanges && !IsReadOnly)
+                _saveTimer.Start();
         }
     }
 

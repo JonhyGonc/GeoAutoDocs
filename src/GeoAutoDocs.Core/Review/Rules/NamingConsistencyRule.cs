@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace GeoAutoDocs.Core.Review.Rules;
 
 public sealed class NamingConsistencyRule : IReportReviewRule
@@ -8,7 +10,8 @@ public sealed class NamingConsistencyRule : IReportReviewRule
         string Stem,
         string StemKey,
         int Number,
-        int NumberWidth);
+        int NumberWidth,
+        int Index);
 
     public string Id => "naming.consistency";
     public string Name => "Padronização de nomenclatura";
@@ -20,7 +23,7 @@ public sealed class NamingConsistencyRule : IReportReviewRule
         if (!context.Options.CheckNamingConsistency) yield break;
 
         var numberedSections = context.SelectedSections
-            .Select(Parse)
+            .Select((section, index) => Parse(section, index))
             .Where(x => x is not null)
             .Cast<NumberedSection>()
             .ToList();
@@ -33,13 +36,13 @@ public sealed class NamingConsistencyRule : IReportReviewRule
             var preferredStem = group
                 .GroupBy(x => x.Stem, StringComparer.Ordinal)
                 .OrderByDescending(x => x.Count())
-                .ThenBy(x => numberedSections.IndexOf(x.First()))
+                .ThenBy(x => x.Min(y => y.Index))
                 .First()
                 .Key;
             var commonWidth = group
                 .GroupBy(x => x.NumberWidth)
                 .OrderByDescending(x => x.Count())
-                .ThenBy(x => numberedSections.IndexOf(x.First()))
+                .ThenBy(x => x.Min(y => y.Index))
                 .First()
                 .Key;
             var expectedWidth = group.Key == "TRECHO"
@@ -49,7 +52,7 @@ public sealed class NamingConsistencyRule : IReportReviewRule
             foreach (var item in group)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var proposed = preferredStem + item.Number.ToString($"D{expectedWidth}");
+                var proposed = preferredStem + item.Number.ToString($"D{expectedWidth}", CultureInfo.InvariantCulture);
                 if (string.Equals(item.CurrentName, proposed, StringComparison.Ordinal))
                     continue;
 
@@ -81,7 +84,7 @@ public sealed class NamingConsistencyRule : IReportReviewRule
                     string.Equals(
                         anomaly.AnomalyName.Trim(),
                         anomaly.AnomalyType.Name.Trim(),
-                        StringComparison.CurrentCulture))
+                        StringComparison.Ordinal))
                     continue;
 
                 yield return new ReviewIssue
@@ -105,7 +108,7 @@ public sealed class NamingConsistencyRule : IReportReviewRule
         }
     }
 
-    private static NumberedSection? Parse(ReviewSectionContext context) =>
+    private static NumberedSection? Parse(ReviewSectionContext context, int index) =>
         SectionSequenceRule.TryParseName(
             context.Section.Name,
             out var stem,
@@ -118,6 +121,7 @@ public sealed class NamingConsistencyRule : IReportReviewRule
                 stem,
                 stemKey,
                 number,
-                width)
+                width,
+                index)
             : null;
 }

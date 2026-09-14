@@ -56,6 +56,7 @@ public partial class App : Application
             var window = new MainWindow(store, new WordReportService(paths, exchangeService), new SharedProjectService(paths), _logger,
                 new FrameCaptureService(paths, _logger), new OccurrenceService(paths, _logger),
                 new AnomalyCatalogService(paths), exchangeService, geoAutoEngineTransport, availableBackup);
+            MainWindow = window;
             window.Show();
             _ = RunStartupBackupAsync(backups, window);
         }
@@ -77,6 +78,12 @@ public partial class App : Application
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { _logger?.Error("Falha no backup automático em segundo plano.", ex); }
+    }
+
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        if (MainWindow is MainWindow window) window.PrepareForSystemShutdown();
+        base.OnSessionEnding(e);
     }
 
     protected override void OnExit(ExitEventArgs e)

@@ -43,11 +43,14 @@ public sealed partial class SectionSequenceRule : IReportReviewRule
 
                 if (current.Number == previous.Number)
                 {
-                    yield return Issue(
-                        current,
-                        "Numeração de trecho duplicada",
-                        $"“{previous.Name}” e “{current.Name}” utilizam o número {current.Number}.",
-                        "Confira os nomes e mantenha uma numeração única para cada trecho.");
+                    // Nomes iguais já são reportados por StructureRule; aqui só há issue
+                    // quando a mesma numeração aparece com grafias diferentes.
+                    if (!string.Equals(current.Name, previous.Name, StringComparison.OrdinalIgnoreCase))
+                        yield return Issue(
+                            current,
+                            "Numeração de trecho duplicada",
+                            $"“{previous.Name}” e “{current.Name}” utilizam o número {current.Number}.",
+                            "Confira os nomes e mantenha uma numeração única para cada trecho.");
                 }
                 else if (current.Number < previous.Number)
                 {

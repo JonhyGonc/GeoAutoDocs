@@ -74,6 +74,11 @@ public partial class ReportReviewWindow : Window
     public void SetStale(bool isStale) =>
         StaleBanner.Visibility = isStale ? Visibility.Visible : Visibility.Collapsed;
 
+    public void ShowCancelled()
+    {
+        ReviewStatusText.Text = "Revisão cancelada. O resultado anterior foi preservado.";
+    }
+
     public void ShowExecutionError()
     {
         ReviewStatusText.Text = "Não foi possível executar a revisão.";
@@ -98,6 +103,11 @@ public partial class ReportReviewWindow : Window
         {
             EmptyStateTitle.Text = "Revisão concluída";
             EmptyStateDescription.Text = "Nenhum problema foi encontrado.";
+        }
+        else if (_result.Issues.Count == 0)
+        {
+            EmptyStateTitle.Text = "Revisão incompleta";
+            EmptyStateDescription.Text = "As verificações concluídas não encontraram problemas.";
         }
         else if (filtered.Count == 0)
         {

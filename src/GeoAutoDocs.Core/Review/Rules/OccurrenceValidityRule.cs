@@ -137,6 +137,7 @@ public sealed class OccurrenceValidityRule : IReportReviewRule
         Severity = ReviewSeverity.Error,
         Title = title,
         Description = description,
+        NavigationArea = ReviewNavigationArea.Inspection,
         LocationId = section?.Location.Id,
         SectionId = section?.Section.Id ?? occurrence?.InspectionSectionId,
         OccurrenceId = occurrence?.Id,

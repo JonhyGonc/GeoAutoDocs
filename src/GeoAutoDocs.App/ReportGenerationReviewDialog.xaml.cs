@@ -71,9 +71,7 @@ public partial class ReportGenerationReviewDialog : Window
 
     private void SecondaryAction_Click(object sender, RoutedEventArgs e)
     {
-        Choice = _mode == ReportGenerationReviewDialogMode.Warnings
-            ? ReportGenerationReviewChoice.OpenReview
-            : ReportGenerationReviewChoice.OpenReview;
+        Choice = ReportGenerationReviewChoice.OpenReview;
         DialogResult = true;
     }
 

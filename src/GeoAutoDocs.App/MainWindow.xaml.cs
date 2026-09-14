@@ -1656,26 +1656,49 @@ public partial class MainWindow : Window
             }
 
             var validation = _wordReportService.Validate(_currentProject, _currentReport);
-            if (validation.Errors.Count > 0)
+            var legacyRuleIds = new HashSet<string>(StringComparer.Ordinal)
             {
+                "report.required",
+                "files.references",
+                "report.coverage"
+            };
+            var structuredLegacyErrors = approvedReview.Result.Issues
+                .Where(x => legacyRuleIds.Contains(x.RuleId) &&
+                            x.Severity == ReviewSeverity.Error)
+                .Select(x => x.Description)
+                .Distinct(StringComparer.Ordinal)
+                .ToHashSet(StringComparer.Ordinal);
+            var structuredLegacyWarnings = approvedReview.Result.Issues
+                .Where(x => legacyRuleIds.Contains(x.RuleId) &&
+                            x.Severity == ReviewSeverity.Warning)
+                .Select(x => x.Description)
+                .Distinct(StringComparer.Ordinal)
+                .ToHashSet(StringComparer.Ordinal);
+            var unexpectedDefensiveErrors = validation.Errors
+                .Where(x => !structuredLegacyErrors.Contains(x))
+                .ToList();
+            var unexpectedDefensiveWarnings = validation.Warnings
+                .Where(x => !structuredLegacyWarnings.Contains(x))
+                .ToList();
+
+            if (validation.Errors.Count > 0 || unexpectedDefensiveWarnings.Count > 0)
+            {
+                var details = validation.Errors
+                    .Select(x => "Erro: " + x)
+                    .Concat(unexpectedDefensiveWarnings.Select(x => "Aviso inesperado: " + x));
                 _logger.Error(
                     "Divergência entre a revisão estruturada e a validação defensiva. " +
                     $"RelatorioId='{_currentReport.Id}'; " +
-                    $"ErrosEstruturados={approvedReview.Result.ErrorCount}; " +
-                    $"ErrosDefensivos={validation.Errors.Count}.",
-                    new InvalidOperationException(string.Join(" | ", validation.Errors)));
+                    $"ErrosDefensivos={validation.Errors.Count}; " +
+                    $"ErrosInesperados={unexpectedDefensiveErrors.Count}; " +
+                    $"AvisosInesperados={unexpectedDefensiveWarnings.Count}.",
+                    new InvalidOperationException(string.Join(" | ", details)));
                 RefreshReportReview(validation);
-                var validationWindow = new ReportValidationWindow(validation) { Owner = this };
+                var validationWindow = new ReportValidationWindow(
+                    validation, defensiveOnly: true) { Owner = this };
                 validationWindow.ShowDialog();
                 return;
             }
-
-            if (validation.Warnings.Count != approvedReview.Result.WarningCount)
-                _logger.Info(
-                    "Diferença de contagem entre revisão estruturada e validação defensiva. " +
-                    $"RelatorioId='{_currentReport.Id}'; " +
-                    $"AvisosEstruturados={approvedReview.Result.WarningCount}; " +
-                    $"AvisosDefensivos={validation.Warnings.Count}.");
 
             var reportsDirectory = Path.Combine(_currentProject.ProjectPath ?? "", "reports");
             if (!string.IsNullOrWhiteSpace(_currentProject.ProjectPath))

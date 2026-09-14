@@ -9,6 +9,7 @@ public sealed record ReviewSectionContext(
 public sealed class ReportReviewContext
 {
     private readonly IReadOnlyDictionary<Guid, ReviewSectionContext> _sectionsById;
+    private readonly IReadOnlyDictionary<Guid, Location> _locationsById;
     private readonly IReadOnlyDictionary<Guid, VideoReference> _videosById;
     private readonly IReadOnlyDictionary<Guid, Capture> _capturesById;
     private readonly IReadOnlyDictionary<Guid, AnomalyDefinition> _anomalyDefinitionsById;
@@ -16,6 +17,7 @@ public sealed class ReportReviewContext
     private readonly IReadOnlyDictionary<Guid, Occurrence> _occurrencesById;
     private readonly IReadOnlyDictionary<Guid, int> _locationOrdersById;
     private readonly IReadOnlyDictionary<Guid, int> _sectionOrdersById;
+    private readonly IReadOnlyDictionary<Guid, IReadOnlyList<Capture>> _pendingCapturesBySectionId;
 
     public ReportReviewContext(
         Project project,
@@ -34,12 +36,12 @@ public sealed class ReportReviewContext
         var selectedIds = report.SectionLinks.Select(x => x.SectionId).ToHashSet();
         SelectedSections = project.Locations
             .OrderBy(location => location.Order)
-            .ThenBy(location => location.Name, StringComparer.CurrentCulture)
+            .ThenBy(location => location.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(location => location.Id)
             .SelectMany(location => location.Sections
                 .Where(section => selectedIds.Contains(section.Id))
                 .OrderBy(section => section.Order)
-                .ThenBy(section => section.Name, StringComparer.CurrentCulture)
+                .ThenBy(section => section.Name, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(section => section.Id)
                 .Select(section => new ReviewSectionContext(
                     location,
@@ -49,6 +51,9 @@ public sealed class ReportReviewContext
             .ToList();
 
         _sectionsById = SelectedSections.ToDictionary(x => x.Section.Id);
+        _locationsById = SelectedSections
+            .GroupBy(x => x.Location.Id)
+            .ToDictionary(x => x.Key, x => x.First().Location);
         _locationOrdersById = SelectedSections
             .GroupBy(x => x.Location.Id)
             .ToDictionary(x => x.Key, x => x.First().LocationOrder);
@@ -88,7 +93,15 @@ public sealed class ReportReviewContext
         Evidences = Occurrences.SelectMany(x => x.Evidence).ToList();
         PendingCaptures = project.Captures
             .Where(x => selectedIds.Contains(x.SectionId) && x.Status == CaptureStatus.Pending)
+            .OrderBy(x => x.SectionId)
+            .ThenBy(x => x.Order)
+            .ThenBy(x => x.Id)
             .ToList();
+        _pendingCapturesBySectionId = PendingCaptures
+            .GroupBy(x => x.SectionId)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<Capture>)x.ToList());
     }
 
     public Project Project { get; }
@@ -103,6 +116,12 @@ public sealed class ReportReviewContext
 
     public bool TryGetSection(Guid id, out ReviewSectionContext section) =>
         _sectionsById.TryGetValue(id, out section!);
+
+    public bool TryGetLocation(Guid id, out Location location) =>
+        _locationsById.TryGetValue(id, out location!);
+
+    public IReadOnlyList<Capture> GetPendingCaptures(Guid sectionId) =>
+        _pendingCapturesBySectionId.TryGetValue(sectionId, out var captures) ? captures : [];
 
     public bool TryGetOccurrenceSection(Guid occurrenceId, out ReviewSectionContext section) =>
         _occurrenceSectionsById.TryGetValue(occurrenceId, out section!);

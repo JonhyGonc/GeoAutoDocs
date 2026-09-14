@@ -53,6 +53,8 @@ public static class AnomalyCatalog
     };
 }
 
+public sealed record OccurrenceValidationFailure(string Code, string Message, string? Field = null);
+
 public static class OccurrenceRules
 {
     public static IReadOnlyList<AnomalyPosition> SelectablePositions { get; } =
@@ -68,65 +70,84 @@ public static class OccurrenceRules
 
     public static void Validate(Occurrence occurrence)
     {
+        var failure = GetValidationFailures(occurrence).FirstOrDefault();
+        if (failure is not null) throw new InvalidOperationException(failure.Message);
+    }
+
+    public static IReadOnlyList<OccurrenceValidationFailure> GetValidationFailures(Occurrence occurrence)
+    {
+        ArgumentNullException.ThrowIfNull(occurrence);
+        var failures = new List<OccurrenceValidationFailure>();
+
         if (occurrence.InspectionSectionId == Guid.Empty)
-            throw new InvalidOperationException("O trecho da anomalia é obrigatório.");
+            failures.Add(new("section.required", "O trecho da anomalia é obrigatório.", nameof(Occurrence.InspectionSectionId)));
 
         switch (occurrence.LocationMode)
         {
             case OccurrenceLocationMode.Point:
                 if (occurrence.Meterage is null || occurrence.Meterage < 0)
-                    throw new InvalidOperationException("Informe uma metragem pontual válida.");
+                    failures.Add(new("meterage.point.invalid", "Informe uma metragem pontual válida.", nameof(Occurrence.Meterage)));
                 break;
             case OccurrenceLocationMode.Range:
                 if (occurrence.Meterage is null || occurrence.EndMeterage is null || occurrence.Meterage < 0)
-                    throw new InvalidOperationException("Informe o início e o fim do intervalo.");
-                if (occurrence.EndMeterage < occurrence.Meterage)
-                    throw new InvalidOperationException("A metragem final deve ser maior ou igual à inicial.");
+                    failures.Add(new("meterage.range.incomplete", "Informe o início e o fim do intervalo.", nameof(Occurrence.Meterage)));
+                else if (occurrence.EndMeterage < occurrence.Meterage)
+                    failures.Add(new("meterage.range.order", "A metragem final deve ser maior ou igual à inicial.", nameof(Occurrence.EndMeterage)));
                 break;
             case OccurrenceLocationMode.MultiPoint:
                 if (occurrence.MeteragePoints is null || occurrence.MeteragePoints.Count < 2)
-                    throw new InvalidOperationException("Informe pelo menos duas metragens distintas.");
-                if (occurrence.MeteragePoints.Any(x => x.Meterage < 0))
-                    throw new InvalidOperationException("As metragens dos múltiplos pontos não podem ser negativas.");
-                if (occurrence.MeteragePoints.Select(x => x.Meterage).Distinct().Count() != occurrence.MeteragePoints.Count)
-                    throw new InvalidOperationException("A mesma metragem foi adicionada mais de uma vez.");
-                if (!occurrence.MeteragePoints.Select(x => x.Meterage)
-                        .SequenceEqual(occurrence.MeteragePoints.OrderBy(x => x.Meterage).Select(x => x.Meterage)))
-                    throw new InvalidOperationException("As metragens dos múltiplos pontos devem estar em ordem crescente.");
+                    failures.Add(new("meterage.multiple.minimum", "Informe pelo menos duas metragens distintas.", nameof(Occurrence.MeteragePoints)));
+                else
+                {
+                    if (occurrence.MeteragePoints.Any(x => x.Meterage < 0))
+                        failures.Add(new("meterage.multiple.negative", "As metragens dos múltiplos pontos não podem ser negativas.", nameof(Occurrence.MeteragePoints)));
+                    if (occurrence.MeteragePoints.Select(x => x.Meterage).Distinct().Count() != occurrence.MeteragePoints.Count)
+                        failures.Add(new("meterage.multiple.duplicate", "A mesma metragem foi adicionada mais de uma vez.", nameof(Occurrence.MeteragePoints)));
+                    if (!occurrence.MeteragePoints.Select(x => x.Meterage)
+                            .SequenceEqual(occurrence.MeteragePoints.OrderBy(x => x.Meterage).Select(x => x.Meterage)))
+                        failures.Add(new("meterage.multiple.order", "As metragens dos múltiplos pontos devem estar em ordem crescente.", nameof(Occurrence.MeteragePoints)));
+                }
                 if (occurrence.EndMeterage is not null)
-                    throw new InvalidOperationException("Múltiplos pontos não possuem metragem final.");
+                    failures.Add(new("meterage.multiple.end", "Múltiplos pontos não possuem metragem final.", nameof(Occurrence.EndMeterage)));
                 break;
             case OccurrenceLocationMode.From:
                 if (occurrence.Meterage is null || occurrence.Meterage < 0)
-                    throw new InvalidOperationException("Informe uma metragem inicial válida.");
+                    failures.Add(new("meterage.from.invalid", "Informe uma metragem inicial válida.", nameof(Occurrence.Meterage)));
                 if (occurrence.EndMeterage is not null)
-                    throw new InvalidOperationException("A localização ‘A partir de’ não possui metragem final.");
+                    failures.Add(new("meterage.from.end", "A localização ‘A partir de’ não possui metragem final.", nameof(Occurrence.EndMeterage)));
                 break;
             case OccurrenceLocationMode.EntireSection:
                 if (occurrence.Meterage is not null || occurrence.EndMeterage is not null)
-                    throw new InvalidOperationException("Uma ocorrência em todo o trecho não possui metragem.");
+                    failures.Add(new("meterage.entire_section", "Uma ocorrência em todo o trecho não possui metragem.", nameof(Occurrence.Meterage)));
                 break;
             default:
-                throw new InvalidOperationException("Selecione a localização da anomalia.");
+                failures.Add(new("location.invalid", "Selecione a localização da anomalia.", nameof(Occurrence.LocationMode)));
+                break;
         }
 
         if (occurrence.Anomalies.Count == 0)
-            throw new InvalidOperationException("Selecione pelo menos um tipo de anomalia.");
+            failures.Add(new("anomaly.required", "Selecione pelo menos um tipo de anomalia.", nameof(Occurrence.Anomalies)));
         if (occurrence.Anomalies.Select(x => x.AnomalyTypeId).Distinct().Count() != occurrence.Anomalies.Count)
-            throw new InvalidOperationException("A mesma anomalia foi selecionada mais de uma vez.");
+            failures.Add(new("anomaly.duplicate", "A mesma anomalia foi selecionada mais de uma vez.", nameof(Occurrence.Anomalies)));
 
-        foreach (var item in occurrence.Anomalies)
+        foreach (var item in occurrence.Anomalies.OrderBy(x => x.Order))
         {
-            if (item.AnomalyType is null) throw new InvalidOperationException("Tipo de anomalia inválido.");
+            if (item.AnomalyType is null)
+            {
+                failures.Add(new("anomaly.invalid", "Tipo de anomalia inválido.", nameof(OccurrenceAnomaly.AnomalyTypeId)));
+                continue;
+            }
             if (item.AnomalyType.AllowsCustomText && string.IsNullOrWhiteSpace(item.CustomText))
-                throw new InvalidOperationException($"Descreva a anomalia ‘{item.AnomalyType.Name}’.");
+                failures.Add(new("anomaly.custom_text.required", $"Descreva a anomalia ‘{item.AnomalyType.Name}’.", nameof(OccurrenceAnomaly.CustomText)));
             if (item.AnomalyType.RequiresPosition && item.Position == AnomalyPosition.NotReported)
-                throw new InvalidOperationException($"Informe a posição de ‘{item.AnomalyType.Name}’.");
+                failures.Add(new("anomaly.position.required", $"Informe a posição de ‘{item.AnomalyType.Name}’.", nameof(OccurrenceAnomaly.Position)));
             if (item.ApproximateExtension is < 0)
-                throw new InvalidOperationException($"A extensão de ‘{item.AnomalyType.Name}’ não pode ser negativa.");
+                failures.Add(new("anomaly.extension.negative", $"A extensão de ‘{item.AnomalyType.Name}’ não pode ser negativa.", nameof(OccurrenceAnomaly.ApproximateExtension)));
             if (item.EstimatedPercentage is < 0 or > 100)
-                throw new InvalidOperationException($"O percentual de ‘{item.AnomalyType.Name}’ deve estar entre 0 e 100.");
+                failures.Add(new("anomaly.percentage.invalid", $"O percentual de ‘{item.AnomalyType.Name}’ deve estar entre 0 e 100.", nameof(OccurrenceAnomaly.EstimatedPercentage)));
         }
+
+        return failures;
     }
 
     public static string FormatLocation(Occurrence occurrence) => occurrence.LocationMode switch

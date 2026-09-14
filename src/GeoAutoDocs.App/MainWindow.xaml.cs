@@ -16,6 +16,8 @@ using GeoAutoDocs.Core;
 using GeoAutoDocs.Infrastructure;
 using LibVLCSharp.Shared;
 using Microsoft.Win32;
+using Drawing = System.Drawing;
+using WinForms = System.Windows.Forms;
 
 namespace GeoAutoDocs.App;
 
@@ -63,6 +65,15 @@ public partial class MainWindow : Window
     private bool _checkpointInProgress;
     private bool _finalizationInProgress;
     private bool _closingAfterSave;
+    private bool _exitRequested;
+    private bool _hideToTrayInProgress;
+    private bool _closeToTrayEnabled = true;
+    private bool _trayNoticeShown;
+    private WinForms.NotifyIcon? _trayIcon;
+    private WinForms.ContextMenuStrip? _trayMenu;
+    private WinForms.ToolStripMenuItem? _trayPendingCapturesItem;
+    private WinForms.ToolStripMenuItem? _closeToTrayMenuItem;
+    private Drawing.Icon? _trayIconImage;
     private bool _saveErrorNotified;
     private bool _reportDeletionInProgress;
     private bool _seeking;
@@ -103,6 +114,9 @@ public partial class MainWindow : Window
     private static string InspectionLayoutPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "GeoAutoDocs", "inspection-layout.json");
+    private static string TrayPreferencesPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "GeoAutoDocs", "tray-preferences.json");
 
     public MainWindow(IProjectStore store, WordReportService wordReportService,
         SharedProjectService sharedProjects, LocalLogger logger, FrameCaptureService frameCaptureService,
@@ -116,6 +130,8 @@ public partial class MainWindow : Window
         _wordReportService = wordReportService;
         _sharedProjects = sharedProjects;
         _logger = logger;
+        LoadTrayPreferences();
+        InitializeTrayIcon();
         _frameCaptureService = frameCaptureService;
         _occurrenceService = occurrenceService;
         _anomalyCatalogService = anomalyCatalogService;
@@ -273,6 +289,165 @@ public partial class MainWindow : Window
     {
         if (_playerDisposed) return;
         _logger.Error($"Falha durante {operation} do player. Caminho='{_currentVideo?.FilePath}'.", exception);
+    }
+
+    private void LoadTrayPreferences()
+    {
+        try
+        {
+            if (!File.Exists(TrayPreferencesPath)) return;
+            var preferences = JsonSerializer.Deserialize<TrayPreferences>(
+                File.ReadAllText(TrayPreferencesPath));
+            if (preferences is null) return;
+            _closeToTrayEnabled = preferences.CloseToTray;
+            _trayNoticeShown = preferences.NoticeShown;
+        }
+        catch (Exception ex)
+        {
+            _logger.Info($"Preferências da bandeja ignoradas: {ex.Message}");
+        }
+    }
+
+    private void SaveTrayPreferences()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(TrayPreferencesPath)!);
+            File.WriteAllText(TrayPreferencesPath, JsonSerializer.Serialize(
+                new TrayPreferences(_closeToTrayEnabled, _trayNoticeShown)));
+        }
+        catch (Exception ex)
+        {
+            _logger.Info($"Não foi possível salvar as preferências da bandeja: {ex.Message}");
+        }
+    }
+
+    private void InitializeTrayIcon()
+    {
+        try
+        {
+            var resource = System.Windows.Application.GetResourceStream(
+                new Uri("pack://application:,,,/Assets/GeoAutoDocs.ico"));
+            if (resource?.Stream is not null)
+            {
+                using (resource.Stream)
+                using (var sourceIcon = new Drawing.Icon(resource.Stream))
+                    _trayIconImage = (Drawing.Icon)sourceIcon.Clone();
+            }
+            _trayIconImage ??= new Drawing.Icon(Drawing.SystemIcons.Application, 32, 32);
+
+            var openItem = new WinForms.ToolStripMenuItem("Abrir GeoAutoDocs");
+            openItem.Click += (_, _) => Dispatcher.BeginInvoke(new Action(RestoreFromTray));
+
+            _trayPendingCapturesItem = new WinForms.ToolStripMenuItem("Capturas pendentes")
+            {
+                Enabled = false
+            };
+            _trayPendingCapturesItem.Click += (_, _) => Dispatcher.BeginInvoke(new Action(() =>
+            {
+                RestoreFromTray();
+                OpenPendingCaptures_Click(this, new RoutedEventArgs());
+            }));
+
+            _closeToTrayMenuItem = new WinForms.ToolStripMenuItem("Fechar para a bandeja")
+            {
+                CheckOnClick = true,
+                Checked = _closeToTrayEnabled
+            };
+            _closeToTrayMenuItem.CheckedChanged += (_, _) => Dispatcher.BeginInvoke(new Action(() =>
+            {
+                _closeToTrayEnabled = _closeToTrayMenuItem.Checked;
+                SaveTrayPreferences();
+                _logger.Info($"Fechar para a bandeja alterado. Ativo={_closeToTrayEnabled}.");
+            }));
+
+            var exitItem = new WinForms.ToolStripMenuItem("Sair");
+            exitItem.Click += (_, _) => Dispatcher.BeginInvoke(new Action(RequestApplicationExit));
+
+            _trayMenu = new WinForms.ContextMenuStrip();
+            _trayMenu.Items.Add(openItem);
+            _trayMenu.Items.Add(_trayPendingCapturesItem);
+            _trayMenu.Items.Add(new WinForms.ToolStripSeparator());
+            _trayMenu.Items.Add(_closeToTrayMenuItem);
+            _trayMenu.Items.Add(new WinForms.ToolStripSeparator());
+            _trayMenu.Items.Add(exitItem);
+
+            _trayIcon = new WinForms.NotifyIcon
+            {
+                Icon = _trayIconImage,
+                Text = "GeoAutoDocs — clique duas vezes para abrir",
+                ContextMenuStrip = _trayMenu,
+                Visible = true
+            };
+            _trayIcon.DoubleClick += (_, _) => Dispatcher.BeginInvoke(new Action(RestoreFromTray));
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Não foi possível criar o ícone da bandeja.", ex);
+            DisposeTrayIcon();
+        }
+    }
+
+    private async Task<bool> HideToTrayAsync()
+    {
+        _saveTimer.Stop();
+        if (_hasPendingChanges && !await SavePendingAsync())
+        {
+            SaveStatus.Text = "Não foi possível ocultar — alterações ainda não foram salvas";
+            return false;
+        }
+
+        if (_mediaPlayer.IsPlaying) _mediaPlayer.Pause();
+        ShowInTaskbar = false;
+        Hide();
+        _logger.Info("Janela principal ocultada na bandeja do Windows.");
+
+        if (!_trayNoticeShown && _trayIcon is not null)
+        {
+            _trayNoticeShown = true;
+            SaveTrayPreferences();
+            _trayIcon.ShowBalloonTip(4000, "GeoAutoDocs continua aberto",
+                "Clique duas vezes no ícone para reabrir ou use “Sair” para encerrar.",
+                WinForms.ToolTipIcon.Info);
+        }
+
+        return true;
+    }
+
+    private void RestoreFromTray()
+    {
+        if (_closingAfterSave || _playerDisposed) return;
+        ShowInTaskbar = true;
+        Show();
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
+        Focus();
+        _logger.Info("Janela principal restaurada a partir da bandeja do Windows.");
+    }
+
+    public void RequestApplicationExit()
+    {
+        _exitRequested = true;
+        RestoreFromTray();
+        Close();
+    }
+
+    public void PrepareForSystemShutdown() => _exitRequested = true;
+
+    private void DisposeTrayIcon()
+    {
+        if (_trayIcon is not null)
+        {
+            _trayIcon.Visible = false;
+            _trayIcon.Dispose();
+            _trayIcon = null;
+        }
+        _trayMenu?.Dispose();
+        _trayMenu = null;
+        _trayPendingCapturesItem = null;
+        _closeToTrayMenuItem = null;
+        _trayIconImage?.Dispose();
+        _trayIconImage = null;
     }
 
     private void LoadInspectionLayoutPreferences()
@@ -1214,22 +1389,61 @@ public partial class MainWindow : Window
     private async void OnClosing(object? sender, CancelEventArgs e)
     {
         SaveInspectionLayoutPreferences();
-        if (_closingAfterSave && _playerDisposed) return;
+        if (_closingAfterSave && _playerDisposed)
+        {
+            DisposeTrayIcon();
+            return;
+        }
+
         e.Cancel = true;
-        if (_playerDisposeInProgress || _finalizationInProgress) return;
+        if (_playerDisposeInProgress || _finalizationInProgress || _hideToTrayInProgress) return;
+
+        if (!_exitRequested && _closeToTrayEnabled && _trayIcon is not null)
+        {
+            _hideToTrayInProgress = true;
+            try
+            {
+                if (!await HideToTrayAsync())
+                {
+                    ShowInTaskbar = true;
+                    Show();
+                    Activate();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("Falha ao ocultar o GeoAutoDocs na bandeja.", ex);
+                ShowInTaskbar = true;
+                Show();
+                Activate();
+                MessageBox.Show("Não foi possível enviar o GeoAutoDocs para a bandeja. Consulte o log.",
+                    "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                _hideToTrayInProgress = false;
+            }
+            return;
+        }
 
         try
         {
             if ((_currentProject is not null || _hasPendingChanges) &&
-                !await FinalizeCurrentProjectAsync()) return;
+                !await FinalizeCurrentProjectAsync())
+            {
+                _exitRequested = false;
+                return;
+            }
             if (_correctionChannel is not null)
                 await _correctionChannel.StopCorrectionSessionAsync();
             await DisposePlayerAsync();
             _closingAfterSave = true;
+            DisposeTrayIcon();
             _ = Dispatcher.BeginInvoke(Close);
         }
         catch (Exception ex)
         {
+            _exitRequested = false;
             _logger.Error("Falha ao finalizar o player durante o fechamento.", ex);
             MessageBox.Show("Não foi possível concluir o fechamento com segurança. Consulte o log.",
                 "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
@@ -1803,6 +2017,7 @@ public partial class MainWindow : Window
             var requestedCount = package.Corrections?.Count ?? 0;
             _logger.Info($"CorrectionPush recebido. ReportId='{package.ReportId}'; " +
                          $"Correções={requestedCount}.");
+            RestoreFromTray();
 
             if (_closingAfterSave || _finalizationInProgress)
                 return CorrectionFailure(package, "O GeoAutoDocs está finalizando o projeto.");
@@ -2214,6 +2429,16 @@ public partial class MainWindow : Window
             _ => $"Abrir {count} capturas pendentes"
         };
         PendingCapturesButton.IsEnabled = _currentProject is not null && _currentSection is not null && count > 0;
+        if (_trayPendingCapturesItem is not null)
+        {
+            _trayPendingCapturesItem.Text = count switch
+            {
+                0 => "Capturas pendentes",
+                1 => "Capturas pendentes (1)",
+                _ => $"Capturas pendentes ({count})"
+            };
+            _trayPendingCapturesItem.Enabled = count > 0;
+        }
     }
 
     private void RefreshOccurrences()
@@ -4600,4 +4825,6 @@ public partial class MainWindow : Window
     private static int NextOrder(IEnumerable<int> orders) => orders.DefaultIfEmpty(-1).Max() + 1;
 
     private static string? EmptyToNull(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private sealed record TrayPreferences(bool CloseToTray, bool NoticeShown);
 }

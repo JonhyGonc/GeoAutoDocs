@@ -145,7 +145,7 @@ public partial class ReportReviewWindow : Window
 
     private void Filter_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not ToggleButton { Tag: string value } selected ||
+        if (sender is not ToggleButton { Tag: string value } ||
             !Enum.TryParse(value, out ReviewIssueFilter filter))
             return;
 

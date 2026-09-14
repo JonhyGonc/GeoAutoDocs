@@ -2497,9 +2497,14 @@ public partial class MainWindow : Window
             _ => null
         };
 
-        if (target is DefaultClientBox or DefaultCnpjBox or DefaultAreaBox or
-            DefaultContractBox or DefaultPurchaseOrderBox or DefaultLogoBox ||
-            string.Equals(reportField, "Project.Name", StringComparison.Ordinal))
+        var overviewTarget = ReferenceEquals(target, DefaultClientBox) ||
+                             ReferenceEquals(target, DefaultCnpjBox) ||
+                             ReferenceEquals(target, DefaultAreaBox) ||
+                             ReferenceEquals(target, DefaultContractBox) ||
+                             ReferenceEquals(target, DefaultPurchaseOrderBox) ||
+                             ReferenceEquals(target, DefaultLogoBox) ||
+                             string.Equals(reportField, "Project.Name", StringComparison.Ordinal);
+        if (overviewTarget)
             OverviewTab.IsSelected = true;
         else
             WordConfigTab.IsSelected = true;

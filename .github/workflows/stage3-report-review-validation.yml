@@ -1,0 +1,94 @@
+name: Stage 3 report review validation
+
+on:
+  push:
+    branches:
+      - fix/section-edit-save-stability
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore GeoAutoDocs.sln
+
+      - name: Build Release
+        run: dotnet build GeoAutoDocs.sln --configuration Release --no-restore
+
+      - name: Test all
+        run: dotnet test GeoAutoDocs.sln --configuration Release --no-build --logger "console;verbosity=normal"
+
+      - name: Instantiate report review window
+        shell: pwsh
+        run: |
+          $smoke = Join-Path $env:RUNNER_TEMP "ReportReviewSmoke"
+          New-Item -ItemType Directory -Path $smoke | Out-Null
+          @'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <OutputType>Exe</OutputType>
+              <TargetFramework>net8.0-windows</TargetFramework>
+              <UseWPF>true</UseWPF>
+              <EnableWindowsTargeting>true</EnableWindowsTargeting>
+              <ImplicitUsings>enable</ImplicitUsings>
+              <Nullable>enable</Nullable>
+            </PropertyGroup>
+            <ItemGroup>
+              <ProjectReference Include="$REPO_ROOT\src\GeoAutoDocs.App\GeoAutoDocs.App.csproj" />
+            </ItemGroup>
+          </Project>
+          '@.Replace('$REPO_ROOT', $env:GITHUB_WORKSPACE) | Set-Content (Join-Path $smoke "ReportReviewSmoke.csproj")
+          @'
+          using System.Windows;
+          using GeoAutoDocs.App;
+
+          internal static class Program
+          {
+              [STAThread]
+              private static void Main()
+              {
+                  var application = new Application();
+                  application.Resources.MergedDictionaries.Add(new ResourceDictionary
+                  {
+                      Source = new Uri(
+                          "pack://application:,,,/GeoAutoDocs.App;component/Styles/GeoAutoDocsTheme.xaml",
+                          UriKind.Absolute)
+                  });
+                  var window = new ReportReviewWindow();
+                  window.Show();
+                  window.Dispatcher.BeginInvoke(new Action(() =>
+                  {
+                      window.Close();
+                      application.Shutdown();
+                  }));
+                  application.Run();
+              }
+          }
+          '@ | Set-Content (Join-Path $smoke "Program.cs")
+          dotnet run --project (Join-Path $smoke "ReportReviewSmoke.csproj") --configuration Release
+
+      - name: Start application smoke test
+        shell: pwsh
+        run: |
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP "GeoAutoDocsLocal"
+          New-Item -ItemType Directory -Path $env:LOCALAPPDATA -Force | Out-Null
+          $exe = Join-Path $env:GITHUB_WORKSPACE "src\GeoAutoDocs.App\bin\Release\net8.0-windows\GeoAutoDocs.App.exe"
+          $process = Start-Process $exe -PassThru
+          Start-Sleep -Seconds 10
+          if ($process.HasExited) {
+            throw "GeoAutoDocs encerrou durante a inicialização. ExitCode=$($process.ExitCode)"
+          }
+          $log = Get-ChildItem $env:LOCALAPPDATA -Filter "GeoAutoDocs.log" -Recurse |
+            Select-Object -First 1
+          if ($null -eq $log -or -not (Select-String -Path $log.FullName -Pattern "Janela principal exibida" -Quiet)) {
+            throw "O log não confirmou a exibição da janela principal."
+          }
+          Stop-Process -Id $process.Id -Force

@@ -479,3 +479,150 @@ public sealed class ReportReviewPresentationTests
         Description = title
     };
 }
+
+
+public sealed class ReportGenerationReviewPolicyTests
+{
+    private readonly Guid _projectId = Guid.NewGuid();
+    private readonly Guid _reportId = Guid.NewGuid();
+    private const string Selection = "01;02;03";
+
+    [Fact]
+    public void CompleteReviewWithoutIssuesAllowsGeneration() =>
+        Assert.Equal(
+            ReportGenerationReviewDecision.AllowGeneration,
+            Evaluate(Snapshot()));
+
+    [Fact]
+    public void InformationDoesNotRequireConfirmation() =>
+        Assert.Equal(
+            ReportGenerationReviewDecision.AllowGeneration,
+            Evaluate(Snapshot(issues: [Issue(ReviewSeverity.Info)])));
+
+    [Fact]
+    public void ErrorsBlockGeneration() =>
+        Assert.Equal(
+            ReportGenerationReviewDecision.BlockErrors,
+            Evaluate(Snapshot(issues: [Issue(ReviewSeverity.Error)])));
+
+    [Fact]
+    public void WarningsRequireUserDecision() =>
+        Assert.Equal(
+            ReportGenerationReviewDecision.ConfirmWarnings,
+            Evaluate(Snapshot(issues: [Issue(ReviewSeverity.Warning)])));
+
+    [Fact]
+    public void IncompleteReviewBlocksGeneration() =>
+        Assert.Equal(
+            ReportGenerationReviewDecision.BlockIncomplete,
+            Evaluate(Snapshot(incomplete: true)));
+
+    [Fact]
+    public void MissingReviewRequestsExecution() =>
+        Assert.Equal(
+            ReportGenerationReviewDecision.ExecuteReview,
+            Evaluate(null));
+
+    [Fact]
+    public void StaleReviewRequestsExecution() =>
+        Assert.Equal(
+            ReportGenerationReviewDecision.ExecuteReview,
+            Evaluate(Snapshot(revision: 9)));
+
+    [Fact]
+    public void CurrentReviewIsReused() =>
+        Assert.Equal(
+            ReportGenerationReviewDecision.AllowGeneration,
+            Evaluate(Snapshot(revision: 10)));
+
+    [Fact]
+    public void CancelledReviewCancelsGeneration()
+    {
+        var outcome = ReportReviewExecutionOutcome.Cancelled();
+
+        Assert.Equal(ReportReviewExecutionStatus.Cancelled, outcome.Status);
+        Assert.Null(outcome.Snapshot);
+    }
+
+    [Fact]
+    public void AcceptedWarningsContinueWithoutAnotherReview()
+    {
+        var snapshot = Snapshot(issues: [Issue(ReviewSeverity.Warning)]);
+
+        var decision = ReportGenerationReviewPolicy.Evaluate(
+            snapshot, _projectId, _reportId, 10, Selection, warningsAccepted: true);
+
+        Assert.Equal(ReportGenerationReviewDecision.AllowGeneration, decision);
+    }
+
+    [Fact]
+    public void NewSnapshotRestoresCurrentStateAfterRevisionChanges()
+    {
+        var revisionTen = Snapshot(revision: 10);
+
+        Assert.Equal(ReportGenerationReviewDecision.AllowGeneration, Evaluate(revisionTen, 10));
+        Assert.Equal(ReportGenerationReviewDecision.ExecuteReview, Evaluate(revisionTen, 11));
+        Assert.Equal(ReportGenerationReviewDecision.AllowGeneration, Evaluate(Snapshot(revision: 11), 11));
+    }
+
+    [Fact]
+    public void ChangedSectionSelectionInvalidatesSnapshot()
+    {
+        var snapshot = Snapshot();
+
+        var decision = ReportGenerationReviewPolicy.Evaluate(
+            snapshot, _projectId, _reportId, 10, "01;03;04");
+
+        Assert.Equal(ReportGenerationReviewDecision.ExecuteReview, decision);
+    }
+
+    [Fact]
+    public void SectionSelectionSignatureIsIndependentOfLinkOrder()
+    {
+        var report = new Report();
+        var first = new InspectionSection { Id = Guid.Parse("10000000-0000-0000-0000-000000000000") };
+        var second = new InspectionSection { Id = Guid.Parse("20000000-0000-0000-0000-000000000000") };
+        report.SelectSection(second);
+        report.SelectSection(first);
+        var reversed = new Report();
+        reversed.SelectSection(first);
+        reversed.SelectSection(second);
+
+        Assert.Equal(
+            ReportReviewSelection.CreateSignature(report),
+            ReportReviewSelection.CreateSignature(reversed));
+    }
+
+    private ReportGenerationReviewDecision Evaluate(
+        ReportReviewSnapshot? snapshot,
+        long revision = 10) =>
+        ReportGenerationReviewPolicy.Evaluate(
+            snapshot, _projectId, _reportId, revision, Selection);
+
+    private ReportReviewSnapshot Snapshot(
+        IReadOnlyList<ReviewIssue>? issues = null,
+        bool incomplete = false,
+        long revision = 10) =>
+        new(
+            _projectId,
+            _reportId,
+            revision,
+            DateTimeOffset.UtcNow,
+            new ReviewResult(
+                issues ?? [],
+                incomplete
+                    ? [new ReviewRuleFailure("test.failure", "Falha", "Exception", "Falhou")]
+                    : [],
+                new ReviewMetrics(0, 0, 0, 0)))
+        {
+            SectionSelectionSignature = Selection
+        };
+
+    private static ReviewIssue Issue(ReviewSeverity severity) => new()
+    {
+        RuleId = "test." + severity,
+        Severity = severity,
+        Title = severity.ToString(),
+        Description = severity.ToString()
+    };
+}

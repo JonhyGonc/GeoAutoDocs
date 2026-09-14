@@ -80,6 +80,7 @@ public sealed partial class TextQualityRule : IReportReviewRule
         Severity = severity,
         Title = title,
         Description = description,
+        NavigationArea = ReviewNavigationArea.Inspection,
         LocationId = section?.Location.Id,
         SectionId = section?.Section.Id ?? occurrence.InspectionSectionId,
         OccurrenceId = occurrence.Id,

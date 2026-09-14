@@ -2496,6 +2496,11 @@ public partial class MainWindow : Window
         AddSectionButton.IsEnabled = !IsReadOnly && !_captureInProgress && _currentLocation is not null;
         RenameLocationButton.IsEnabled = !IsReadOnly && !_captureInProgress && _currentLocation is not null;
         DeleteLocationButton.IsEnabled = !IsReadOnly && !_captureInProgress && _currentLocation is not null;
+        ReorderLocationsButton.IsEnabled = !IsReadOnly && !_captureInProgress &&
+                                            _currentProject?.Locations.Count > 1;
+        ReorderLocationsButton.ToolTip = IsReadOnly ? "Projeto aberto somente para leitura."
+            : _currentProject?.Locations.Count > 1 ? "Ordenar locais arrastando para cima ou para baixo"
+            : "Crie pelo menos dois locais para alterar a ordem.";
         ReorderSectionsButton.IsEnabled = !IsReadOnly && !_captureInProgress &&
                                           _currentLocation?.Sections.Count > 1;
         ReorderSectionsButton.ToolTip = IsReadOnly ? "Projeto aberto somente para leitura."
@@ -2731,6 +2736,99 @@ public partial class MainWindow : Window
                 }
             }
         }
+    }
+
+    private async void ReorderLocations_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null || IsReadOnly || _currentProject.Locations.Count < 2) return;
+
+        var project = _currentProject;
+        var selectedLocationId = _currentLocation?.Id;
+        var selectedSectionId = _currentSection?.Id;
+        IReadOnlyList<Guid>? requestedOrder = null;
+        HideVideoSurfaceForOverlay();
+        try
+        {
+            var dialog = new LocationOrderWindow(project.Locations) { Owner = this };
+            if (dialog.ShowDialog() == true) requestedOrder = dialog.OrderedLocationIds;
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"Falha ao abrir a ordenação de locais. ProjectId='{project.Id}'.", ex);
+            ShowError("Não foi possível abrir a ordenação de locais.", ex);
+        }
+        finally
+        {
+            RestoreVideoSurfaceAfterOverlay();
+        }
+
+        if (requestedOrder is null) return;
+        var previousOrders = project.Locations.ToDictionary(x => x.Id, x => x.Order);
+        var previousReportOrders = project.Reports
+            .SelectMany(report => report.SectionLinks.Select(link =>
+                (Key: (report.Id, link.SectionId), link.Order)))
+            .ToDictionary(x => x.Key, x => x.Order);
+        var currentIds = project.Locations.OrderBy(x => x.Order).Select(x => x.Id).ToList();
+        if (currentIds.SequenceEqual(requestedOrder)) return;
+
+        try
+        {
+            LocationOrdering.Apply(project, requestedOrder);
+            NormalizeAllReportSectionOrders(project);
+            MarkPendingChanges();
+            SaveStatus.Text = "Salvando nova ordem dos locais...";
+            if (!await SavePendingAsync())
+            {
+                RestoreLocationAndReportOrders(project, previousOrders, previousReportOrders);
+                MarkPendingChanges();
+                _logger.Info($"Reordenação de locais revertida após falha de salvamento. ProjectId='{project.Id}'.");
+            }
+            else
+            {
+                _logger.Info($"Locais reordenados. ProjectId='{project.Id}'; Ordem='{string.Join(",", requestedOrder)}'.");
+            }
+        }
+        catch (Exception ex)
+        {
+            RestoreLocationAndReportOrders(project, previousOrders, previousReportOrders);
+            _logger.Error($"Falha ao aplicar a ordenação de locais. ProjectId='{project.Id}'.", ex);
+            ShowError("Não foi possível alterar a ordem dos locais.", ex);
+        }
+        finally
+        {
+            if (_currentProject?.Id == project.Id)
+            {
+                _currentLocation = project.Locations.FirstOrDefault(x => x.Id == selectedLocationId)
+                                   ?? project.Locations.OrderBy(x => x.Order).FirstOrDefault();
+                _currentSection = _currentLocation?.Sections.FirstOrDefault(x => x.Id == selectedSectionId)
+                                  ?? _currentLocation?.Sections.OrderBy(x => x.Order).FirstOrDefault();
+                RefreshInspectionTree();
+                RefreshReportReview();
+            }
+        }
+    }
+
+    private static void NormalizeAllReportSectionOrders(Project project)
+    {
+        var order = project.Locations.OrderBy(x => x.Order).ThenBy(x => x.Name)
+            .SelectMany(x => x.Sections.OrderBy(y => y.Order).ThenBy(y => y.Name))
+            .Select((section, index) => (section.Id, index))
+            .ToDictionary(x => x.Id, x => x.index);
+        foreach (var report in project.Reports)
+        foreach (var link in report.SectionLinks)
+            link.Order = order.GetValueOrDefault(link.SectionId, int.MaxValue);
+    }
+
+    private static void RestoreLocationAndReportOrders(
+        Project project,
+        IReadOnlyDictionary<Guid, int> locationOrders,
+        IReadOnlyDictionary<(Guid ReportId, Guid SectionId), int> reportOrders)
+    {
+        foreach (var location in project.Locations)
+            if (locationOrders.TryGetValue(location.Id, out var order)) location.Order = order;
+        foreach (var report in project.Reports)
+        foreach (var link in report.SectionLinks)
+            if (reportOrders.TryGetValue((report.Id, link.SectionId), out var order)) link.Order = order;
     }
 
     private async void ReorderSections_Click(object sender, RoutedEventArgs e)

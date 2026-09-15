@@ -31,7 +31,6 @@ public sealed record ReviewIssue
     public string? ReportField { get; init; }
     public decimal? Meterage { get; init; }
     public string? SuggestedFix { get; init; }
-    public bool CanBeAcceptedAfterVerification { get; init; }
 }
 
 public sealed record ReviewRuleFailure(

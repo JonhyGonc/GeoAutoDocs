@@ -116,6 +116,7 @@ public sealed class FrameCaptureService(AppDataPaths paths, LocalLogger logger)
     {
         EnsureWritable(isReadOnly);
         var referencedPaths = PendingCaptureRemoval.GetReferencedPaths(project);
+        var existingIds = project.Captures.Select(x => x.Id).ToHashSet();
         var processed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var archived = 0;
         var failed = 0;
@@ -126,7 +127,7 @@ public sealed class FrameCaptureService(AppDataPaths paths, LocalLogger logger)
             {
                 var source = Path.GetFullPath(capture.FilePath);
                 if (capture.Status != CaptureStatus.Pending || !capture.ManagedByGeoAutoDocs ||
-                    project.Captures.Any(x => x.Id == capture.Id) ||
+                    existingIds.Contains(capture.Id) ||
                     referencedPaths.Contains(source) || !processed.Add(source) ||
                     !string.Equals(Path.GetExtension(source), ".png", StringComparison.OrdinalIgnoreCase) ||
                     !IsInsideManagedCaptureDirectory(project, source) || !File.Exists(source))

@@ -45,7 +45,8 @@ public sealed partial class SectionSequenceRule : IReportReviewRule
                 {
                     // Nomes iguais já são reportados por StructureRule; aqui só há issue
                     // quando a mesma numeração aparece com grafias diferentes.
-                    if (!string.Equals(current.Name, previous.Name, StringComparison.OrdinalIgnoreCase))
+                    if (current.Context.Location.Id != previous.Context.Location.Id ||
+                        !string.Equals(current.Name, previous.Name, StringComparison.OrdinalIgnoreCase))
                         yield return Issue(
                             current,
                             "Numeração de trecho duplicada",

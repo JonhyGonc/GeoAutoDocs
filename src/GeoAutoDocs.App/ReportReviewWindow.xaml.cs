@@ -10,10 +10,22 @@ public sealed class ReviewIssueNavigationEventArgs(ReviewIssue issue) : EventArg
     public ReviewIssue Issue { get; } = issue;
 }
 
+public sealed class ReviewIssueVerificationEventArgs(ReviewIssue issue, bool verified) : EventArgs
+{
+    public ReviewIssue Issue { get; } = issue;
+    public bool Verified { get; } = verified;
+}
+
 public partial class ReportReviewWindow : Window
 {
     private ReviewResult? _result;
     private ReportReviewContext? _context;
+    private ReviewVerificationState? _verification;
+    private int _verificationVersion = -1;
+    private bool _isStale;
+    private bool _isReadOnly;
+    private bool _running;
+    private bool _busy;
     private ReviewIssueFilter _filter = ReviewIssueFilter.All;
 
     public ReportReviewWindow()
@@ -25,13 +37,23 @@ public partial class ReportReviewWindow : Window
     public event EventHandler? ReviewRequested;
     public event EventHandler? CancelRequested;
     public event EventHandler<ReviewIssueNavigationEventArgs>? NavigateRequested;
+    public event EventHandler<ReviewIssueVerificationEventArgs>? VerificationRequested;
+    public event EventHandler<ReviewIssueNavigationEventArgs>? RemovePendingRequested;
 
     public void ShowSnapshot(
         ReportReviewSnapshot snapshot,
         ReportReviewContext context,
-        bool isStale)
+        bool isStale,
+        ReviewVerificationState? verification = null,
+        bool isReadOnly = false)
     {
-        var changed = !ReferenceEquals(_result, snapshot.Result) || !ReferenceEquals(_context, context);
+        var changed = !ReferenceEquals(_result, snapshot.Result) || !ReferenceEquals(_context, context) ||
+            _verificationVersion != (verification?.Version ?? -1) ||
+            _isStale != isStale || _isReadOnly != isReadOnly;
+        _verification = ReferenceEquals(verification?.Snapshot, snapshot) ? verification : null;
+        _verificationVersion = _verification?.Version ?? -1;
+        _isStale = isStale;
+        _isReadOnly = isReadOnly;
         _result = snapshot.Result;
         _context = context;
         ErrorCountText.Text = snapshot.Result.ErrorCount.ToString(CultureInfo.CurrentCulture);
@@ -42,6 +64,8 @@ public partial class ReportReviewWindow : Window
         IncompleteBanner.Visibility = snapshot.Result.IsComplete
             ? Visibility.Collapsed
             : Visibility.Visible;
+        VerifiedCountText.Text = $"{_verification?.VerifiedCount ?? 0} item(ns) verificado(s). " +
+            "A conferência vale somente para esta revisão.";
         SetStale(isStale);
         if (changed) ApplyFilter();
     }
@@ -50,6 +74,9 @@ public partial class ReportReviewWindow : Window
     {
         _result = null;
         _context = null;
+        _verification = null;
+        _verificationVersion = -1;
+        VerifiedCountText.Text = "";
         ErrorCountText.Text = "0";
         WarningCountText.Text = "0";
         InfoCountText.Text = "0";
@@ -65,11 +92,24 @@ public partial class ReportReviewWindow : Window
 
     public void SetRunning(bool running)
     {
+        _running = running;
         ReviewProgress.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
-        RunReviewButton.IsEnabled = !running;
+        RefreshAvailability();
         CancelReviewButton.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
         ReviewStatusText.Text = running ? "Revisando relatório..." : ReviewStatusText.Text;
-        foreach (var button in FilterButtons()) button.IsEnabled = !running;
+    }
+
+    public void SetActionBusy(bool busy)
+    {
+        _busy = busy;
+        RefreshAvailability();
+    }
+
+    private void RefreshAvailability()
+    {
+        RunReviewButton.IsEnabled = !_running && !_busy;
+        IssuesList.IsEnabled = !_running && !_busy;
+        foreach (var button in FilterButtons()) button.IsEnabled = !_running && !_busy;
     }
 
     public void SetStale(bool isStale) =>
@@ -105,7 +145,7 @@ public partial class ReportReviewWindow : Window
         }
 
         var filtered = ReviewIssueFiltering.Apply(_result.Issues, _filter)
-            .Select(issue => ReviewIssueListItem.Create(issue, _context))
+            .Select(issue => ReviewIssueListItem.Create(issue, _context, _verification, _isStale, _isReadOnly))
             .ToList();
         IssuesList.ItemsSource = filtered;
         EmptyState.Visibility = filtered.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -143,6 +183,21 @@ public partial class ReportReviewWindow : Window
             NavigateRequested?.Invoke(this, new ReviewIssueNavigationEventArgs(issue));
     }
 
+    private void Verify_Click(object sender, RoutedEventArgs e)
+    {
+        if (_running || _busy || _isStale) return;
+        if (sender is ToggleButton { Tag: ReviewIssue issue } button)
+            VerificationRequested?.Invoke(this, new ReviewIssueVerificationEventArgs(
+                issue, button.IsChecked == true));
+    }
+
+    private void RemovePending_Click(object sender, RoutedEventArgs e)
+    {
+        if (_running || _busy || _isStale || _isReadOnly) return;
+        if (sender is FrameworkElement { Tag: ReviewIssue issue })
+            RemovePendingRequested?.Invoke(this, new ReviewIssueNavigationEventArgs(issue));
+    }
+
     private void Filter_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not ToggleButton { Tag: string value } ||
@@ -173,11 +228,19 @@ public partial class ReportReviewWindow : Window
         string SectionText,
         Visibility SectionVisibility,
         string MeterageText,
-        Visibility MeterageVisibility)
+        Visibility MeterageVisibility,
+        bool IsVerified,
+        bool CanVerify,
+        string VerificationTooltip,
+        Visibility RemovePendingVisibility,
+        bool CanRemovePending)
     {
         public static ReviewIssueListItem Create(
             ReviewIssue issue,
-            ReportReviewContext context)
+            ReportReviewContext context,
+            ReviewVerificationState? verification,
+            bool isStale,
+            bool isReadOnly)
         {
             ReviewSectionContext? section = null;
             if (issue.SectionId is Guid sectionId)
@@ -205,7 +268,16 @@ public partial class ReportReviewWindow : Window
                 section is null ? string.Empty : $"Trecho: {DisplayName(section.Section.Name)}",
                 section is null ? Visibility.Collapsed : Visibility.Visible,
                 meterage,
-                meterage.Length == 0 ? Visibility.Collapsed : Visibility.Visible);
+                meterage.Length == 0 ? Visibility.Collapsed : Visibility.Visible,
+                verification?.IsVerified(issue) == true,
+                !isStale,
+                issue.Severity == ReviewSeverity.Error && !issue.CanBeAcceptedAfterVerification
+                    ? "Marca como conferido. Este erro objetivo ainda precisa ser corrigido para gerar."
+                    : "Confirme que conferiu este item. Clique novamente para desfazer.",
+                issue.NavigationArea == ReviewNavigationArea.PendingCaptures &&
+                    issue.RuleId == "report.coverage" && issue.SectionId.HasValue
+                    ? Visibility.Visible : Visibility.Collapsed,
+                !isStale && !isReadOnly);
         }
 
         private static string DisplayName(string? value) =>

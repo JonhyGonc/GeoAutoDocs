@@ -2562,6 +2562,10 @@ public partial class MainWindow : Window
             project, report, configuredTemplate, ReviewFileSystem.Instance);
         var cancellation = new CancellationTokenSource();
         _reportReviewCts = cancellation;
+        var reviewWatch = Stopwatch.StartNew();
+        _logger.Info($"Revisão iniciada. ProjetoId='{project.Id}'; RelatorioId='{report.Id}'; " +
+                     $"Trechos={context.SelectedSections.Count}; Ocorrencias={context.Occurrences.Count}; " +
+                     $"Evidencias={context.Evidences.Count}.");
         var window = showWindow ? EnsureReportReviewWindow() : _reportReviewWindow;
         window?.SetRunning(true);
         var editorWasEnabled = EditorView.IsEnabled;
@@ -2574,6 +2578,7 @@ public partial class MainWindow : Window
             var result = await Task.Run(
                 () => _reportReviewService.Review(context, cancellation.Token),
                 cancellation.Token);
+            cancellation.Token.ThrowIfCancellationRequested();
             if (!ReferenceEquals(project, _currentProject) ||
                 !ReferenceEquals(report, _currentReport))
                 return ReportReviewExecutionOutcome.Cancelled();
@@ -2585,7 +2590,7 @@ public partial class MainWindow : Window
             };
             _reportReviewSnapshot = snapshot;
             _reportReviewContext = context;
-            if (ReferenceEquals(window, _reportReviewWindow))
+            if (window is not null && ReferenceEquals(window, _reportReviewWindow))
                 window!.ShowSnapshot(
                     snapshot,
                     context,
@@ -2597,27 +2602,29 @@ public partial class MainWindow : Window
             RefreshReportReview();
             _logger.Info(
                 $"Revisão concluída. RelatorioId='{report.Id}'; Erros={result.ErrorCount}; " +
-                $"Avisos={result.WarningCount}; Informacoes={result.InfoCount}; Completa={result.IsComplete}.");
+                $"Avisos={result.WarningCount}; Informacoes={result.InfoCount}; Completa={result.IsComplete}; " +
+                $"TempoMs={reviewWatch.ElapsedMilliseconds}.");
             return ReportReviewExecutionOutcome.Completed(snapshot);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
-            if (ReferenceEquals(window, _reportReviewWindow))
+            if (window is not null && ReferenceEquals(window, _reportReviewWindow))
                 window!.ShowCancelled();
-            _logger.Info($"Revisão cancelada. RelatorioId='{report.Id}'.");
+            _logger.Info($"Revisão cancelada. RelatorioId='{report.Id}'; TempoMs={reviewWatch.ElapsedMilliseconds}.");
             return ReportReviewExecutionOutcome.Cancelled();
         }
         catch (Exception ex)
         {
-            _logger.Error("Falha ao executar a revisão do relatório.", ex);
-            if (ReferenceEquals(window, _reportReviewWindow))
+            _logger.Error($"Falha ao executar a revisão do relatório. RelatorioId='{report.Id}'; " +
+                          $"TempoMs={reviewWatch.ElapsedMilliseconds}.", ex);
+            if (window is not null && ReferenceEquals(window, _reportReviewWindow))
                 window!.ShowExecutionError();
             return ReportReviewExecutionOutcome.Failed();
         }
         finally
         {
             EditorView.IsEnabled = editorWasEnabled;
-            if (ReferenceEquals(window, _reportReviewWindow))
+            if (window is not null && ReferenceEquals(window, _reportReviewWindow))
                 window!.SetRunning(false);
             if (ReferenceEquals(_reportReviewCts, cancellation))
                 _reportReviewCts = null;

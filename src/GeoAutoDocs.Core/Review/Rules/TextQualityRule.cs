@@ -32,13 +32,17 @@ public sealed partial class TextQualityRule : IReportReviewRule
 
             var trimmed = text.Trim();
             var normalizedPlaceholder = trimmed.Trim('.', ';', ':', '-', '_').Trim();
-            if (context.Options.TextPlaceholders.Contains(normalizedPlaceholder))
+            if (context.Options.TextPlaceholders.Contains(trimmed) ||
+                context.Options.TextPlaceholders.Contains(normalizedPlaceholder))
+            {
                 yield return Issue(
                     ReviewSeverity.Warning,
                     "Texto provisório",
                     $"A descrição “{trimmed}” parece ser um texto provisório.",
                     section,
                     occurrence);
+                continue;
+            }
 
             if (context.Options.MinimumDescriptionLength > 0 &&
                 trimmed.Length < context.Options.MinimumDescriptionLength)

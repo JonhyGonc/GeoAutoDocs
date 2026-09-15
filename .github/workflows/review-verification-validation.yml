@@ -182,21 +182,21 @@ jobs:
                   Require(second.Snapshot.Result.WarningCount > 0, "Verificar ocultou contagem original.");
                   handler.Invoke(window, [review, new ReviewIssueVerificationEventArgs(issue, false)]);
                   Require(!verification.IsVerified(issue), "Desmarcar falhou.");
-                  var item = list.ItemsSource.Cast<object>().First();
+                  var item = list.ItemsSource.Cast<object>().First(x => Equals(x.GetType().GetProperty("Issue")!.GetValue(x), issue));
                   Require((bool)item.GetType().GetProperty("CanRemovePending")!.GetValue(item)!,
                       "Ação de remover capturas não foi disponibilizada.");
                   var previousItems = list.ItemsSource;
                   review.ShowSnapshot(second.Snapshot!, context, false, verification, false);
                   Require(ReferenceEquals(previousItems, list.ItemsSource), "Refresh estável recriou itens.");
                   review.ShowSnapshot(second.Snapshot!, context, true, verification, false);
-                  item = list.ItemsSource.Cast<object>().First();
+                  item = list.ItemsSource.Cast<object>().First(x => Equals(x.GetType().GetProperty("Issue")!.GetValue(x), issue));
                   Require(!(bool)item.GetType().GetProperty("CanVerify")!.GetValue(item)! &&
                       !(bool)item.GetType().GetProperty("CanRemovePending")!.GetValue(item)!,
                       "Snapshot antigo permitiu ações.");
                   Require(((FrameworkElement)review.FindName("StaleBanner")).Visibility == Visibility.Visible,
                       "Resultado desatualizado não sinalizado.");
                   review.ShowSnapshot(second.Snapshot!, context, false, verification, true);
-                  item = list.ItemsSource.Cast<object>().First();
+                  item = list.ItemsSource.Cast<object>().First(x => Equals(x.GetType().GetProperty("Issue")!.GetValue(x), issue));
                   Require(!(bool)item.GetType().GetProperty("CanRemovePending")!.GetValue(item)!,
                       "Read-only permitiu remoção.");
                   review.ShowSnapshot(second.Snapshot!, context, false, verification, false);

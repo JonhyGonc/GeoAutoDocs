@@ -85,7 +85,8 @@ public static class ReportGenerationReviewPolicy
         Guid reportId,
         long currentRevision,
         string sectionSelectionSignature,
-        bool warningsAccepted = false)
+        bool warningsAccepted = false,
+        ReviewVerificationState? verification = null)
     {
         if (snapshot is null ||
             !snapshot.IsCurrent(
@@ -97,9 +98,10 @@ public static class ReportGenerationReviewPolicy
 
         if (!snapshot.Result.IsComplete)
             return ReportGenerationReviewDecision.BlockIncomplete;
-        if (snapshot.Result.HasErrors)
+        var verified = ReferenceEquals(verification?.Snapshot, snapshot) ? verification : null;
+        if ((verified?.BlockingErrorCount ?? snapshot.Result.ErrorCount) > 0)
             return ReportGenerationReviewDecision.BlockErrors;
-        if (snapshot.Result.WarningCount > 0 && !warningsAccepted)
+        if ((verified?.UnverifiedWarningCount ?? snapshot.Result.WarningCount) > 0 && !warningsAccepted)
             return ReportGenerationReviewDecision.ConfirmWarnings;
         return ReportGenerationReviewDecision.AllowGeneration;
     }

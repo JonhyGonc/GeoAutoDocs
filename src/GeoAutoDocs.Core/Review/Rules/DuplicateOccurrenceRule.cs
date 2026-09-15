@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace GeoAutoDocs.Core.Review.Rules;
 
 public sealed class DuplicateOccurrenceRule : IReportReviewRule
@@ -69,7 +71,7 @@ public sealed class DuplicateOccurrenceRule : IReportReviewRule
                             Title = "Possíveis ocorrências duplicadas",
                             Description =
                                 $"{cluster.Count} ocorrências do tipo “{first.AnomalyName}” foram encontradas " +
-                                $"entre {first.Meterage:0.##} m e {last.Meterage:0.##} m.",
+                                $"entre {first.Meterage.ToString("0.##", CultureInfo.GetCultureInfo("pt-BR"))} m e {last.Meterage.ToString("0.##", CultureInfo.GetCultureInfo("pt-BR"))} m.",
                             NavigationArea = ReviewNavigationArea.Inspection,
                             LocationId = section.Location.Id,
                             SectionId = section.Section.Id,

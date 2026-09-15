@@ -2520,6 +2520,7 @@ public partial class MainWindow : Window
         window.CancelRequested += ReportReviewWindow_CancelRequested;
         window.NavigateRequested += ReportReviewWindow_NavigateRequested;
         window.VerificationRequested += ReportReviewWindow_VerificationRequested;
+        window.ResetVerificationRequested += ReportReviewWindow_ResetVerificationRequested;
         window.RemovePendingRequested += ReportReviewWindow_RemovePendingRequested;
         window.Closed += ReportReviewWindow_Closed;
         _reportReviewWindow = window;
@@ -2665,25 +2666,22 @@ public partial class MainWindow : Window
             return;
         }
         var verification = _reportReviewVerification;
-        if (e.Verified && e.Issue.Severity == ReviewSeverity.Error &&
-            e.Issue.CanBeAcceptedAfterVerification &&
-            MessageBox.Show(this,
-                "Você conferiu esta ocorrência e considera correto manter a metragem indicada?\n\n" +
-                "A marcação permitirá dispensar este alerta nesta revisão. " +
-                "Os dados não serão alterados e a validação defensiva continuará ativa.",
-                "Confirmar verificação", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
-            return;
-
-        if (!ReferenceEquals(verification, _reportReviewVerification) || !CanActOnCurrentReview(e.Issue))
-        {
-            RefreshReportReview();
-            return;
-        }
         if (verification.SetVerified(e.Issue, e.Verified))
             _logger.Info($"Item da revisão conferido. RelatorioId='{_currentReport!.Id}'; " +
                          $"Regra='{e.Issue.RuleId}'; Severidade={e.Issue.Severity}; " +
                          $"SectionId='{e.Issue.SectionId}'; OccurrenceId='{e.Issue.OccurrenceId}'; " +
                          $"Verificado={e.Verified}.");
+        RefreshReportReview();
+    }
+
+    private void ReportReviewWindow_ResetVerificationRequested(object? sender, EventArgs e)
+    {
+        var issue = _reportReviewSnapshot?.Result.Issues.FirstOrDefault();
+        if (!ReferenceEquals(sender, _reportReviewWindow) || issue is null ||
+            !CanActOnCurrentReview(issue) || _reportReviewVerification is null)
+            return;
+        if (_reportReviewVerification.ClearVerified())
+            _logger.Info($"Verificações do relatório desfeitas. RelatorioId='{_currentReport!.Id}'.");
         RefreshReportReview();
     }
 
@@ -3003,15 +3001,16 @@ public partial class MainWindow : Window
                     ? "Revisão necessária"
                     : "Revisão concluída";
         ReportReviewSummary.Text =
-            $"{snapshot.Result.ErrorCount} erro(s) • {snapshot.Result.WarningCount} aviso(s) • " +
-            $"{snapshot.Result.InfoCount} informação(ões)\n" +
+            $"{_reportReviewVerification?.BlockingErrorCount ?? snapshot.Result.ErrorCount} erro(s) • " +
+            $"{_reportReviewVerification?.UnverifiedWarningCount ?? snapshot.Result.WarningCount} aviso(s) • " +
+            $"{_reportReviewVerification?.UnverifiedInfoCount ?? snapshot.Result.InfoCount} informação(ões)\n" +
             $"Concluída às {snapshot.CompletedAt.ToLocalTime():HH:mm} • " +
             $"{_reportReviewVerification?.VerifiedCount ?? 0} verificado(s)";
         ReportReviewIssues.Text = stale
             ? "⚠ O projeto foi alterado após a última revisão. Execute novamente."
             : snapshot.Result.IsComplete
-                ? snapshot.Result.Issues.Count == 0
-                    ? "Nenhum problema foi encontrado."
+                ? (_reportReviewVerification?.UnverifiedIssueCount ?? snapshot.Result.Issues.Count) == 0
+                    ? "Nenhuma pendência restante nesta revisão."
                     : "Abra a revisão para consultar e navegar pelos resultados."
                 : "⚠ Uma ou mais verificações não puderam ser executadas.";
         ReportReviewIssues.Foreground = (System.Windows.Media.Brush)FindResource(

@@ -36,13 +36,9 @@ public sealed class ReportReviewContext
         var selectedIds = report.SectionLinks.Select(x => x.SectionId).ToHashSet();
         SelectedSections = project.Locations
             .OrderBy(location => location.Order)
-            .ThenBy(location => location.Name, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(location => location.Id)
             .SelectMany(location => location.Sections
                 .Where(section => selectedIds.Contains(section.Id))
                 .OrderBy(section => section.Order)
-                .ThenBy(section => section.Name, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(section => section.Id)
                 .Select(section => new ReviewSectionContext(
                     location,
                     section,
@@ -54,11 +50,16 @@ public sealed class ReportReviewContext
         _locationsById = SelectedSections
             .GroupBy(x => x.Location.Id)
             .ToDictionary(x => x.Key, x => x.First().Location);
+        // Ranks da ordem efetiva preservam os empates de Order exatamente como
+        // a exportação: sequência original de criação, sem desempate pelo nome.
         _locationOrdersById = SelectedSections
-            .GroupBy(x => x.Location.Id)
-            .ToDictionary(x => x.Key, x => x.First().LocationOrder);
+            .Select(x => x.Location.Id)
+            .Distinct()
+            .Select((id, index) => (id, index))
+            .ToDictionary(x => x.id, x => x.index);
         _sectionOrdersById = SelectedSections
-            .ToDictionary(x => x.Section.Id, x => x.SectionOrder);
+            .Select((section, index) => (section.Section.Id, index))
+            .ToDictionary(x => x.Id, x => x.index);
         _videosById = SelectedSections
             .SelectMany(x => x.Section.VideoReferences)
             .GroupBy(x => x.Id)

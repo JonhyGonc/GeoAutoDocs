@@ -151,6 +151,21 @@ public sealed class PendingCaptureRemovalTests : IDisposable
     }
 
     [Fact]
+    public async Task DuplicateIdOutsideProjectDoesNotRemoveUnconfirmedObject()
+    {
+        var removed = Capture("confirmed");
+        var keep = Capture("other-project");
+        keep.Id = removed.Id;
+        keep.ProjectId = Guid.NewGuid();
+
+        Assert.True(await PendingCaptureRemoval.RemoveAsync(_project, Candidates(removed),
+            () => Task.FromResult(true)));
+
+        Assert.Same(keep, Assert.Single(_project.Captures));
+        Assert.True(File.Exists(keep.FilePath));
+    }
+
+    [Fact]
     public async Task EmptyRemovalDoesNotPersist()
     {
         Assert.True(await PendingCaptureRemoval.RemoveAsync(_project, [],

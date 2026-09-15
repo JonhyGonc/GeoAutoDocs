@@ -116,7 +116,10 @@
                          Visibility="Collapsed" Margin="0,0,0,10"/>
         </StackPanel>
 
-        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,12">
+        <StackPanel Grid.Row="3" Margin="0,0,0,12">
+            <TextBlock x:Name="VerifiedCountText" Foreground="{StaticResource TextSecondaryBrush}"
+                       TextWrapping="Wrap" Margin="0,0,0,8"/>
+            <StackPanel Orientation="Horizontal">
             <ToggleButton x:Name="AllFilterButton" Content="Todos" Tag="All" IsChecked="True"
                           Style="{StaticResource ReviewFilterChipStyle}" Click="Filter_Click"/>
             <ToggleButton x:Name="ErrorsFilterButton" Content="Erros" Tag="Errors"
@@ -125,6 +128,7 @@
                           Style="{StaticResource ReviewFilterChipStyle}" Click="Filter_Click"/>
             <ToggleButton x:Name="InformationFilterButton" Content="Informações" Tag="Information"
                           Style="{StaticResource ReviewFilterChipStyle}" Click="Filter_Click"/>
+            </StackPanel>
         </StackPanel>
 
         <Grid Grid.Row="4">
@@ -162,8 +166,15 @@
                                     <TextBlock Text="{Binding Description}" Foreground="{StaticResource TextSecondaryBrush}"
                                                TextWrapping="Wrap" Margin="0,5,0,0"/>
                                 </StackPanel>
-                                <Button Grid.Column="2" Content="Ir até" Tag="{Binding Issue}"
-                                        Click="Navigate_Click" VerticalAlignment="Center"/>
+                                <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                    <ToggleButton Content="Verificado" Tag="{Binding Issue}"
+                                                  IsChecked="{Binding IsVerified, Mode=OneWay}"
+                                                  IsEnabled="{Binding CanVerify}"
+                                                  ToolTip="{Binding VerificationTooltip}"
+                                                  Style="{StaticResource ReviewFilterChipStyle}"
+                                                  Click="Verify_Click"/>
+                                    <Button Content="Ir até" Tag="{Binding Issue}" Click="Navigate_Click"/>
+                                </StackPanel>
                                 <WrapPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Margin="12,9,0,0">
                                     <TextBlock Text="{Binding LocationText}" Visibility="{Binding LocationVisibility}"
                                                Foreground="{StaticResource TextMutedBrush}" Margin="0,0,16,0"/>
@@ -172,6 +183,12 @@
                                     <TextBlock Text="{Binding MeterageText}" Visibility="{Binding MeterageVisibility}"
                                                Foreground="{StaticResource TextMutedBrush}"/>
                                 </WrapPanel>
+                                <Button Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2"
+                                        Content="Remover capturas pendentes deste trecho"
+                                        Tag="{Binding Issue}" Click="RemovePending_Click"
+                                        Visibility="{Binding RemovePendingVisibility}"
+                                        IsEnabled="{Binding CanRemovePending}"
+                                        HorizontalAlignment="Left" Margin="12,10,0,0"/>
                             </Grid>
                         </Border>
                         <DataTemplate.Triggers>

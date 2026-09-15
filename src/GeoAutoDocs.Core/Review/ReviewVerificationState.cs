@@ -19,9 +19,23 @@ public sealed class ReviewVerificationState(ReportReviewSnapshot snapshot)
         return changed;
     }
 
+    public bool ClearVerified()
+    {
+        if (_verified.Count == 0) return false;
+        _verified.Clear();
+        Version++;
+        return true;
+    }
+
+    public IEnumerable<ReviewIssue> PendingIssues =>
+        Snapshot.Result.Issues.Where(issue => !IsVerified(issue));
+
+    public int UnverifiedInfoCount => PendingIssues.Count(issue => issue.Severity == ReviewSeverity.Info);
+    public int UnverifiedIssueCount => PendingIssues.Count();
+
     public int BlockingErrorCount => Snapshot.Result.Issues.Count(issue =>
         issue.Severity == ReviewSeverity.Error &&
-        (!issue.CanBeAcceptedAfterVerification || !IsVerified(issue)));
+        !IsVerified(issue));
 
     public int UnverifiedWarningCount => Snapshot.Result.Issues.Count(issue =>
         issue.Severity == ReviewSeverity.Warning && !IsVerified(issue));

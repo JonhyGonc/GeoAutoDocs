@@ -83,6 +83,8 @@ public partial class MainWindow : Window
     private ReportReviewWindow? _reportReviewWindow;
     private ReportReviewSnapshot? _reportReviewSnapshot;
     private ReportReviewContext? _reportReviewContext;
+    private ReviewVerificationState? _reportReviewVerification;
+    private bool _reportReviewActionInProgress;
     private CancellationTokenSource? _reportReviewCts;
     private bool _seeking;
     private bool _playerOperationInProgress;
@@ -1361,7 +1363,7 @@ public partial class MainWindow : Window
 
     private async Task<bool> FinalizeCurrentProjectAsync()
     {
-        if (_finalizationInProgress) return false;
+        if (_finalizationInProgress || _reportReviewActionInProgress) return false;
         _finalizationInProgress = true;
         var session = _sharedSession;
         var restoreSharedTimers = session is { IsReadOnly: false };
@@ -1629,7 +1631,7 @@ public partial class MainWindow : Window
     private async void GenerateReport_Click(object sender, RoutedEventArgs e)
     {
         if (_currentProject is null || _currentReport is null || _reportGenerationInProgress ||
-            _reportReviewCts is not null)
+            _reportReviewCts is not null || _reportReviewActionInProgress)
             return;
 
         _reportGenerationInProgress = true;
@@ -1841,7 +1843,7 @@ public partial class MainWindow : Window
             {
                 var dialog = new ReportGenerationReviewDialog(
                     ReportGenerationReviewDialogMode.Errors,
-                    snapshot.Result.ErrorCount) { Owner = this };
+                    _reportReviewVerification?.BlockingErrorCount ?? snapshot.Result.ErrorCount) { Owner = this };
                 dialog.ShowDialog();
                 if (dialog.Choice == ReportGenerationReviewChoice.OpenReview)
                 {
@@ -1859,7 +1861,7 @@ public partial class MainWindow : Window
             {
                 var dialog = new ReportGenerationReviewDialog(
                     ReportGenerationReviewDialogMode.Warnings,
-                    snapshot.Result.WarningCount) { Owner = this };
+                    _reportReviewVerification?.UnverifiedWarningCount ?? snapshot.Result.WarningCount) { Owner = this };
                 dialog.ShowDialog();
                 switch (dialog.Choice)
                 {
@@ -1893,7 +1895,8 @@ public partial class MainWindow : Window
             _currentReport.Id,
             _reportReviewRevision,
             ReportReviewSelection.CreateSignature(_currentReport),
-            warningsAccepted);
+            warningsAccepted,
+            _reportReviewVerification);
     }
 
     private async void ExportInspection_Click(object sender, RoutedEventArgs e)
@@ -2516,6 +2519,8 @@ public partial class MainWindow : Window
         window.ReviewRequested += ReportReviewWindow_ReviewRequested;
         window.CancelRequested += ReportReviewWindow_CancelRequested;
         window.NavigateRequested += ReportReviewWindow_NavigateRequested;
+        window.VerificationRequested += ReportReviewWindow_VerificationRequested;
+        window.RemovePendingRequested += ReportReviewWindow_RemovePendingRequested;
         window.Closed += ReportReviewWindow_Closed;
         _reportReviewWindow = window;
         return window;
@@ -2549,7 +2554,8 @@ public partial class MainWindow : Window
     {
         if (_currentProject is null || _currentReport is null)
             return ReportReviewExecutionOutcome.Failed();
-        if (_reportReviewCts is not null || (_reportGenerationInProgress && !forGeneration))
+        if (_reportReviewCts is not null || _reportReviewActionInProgress ||
+            (_reportGenerationInProgress && !forGeneration))
             return ReportReviewExecutionOutcome.Busy();
 
         ApplyFieldsToModel();
@@ -2592,6 +2598,7 @@ public partial class MainWindow : Window
             };
             _reportReviewSnapshot = snapshot;
             _reportReviewContext = context;
+            _reportReviewVerification = new ReviewVerificationState(snapshot);
             if (window is not null && ReferenceEquals(window, _reportReviewWindow))
                 window!.ShowSnapshot(
                     snapshot,
@@ -2600,7 +2607,9 @@ public partial class MainWindow : Window
                         project.Id,
                         report.Id,
                         _reportReviewRevision,
-                        ReportReviewSelection.CreateSignature(report)));
+                        ReportReviewSelection.CreateSignature(report)),
+                    _reportReviewVerification,
+                    IsReadOnly);
             RefreshReportReview();
             _logger.Info(
                 $"Revisão concluída. RelatorioId='{report.Id}'; Erros={result.ErrorCount}; " +
@@ -2633,6 +2642,143 @@ public partial class MainWindow : Window
             cancellation.Dispose();
             if (resumeScheduledSave && _hasPendingChanges && !IsReadOnly)
                 _saveTimer.Start();
+        }
+    }
+
+    private bool CanActOnCurrentReview(ReviewIssue issue) =>
+        _currentProject is not null && _currentReport is not null &&
+        _reportReviewSnapshot is not null &&
+        _reportReviewSnapshot.IsCurrent(
+            _currentProject.Id, _currentReport.Id, _reportReviewRevision,
+            ReportReviewSelection.CreateSignature(_currentReport)) &&
+        _reportReviewSnapshot.Result.Issues.Contains(issue) &&
+        _reportReviewCts is null && !_reportGenerationInProgress &&
+        !_reportReviewActionInProgress && !_finalizationInProgress;
+
+    private void ReportReviewWindow_VerificationRequested(
+        object? sender, ReviewIssueVerificationEventArgs e)
+    {
+        if (!ReferenceEquals(sender, _reportReviewWindow) ||
+            !CanActOnCurrentReview(e.Issue) || _reportReviewVerification is null)
+        {
+            RefreshReportReview();
+            return;
+        }
+        if (e.Verified && e.Issue.Severity == ReviewSeverity.Error &&
+            e.Issue.CanBeAcceptedAfterVerification &&
+            MessageBox.Show(this,
+                "Você conferiu esta ocorrência e considera correto manter a metragem indicada?\n\n" +
+                "A marcação permitirá dispensar este alerta nesta revisão. " +
+                "Os dados não serão alterados e a validação defensiva continuará ativa.",
+                "Confirmar verificação", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        if (_reportReviewVerification.SetVerified(e.Issue, e.Verified))
+            _logger.Info($"Item da revisão conferido. RelatorioId='{_currentReport!.Id}'; " +
+                         $"Regra='{e.Issue.RuleId}'; Severidade={e.Issue.Severity}; " +
+                         $"SectionId='{e.Issue.SectionId}'; OccurrenceId='{e.Issue.OccurrenceId}'; " +
+                         $"Verificado={e.Verified}.");
+        RefreshReportReview();
+    }
+
+    private async void ReportReviewWindow_RemovePendingRequested(
+        object? sender, ReviewIssueNavigationEventArgs e)
+    {
+        if (!ReferenceEquals(sender, _reportReviewWindow) || !CanActOnCurrentReview(e.Issue) ||
+            IsReadOnly || e.Issue.RuleId != "report.coverage" ||
+            e.Issue.NavigationArea != ReviewNavigationArea.PendingCaptures ||
+            e.Issue.SectionId is not Guid sectionId || _reportReviewContext is null)
+            return;
+
+        var project = _currentProject!;
+        var window = _reportReviewWindow;
+        var snapshot = _reportReviewSnapshot;
+        var expectedIds = _reportReviewContext.GetPendingCaptures(sectionId).Select(x => x.Id).ToList();
+        var captures = PendingCaptureRemoval.FindRemovable(project, sectionId, expectedIds);
+        if (captures.Count == 0)
+        {
+            MessageBox.Show(this,
+                "Nenhuma captura pendente removível foi encontrada. Evidências vinculadas serão preservadas. " +
+                "Execute a revisão novamente.",
+                "Capturas pendentes", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (MessageBox.Show(this,
+                $"Remover {captures.Count} captura(s) pendente(s) deste trecho?\n\n" +
+                "Capturas cadastradas como evidência não serão alteradas. " +
+                "Após salvar, os PNGs gerenciados serão movidos para uma pasta de recuperação. " +
+                "Arquivos externos não serão apagados.",
+                "Confirmar remoção", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        _reportReviewActionInProgress = true;
+        window?.SetActionBusy(true);
+        var editorWasEnabled = EditorView.IsEnabled;
+        var resumeSave = _saveTimer.IsEnabled;
+        _saveTimer.Stop();
+        EditorView.IsEnabled = false;
+        var persisted = false;
+        try
+        {
+            // Aguarda qualquer save anterior antes de alterar as referências em memória.
+            await _persistenceGate.WaitAsync();
+            _persistenceGate.Release();
+            if (!ReferenceEquals(project, _currentProject) || IsReadOnly ||
+                !ReferenceEquals(snapshot, _reportReviewSnapshot) ||
+                !snapshot!.IsCurrent(project.Id, _currentReport!.Id, _reportReviewRevision,
+                    ReportReviewSelection.CreateSignature(_currentReport)))
+                return;
+
+            persisted = await PendingCaptureRemoval.RemoveAsync(project, captures, async () =>
+            {
+                MarkPendingChanges();
+                return await SavePendingAsync();
+            });
+            if (!persisted)
+            {
+                MarkPendingChanges();
+                _logger.Info("Remoção de capturas pendentes revertida após falha de salvamento; nenhum PNG foi movido.");
+                return;
+            }
+
+            var archiveReadOnly = IsReadOnly;
+            var archived = await Task.Run(() =>
+                _frameCaptureService.ArchiveRemovedPendingFiles(project, captures, archiveReadOnly));
+            _logger.Info($"Capturas pendentes removidas pela revisão. ProjectId='{project.Id}'; " +
+                         $"SectionId='{sectionId}'; Capturas={captures.Count}; " +
+                         $"PNGsRecuperaveis={archived.ArchivedFiles}; FalhasArquivo={archived.FailedFiles}.");
+            var recovery = archived.ArchivedFiles > 0
+                ? $"\n\nPasta de recuperação:\n{archived.RecoveryDirectory}" : "";
+            var failures = archived.FailedFiles > 0
+                ? $"\n{archived.FailedFiles} arquivo(s) não puderam ser movidos e foram mantidos no local original." : "";
+            MessageBox.Show(this,
+                $"{captures.Count} captura(s) removida(s) do projeto. " +
+                "Execute a revisão novamente para atualizar os resultados." + failures + recovery,
+                "Capturas pendentes", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception exception)
+        {
+            _logger.Error("Falha ao remover capturas pendentes pela revisão.", exception);
+            if (!persisted) MarkPendingChanges();
+            MessageBox.Show(this,
+                persisted
+                    ? "As referências foram removidas do projeto, mas nem todos os arquivos puderam ser movidos. Consulte o log."
+                    : "Não foi possível remover as capturas. As referências foram preservadas e nenhum PNG foi movido.",
+                "Capturas pendentes", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _reportReviewActionInProgress = false;
+            EditorView.IsEnabled = editorWasEnabled;
+            if (ReferenceEquals(window, _reportReviewWindow)) window?.SetActionBusy(false);
+            if (ReferenceEquals(project, _currentProject))
+            {
+                RefreshCaptures();
+                RefreshOverviewCounters();
+                ScheduleOverviewRefresh();
+                RefreshReportReview();
+                if (resumeSave && _hasPendingChanges && !IsReadOnly) _saveTimer.Start();
+            }
         }
     }
 
@@ -2769,6 +2915,7 @@ public partial class MainWindow : Window
         _reportReviewCts?.Cancel();
         _reportReviewSnapshot = null;
         _reportReviewContext = null;
+        _reportReviewVerification = null;
         if (_reportReviewWindow is not null)
         {
             _reportReviewWindow.Close();
@@ -2841,13 +2988,14 @@ public partial class MainWindow : Window
             ? "Revisão incompleta"
             : stale
                 ? "Revisão desatualizada"
-                : snapshot.Result.HasErrors
+                : (_reportReviewVerification?.BlockingErrorCount ?? snapshot.Result.ErrorCount) > 0
                     ? "Revisão necessária"
                     : "Revisão concluída";
         ReportReviewSummary.Text =
             $"{snapshot.Result.ErrorCount} erro(s) • {snapshot.Result.WarningCount} aviso(s) • " +
             $"{snapshot.Result.InfoCount} informação(ões)\n" +
-            $"Concluída às {snapshot.CompletedAt.ToLocalTime():HH:mm}";
+            $"Concluída às {snapshot.CompletedAt.ToLocalTime():HH:mm} • " +
+            $"{_reportReviewVerification?.VerifiedCount ?? 0} verificado(s)";
         ReportReviewIssues.Text = stale
             ? "⚠ O projeto foi alterado após a última revisão. Execute novamente."
             : snapshot.Result.IsComplete
@@ -2856,10 +3004,11 @@ public partial class MainWindow : Window
                     : "Abra a revisão para consultar e navegar pelos resultados."
                 : "⚠ Uma ou mais verificações não puderam ser executadas.";
         ReportReviewIssues.Foreground = (System.Windows.Media.Brush)FindResource(
-            stale || !snapshot.Result.IsComplete || snapshot.Result.HasErrors
+            stale || !snapshot.Result.IsComplete ||
+                (_reportReviewVerification?.BlockingErrorCount ?? snapshot.Result.ErrorCount) > 0
                 ? "WarningBrush"
                 : "SuccessBrush");
-        _reportReviewWindow?.ShowSnapshot(snapshot, context, stale);
+        _reportReviewWindow?.ShowSnapshot(snapshot, context, stale, _reportReviewVerification, IsReadOnly);
     }
 
     private void RefreshInspectionTree()

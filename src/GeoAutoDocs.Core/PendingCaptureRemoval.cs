@@ -24,7 +24,8 @@ public static class PendingCaptureRemoval
         ArgumentNullException.ThrowIfNull(persist);
         if (captures.Count == 0) return true;
         var valid = FindRemovable(project, captures[0].SectionId, captures.Select(x => x.Id));
-        if (valid.Count != captures.Count || captures.Any(x => !valid.Contains(x)))
+        var validSet = valid.ToHashSet();
+        if (valid.Count != captures.Count || captures.Any(x => !validSet.Contains(x)))
             throw new InvalidOperationException(
                 "As capturas mudaram ou estão vinculadas a evidências. Execute a revisão novamente.");
         var original = project.Captures.ToList();
@@ -48,16 +49,17 @@ public static class PendingCaptureRemoval
 
     public static bool IsPathReferenced(Project project, string path)
     {
-        var normalized = NormalizePath(path);
-        return project.Captures.Any(x => SamePath(x.FilePath, normalized)) ||
-            project.Locations.SelectMany(x => x.Sections).SelectMany(x => x.Occurrences)
-                .SelectMany(x => x.Evidence).Any(x => SamePath(x.FilePath, normalized));
+        return GetReferencedPaths(project).Contains(NormalizePath(path));
     }
 
-    private static bool SamePath(string path, string normalized) =>
-        string.Equals(NormalizePath(path), normalized, StringComparison.OrdinalIgnoreCase);
+    public static IReadOnlySet<string> GetReferencedPaths(Project project) =>
+        project.Captures.Select(x => x.FilePath)
+            .Concat(project.Locations.SelectMany(x => x.Sections).SelectMany(x => x.Occurrences)
+                .SelectMany(x => x.Evidence).Select(x => x.FilePath))
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(NormalizePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-    private static string NormalizePath(string path)
+    public static string NormalizePath(string path)
     {
         if (string.IsNullOrWhiteSpace(path)) return string.Empty;
         try { return Path.GetFullPath(path); }

@@ -1,0 +1,287 @@
+name: Review verification and pending removal validation
+
+on:
+  push:
+    branches:
+      - fix/section-edit-save-stability
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore GeoAutoDocs.sln
+
+      - name: Build Release
+        run: dotnet build GeoAutoDocs.sln --configuration Release --no-restore
+
+      - name: Test all
+        run: dotnet test GeoAutoDocs.sln --configuration Release --no-build --logger "console;verbosity=normal"
+
+      - name: Start application smoke test
+        shell: pwsh
+        run: |
+          $env:GEOAUTODOCS_DATA_ROOT = Join-Path $env:RUNNER_TEMP "GeoAutoDocsVerification"
+          New-Item -ItemType Directory -Path $env:GEOAUTODOCS_DATA_ROOT -Force | Out-Null
+          $exe = Join-Path $env:GITHUB_WORKSPACE "src\GeoAutoDocs.App\bin\Release\net8.0-windows\GeoAutoDocs.App.exe"
+          $process = Start-Process $exe -PassThru
+          Start-Sleep -Seconds 10
+          if ($process.HasExited) {
+            throw "GeoAutoDocs encerrou durante a inicialização. ExitCode=$($process.ExitCode)"
+          }
+          $logPath = Join-Path $env:GEOAUTODOCS_DATA_ROOT "logs\GeoAutoDocs.log"
+          if (-not (Test-Path $logPath) -or
+              -not (Select-String -Path $logPath -Pattern "Janela principal exibida" -Quiet)) {
+            throw "O log não confirmou a exibição da janela principal em $logPath."
+          }
+          Stop-Process -Id $process.Id -Force
+
+      - name: Review flow WPF smoke test
+        shell: pwsh
+        run: |
+          $smokeRoot = Join-Path $env:RUNNER_TEMP ("ReviewSmoke-" + [guid]::NewGuid().ToString("N"))
+          New-Item -ItemType Directory -Path $smokeRoot | Out-Null
+          $env:GEOAUTODOCS_DATA_ROOT = Join-Path $smokeRoot "data"
+          $appProject = Join-Path $env:GITHUB_WORKSPACE "src\GeoAutoDocs.App\GeoAutoDocs.App.csproj"
+          $project = @'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <OutputType>Exe</OutputType>
+              <TargetFramework>net8.0-windows</TargetFramework>
+              <UseWPF>true</UseWPF>
+              <Nullable>enable</Nullable>
+              <ImplicitUsings>enable</ImplicitUsings>
+            </PropertyGroup>
+            <ItemGroup><ProjectReference Include="APP_PROJECT" /></ItemGroup>
+          </Project>
+          '@
+          $project.Replace("APP_PROJECT", $appProject) | Set-Content (Join-Path $smokeRoot "ReviewSmoke.csproj")
+          $code = @'
+          using System;
+          using System.Collections.Generic;
+          using System.IO;
+          using System.Linq;
+          using System.Reflection;
+          using System.Threading;
+          using System.Threading.Tasks;
+          using System.Windows;
+          using System.Windows.Controls;
+          using System.Windows.Threading;
+          using GeoAutoDocs.App;
+          using GeoAutoDocs.Core;
+          using GeoAutoDocs.Core.Review;
+          using GeoAutoDocs.Infrastructure;
+          
+          internal static class Program
+          {
+              private static readonly BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
+              [STAThread]
+              private static int Main()
+              {
+                  var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                  app.Resources.MergedDictionaries.Add(new ResourceDictionary
+                  {
+                      Source = new Uri("pack://application:,,,/GeoAutoDocs.App;component/Styles/GeoAutoDocsTheme.xaml")
+                  });
+                  var exit = 1;
+                  app.Dispatcher.BeginInvoke(new Action(async () =>
+                  {
+                      try { await RunAsync(); exit = 0; }
+                      catch (Exception exception) { Console.Error.WriteLine(exception); }
+                      finally { app.Shutdown(); }
+                  }));
+                  app.Run();
+                  return exit;
+              }
+          
+              private static object? Get(MainWindow window, string name) =>
+                  typeof(MainWindow).GetField(name, Private)!.GetValue(window);
+              private static void Set(MainWindow window, string name, object? value) =>
+                  typeof(MainWindow).GetField(name, Private)!.SetValue(window, value);
+              private static Task<ReportReviewExecutionOutcome> Execute(MainWindow window, bool showWindow) =>
+                  (Task<ReportReviewExecutionOutcome>)typeof(MainWindow)
+                      .GetMethod("ExecuteReportReviewAsync", Private)!.Invoke(window, [showWindow, false])!;
+              private static void Invoke(MainWindow window, string name) =>
+                  typeof(MainWindow).GetMethod(name, Private)!.Invoke(window, null);
+              private static void Require(bool condition, string message)
+              {
+                  if (!condition) throw new InvalidOperationException(message);
+              }
+              private static async Task RunAsync()
+              {
+                  var paths = new AppDataPaths(Environment.GetEnvironmentVariable("GEOAUTODOCS_DATA_ROOT"));
+                  paths.EnsureDirectories();
+                  var logger = new LocalLogger(paths.LogPath);
+                  var store = new ProjectStore(paths);
+                  await store.InitializeAsync();
+                  var exchange = new InspectionExchangeService(new InspectionExchangeSerializer());
+                  var transport = new NamedPipeInspectionTransport(new InspectionExchangeSerializer(), logger: logger);
+                  var window = new MainWindow(store, new WordReportService(paths, exchange),
+                      new SharedProjectService(paths), logger, new FrameCaptureService(paths, logger),
+                      new OccurrenceService(paths, logger), new AnomalyCatalogService(paths), exchange,
+                      transport, new BackupService(paths, logger).GetStatus());
+                  window.Show();
+                  var project = new Project { Name = "Projeto sintético de smoke" };
+                  var location = new Location { ProjectId = project.Id, Name = "PV 01" };
+                  var section = new InspectionSection { LocationId = location.Id, Name = "Trecho 01" };
+                  location.Sections.Add(section);
+                  project.Locations.Add(location);
+                  var report = project.CreateReport("Smoke");
+                  report.SelectSection(section);
+                  Set(window, "_loadingFields", true);
+                  Set(window, "_currentProject", project);
+                  Set(window, "_currentReport", report);
+                  foreach (var name in new[] { "DefaultClientBox", "DefaultAreaBox", "DefaultContractBox",
+                      "DefaultPurchaseOrderBox", "ReportCodeBox" })
+                      ((TextBox)window.FindName(name)).Text = "Smoke";
+                  ((TextBox)window.FindName("MetersBox")).Text = "20";
+                  ((TextBox)window.FindName("CustomDiametersBox")).Text = "300 mm";
+                  ((DatePicker)window.FindName("ReportDatePicker")).SelectedDate = new DateTime(2026, 9, 15);
+                  Set(window, "_loadingFields", false);
+          
+                  var first = await Execute(window, false);
+                  Require(first.Status == ReportReviewExecutionStatus.Completed, "Revisão automática sem janela falhou.");
+                  Require(first.Snapshot!.Result.IsComplete && !first.Snapshot.Result.HasErrors, "Fixture limpa falhou.");
+                  Require(Get(window, "_reportReviewWindow") is null, "Revisão automática abriu janela indevida.");
+                  Require(!(bool)Get(window, "_hasPendingChanges")!, "A revisão provocou dirty/save.");
+          
+                  Invoke(window, "MarkOperationalPendingChanges");
+                  Require((long)Get(window, "_reportReviewRevision")! == first.Snapshot.ProjectRevision,
+                      "Metadata operacional invalidou a revisão.");
+                  Set(window, "_hasPendingChanges", false);
+                  Invoke(window, "MarkPendingChanges");
+                  Require((long)Get(window, "_reportReviewRevision")! != first.Snapshot.ProjectRevision,
+                      "Alteração técnica não invalidou revisão.");
+                  Set(window, "_hasPendingChanges", false);
+          
+                  project.Captures.Add(new Capture { ProjectId = project.Id, SectionId = section.Id,
+                      Status = CaptureStatus.Pending, FilePath = Path.Combine(paths.Root, "pending.png") });
+                  var second = await Execute(window, true);
+                  Require(second.Status == ReportReviewExecutionStatus.Completed, "Revisão com janela falhou.");
+                  var review = (ReportReviewWindow)Get(window, "_reportReviewWindow")!;
+                  review.Show();
+                  review.UpdateLayout();
+                  var context = (ReportReviewContext)Get(window, "_reportReviewContext")!;
+                  var list = (ListBox)review.FindName("IssuesList");
+                  var verification = (ReviewVerificationState)Get(window, "_reportReviewVerification")!;
+                  var issue = second.Snapshot!.Result.Issues.First(i => i.NavigationArea == ReviewNavigationArea.PendingCaptures);
+                  var revisionBefore = (long)Get(window, "_reportReviewRevision")!;
+                  var handler = typeof(MainWindow).GetMethod("ReportReviewWindow_VerificationRequested", Private)!;
+                  handler.Invoke(window, [review, new ReviewIssueVerificationEventArgs(issue, true)]);
+                  Require(verification.IsVerified(issue), "Verificado não foi aplicado.");
+                  Require((long)Get(window, "_reportReviewRevision")! == revisionBefore &&
+                      !(bool)Get(window, "_hasPendingChanges")!, "Verificar alterou dados/dirty.");
+                  Require(second.Snapshot.Result.WarningCount > 0, "Verificar ocultou contagem original.");
+                  handler.Invoke(window, [review, new ReviewIssueVerificationEventArgs(issue, false)]);
+                  Require(!verification.IsVerified(issue), "Desmarcar falhou.");
+                  var item = list.ItemsSource.Cast<object>().First();
+                  Require((bool)item.GetType().GetProperty("CanRemovePending")!.GetValue(item)!,
+                      "Ação de remover capturas não foi disponibilizada.");
+                  var previousItems = list.ItemsSource;
+                  review.ShowSnapshot(second.Snapshot!, context, false, verification, false);
+                  Require(ReferenceEquals(previousItems, list.ItemsSource), "Refresh estável recriou itens.");
+                  review.ShowSnapshot(second.Snapshot!, context, true, verification, false);
+                  item = list.ItemsSource.Cast<object>().First();
+                  Require(!(bool)item.GetType().GetProperty("CanVerify")!.GetValue(item)! &&
+                      !(bool)item.GetType().GetProperty("CanRemovePending")!.GetValue(item)!,
+                      "Snapshot antigo permitiu ações.");
+                  Require(((FrameworkElement)review.FindName("StaleBanner")).Visibility == Visibility.Visible,
+                      "Resultado desatualizado não sinalizado.");
+                  review.ShowSnapshot(second.Snapshot!, context, false, verification, true);
+                  item = list.ItemsSource.Cast<object>().First();
+                  Require(!(bool)item.GetType().GetProperty("CanRemovePending")!.GetValue(item)!,
+                      "Read-only permitiu remoção.");
+                  review.ShowSnapshot(second.Snapshot!, context, false, verification, false);
+                  review.SetActionBusy(true);
+                  Require(!list.IsEnabled, "Lista não bloqueou ação em andamento.");
+                  review.SetActionBusy(false);
+                  Set(window, "_reportReviewActionInProgress", true);
+                  Require((await Execute(window, false)).Status == ReportReviewExecutionStatus.Busy,
+                      "Revisão iniciou durante remoção.");
+                  typeof(MainWindow).GetMethod("GenerateReport_Click", Private)!
+                      .Invoke(window, [new Button(), new RoutedEventArgs()]);
+                  Require(!(bool)Get(window, "_reportGenerationInProgress")!, "Geração iniciou durante remoção.");
+                  Set(window, "_reportReviewActionInProgress", false);
+                  review.ShowExecutionError();
+                  Require(((FrameworkElement)review.FindName("IncompleteBanner")).Visibility == Visibility.Collapsed,
+                      "Falha marcou snapshot anterior válido como incompleto.");
+                  review.SelectFilter(ReviewIssueFilter.Warnings);
+                  Require(ReferenceEquals(Get(window, "_reportReviewSnapshot"), second.Snapshot),
+                      "Filtro substituiu snapshot.");
+          
+                  Set(window, "_reportGenerationInProgress", true);
+                  Require((await Execute(window, false)).Status == ReportReviewExecutionStatus.Busy,
+                      "Revisão manual iniciou durante geração.");
+                  Set(window, "_reportGenerationInProgress", false);
+          
+                  using var entered = new ManualResetEventSlim();
+                  using var release = new ManualResetEventSlim();
+                  Set(window, "_reportReviewService", new ReportReviewService([new BlockingRule(entered, release)]));
+                  var pending = Execute(window, false);
+                  Require(entered.Wait(TimeSpan.FromSeconds(15)), "Worker não iniciou.");
+                  Require((await Execute(window, false)).Status == ReportReviewExecutionStatus.Busy,
+                      "Duas revisões concorrentes foram permitidas.");
+                  typeof(MainWindow).GetMethod("GenerateReport_Click", Private)!
+                      .Invoke(window, [new Button(), new RoutedEventArgs()]);
+                  Require(!(bool)Get(window, "_reportGenerationInProgress")! &&
+                      !((FrameworkElement)window.FindName("EditorView")).IsEnabled,
+                      "Geração concorrente alterou o estado da revisão manual.");
+                  ((CancellationTokenSource)Get(window, "_reportReviewCts")!).Cancel();
+                  release.Set();
+                  Require((await pending).Status == ReportReviewExecutionStatus.Cancelled, "Cancelamento falhou.");
+                  Require(ReferenceEquals(Get(window, "_reportReviewSnapshot"), second.Snapshot),
+                      "Cancelamento descartou snapshot anterior.");
+                  Require(((FrameworkElement)window.FindName("EditorView")).IsEnabled, "Editor permaneceu bloqueado.");
+          
+                  entered.Reset(); release.Reset();
+                  var switching = Execute(window, false);
+                  Require(entered.Wait(TimeSpan.FromSeconds(15)), "Worker de troca não iniciou.");
+                  Invoke(window, "ResetReportReviewState");
+                  Set(window, "_currentProject", new Project { Name = "Projeto B" });
+                  Set(window, "_currentReport", null);
+                  release.Set();
+                  Require((await switching).Status == ReportReviewExecutionStatus.Cancelled,
+                      "Resultado do projeto anterior foi aplicado.");
+                  Require(Get(window, "_reportReviewSnapshot") is null && Get(window, "_reportReviewWindow") is null,
+                      "Troca de projeto não limpou resultado e janela.");
+                  Set(window, "_currentProject", null);
+                  Set(window, "_hasPendingChanges", false);
+                  Set(window, "_exitRequested", true);
+                  await (Task)typeof(MainWindow).GetMethod("DisposePlayerAsync", Private)!.Invoke(window, null)!;
+                  Set(window, "_closingAfterSave", true);
+                  Invoke(window, "DisposeTrayIcon");
+                  window.Close();
+                  Console.WriteLine("REVIEW_UI_SMOKE_OK: automatic/no-window, clean fixture, verification/unverification without model mutations, pending removal action, stale/read-only guards, busy guards, snapshot, filters, concurrency, cancellation and project reset.");
+              }
+          
+              private sealed class BlockingRule(ManualResetEventSlim entered, ManualResetEventSlim release) : IReportReviewRule
+              {
+                  public string Id => "smoke.blocking";
+                  public string Name => Id;
+                  public IEnumerable<ReviewIssue> Evaluate(ReportReviewContext context, CancellationToken token = default)
+                  {
+                      entered.Set();
+                      if (!release.Wait(TimeSpan.FromSeconds(30))) throw new TimeoutException("Smoke release timeout.");
+                      token.ThrowIfCancellationRequested();
+                      yield break;
+                  }
+              }
+          }
+          
+          '@
+          $code | Set-Content (Join-Path $smokeRoot "Program.cs")
+          dotnet build (Join-Path $smokeRoot "ReviewSmoke.csproj") -c Release
+          if ($LASTEXITCODE -ne 0) { throw "Build do smoke falhou." }
+          $output = Join-Path $smokeRoot "bin\Release\net8.0-windows"
+          $native = Join-Path $env:GITHUB_WORKSPACE "src\GeoAutoDocs.App\bin\Release\net8.0-windows\libvlc"
+          if (Test-Path $native) { Copy-Item $native $output -Recurse -Force }
+          & (Join-Path $output "ReviewSmoke.exe")
+          if ($LASTEXITCODE -ne 0) { throw "Smoke da revisão falhou." }

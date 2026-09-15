@@ -301,6 +301,31 @@ public sealed class ReportReviewConsolidationTests
         Assert.Empty(context.GetPendingCaptures(Guid.NewGuid()));
     }
 
+    [Fact]
+    public void OrderTiesPreserveCreationOrderAndMatchTheReportExchange()
+    {
+        var fixture = CleanFixture();
+        fixture.Location.Name = "Local Z";
+        fixture.Section.Name = "Rede Z";
+        var second = AddSection(fixture, "Rede A", 0);
+        var anotherLocation = new Location { ProjectId = fixture.Project.Id, Name = "Local A", Order = 0 };
+        var third = new InspectionSection { LocationId = anotherLocation.Id, Name = "Rede B", Order = -10 };
+        anotherLocation.Sections.Add(third);
+        fixture.Project.Locations.Add(anotherLocation);
+        fixture.Report.SelectSection(third);
+        foreach (var section in new[] { fixture.Section, second, third }) section.Diameter = -100;
+        var context = fixture.Context();
+        var expectedIds = new[] { fixture.Section.Id, second.Id, third.Id };
+        var exchange = new GeoAutoDocs.Infrastructure.InspectionExchangeService().Build(
+            fixture.Project, fixture.Report);
+        var result = new ReportReviewService(ReportReviewRules.CreateDefault()).Review(context);
+
+        Assert.Equal(expectedIds, context.SelectedSections.Select(x => x.Section.Id));
+        Assert.Equal(expectedIds, exchange.Sections.Select(x => x.SectionId));
+        Assert.Equal(expectedIds, result.Issues.Select(x => x.SectionId!.Value));
+        Assert.All(result.Issues, x => Assert.Equal("Diâmetro inválido", x.Title));
+    }
+
     private static ReviewFixture CleanFixture()
     {
         var fixture = ReviewFixture.Create();

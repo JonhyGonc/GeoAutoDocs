@@ -187,8 +187,11 @@ public partial class ReportReviewWindow : Window
     {
         if (_running || _busy || _isStale) return;
         if (sender is ToggleButton { Tag: ReviewIssue issue } button)
+        {
             VerificationRequested?.Invoke(this, new ReviewIssueVerificationEventArgs(
                 issue, button.IsChecked == true));
+            button.GetBindingExpression(ToggleButton.IsCheckedProperty)?.UpdateTarget();
+        }
     }
 
     private void RemovePending_Click(object sender, RoutedEventArgs e)

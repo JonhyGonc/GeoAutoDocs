@@ -163,7 +163,7 @@ public partial class ReportReviewWindow : Window
                 ? "Nenhuma pendência restante. Os itens verificados foram considerados resolvidos."
                 : "Nenhum problema foi encontrado.";
         }
-        else if (_result.Issues.Count == 0)
+        else if (pending.Count == 0)
         {
             EmptyStateTitle.Text = "Revisão incompleta";
             EmptyStateDescription.Text = "As verificações concluídas não encontraram problemas.";

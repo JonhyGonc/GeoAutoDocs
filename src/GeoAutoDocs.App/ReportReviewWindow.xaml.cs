@@ -31,6 +31,7 @@ public partial class ReportReviewWindow : Window
         ReportReviewContext context,
         bool isStale)
     {
+        var changed = !ReferenceEquals(_result, snapshot.Result) || !ReferenceEquals(_context, context);
         _result = snapshot.Result;
         _context = context;
         ErrorCountText.Text = snapshot.Result.ErrorCount.ToString(CultureInfo.CurrentCulture);
@@ -42,7 +43,7 @@ public partial class ReportReviewWindow : Window
             ? Visibility.Collapsed
             : Visibility.Visible;
         SetStale(isStale);
-        ApplyFilter();
+        if (changed) ApplyFilter();
     }
 
     public void ShowNoReview(string message)
@@ -93,7 +94,6 @@ public partial class ReportReviewWindow : Window
     public void ShowExecutionError()
     {
         ReviewStatusText.Text = "Não foi possível executar a revisão.";
-        IncompleteBanner.Visibility = Visibility.Visible;
     }
 
     private void ApplyFilter()
@@ -179,14 +179,14 @@ public partial class ReportReviewWindow : Window
             ReviewIssue issue,
             ReportReviewContext context)
         {
-            var section = issue.SectionId is Guid sectionId
-                ? context.SelectedSections.FirstOrDefault(x => x.Section.Id == sectionId)
-                : null;
-            var location = section?.Location ?? (issue.LocationId is Guid locationId
-                ? context.SelectedSections.FirstOrDefault(x => x.Location.Id == locationId)?.Location
-                : null);
+            ReviewSectionContext? section = null;
+            if (issue.SectionId is Guid sectionId)
+                context.TryGetSection(sectionId, out section);
+            var location = section?.Location;
+            if (location is null && issue.LocationId is Guid locationId)
+                context.TryGetLocation(locationId, out location);
             var meterage = issue.Meterage is decimal value
-                ? $"Metragem: {value:0.##} m"
+                ? $"Metragem: {value.ToString("0.##", CultureInfo.GetCultureInfo("pt-BR"))} m"
                 : string.Empty;
 
             return new ReviewIssueListItem(

@@ -88,8 +88,7 @@ public sealed class OccurrenceValidityRule : IReportReviewRule
                     ownerSection,
                     occurrence,
                     field: nameof(Occurrence.Meterage),
-                    meterage: maximum,
-                    canBeAcceptedAfterVerification: true);
+                    meterage: maximum);
 
             foreach (var evidence in occurrence.Evidence.OrderBy(x => x.Order).ThenBy(x => x.Id))
             {
@@ -134,12 +133,10 @@ public sealed class OccurrenceValidityRule : IReportReviewRule
         Guid? captureId = null,
         Guid? videoId = null,
         string? field = null,
-        decimal? meterage = null,
-        bool canBeAcceptedAfterVerification = false) => new()
+        decimal? meterage = null) => new()
     {
         RuleId = Id,
         Severity = ReviewSeverity.Error,
-        CanBeAcceptedAfterVerification = canBeAcceptedAfterVerification,
         Title = title,
         Description = description,
         NavigationArea = ReviewNavigationArea.Inspection,

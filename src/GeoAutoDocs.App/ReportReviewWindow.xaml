@@ -117,8 +117,13 @@
         </StackPanel>
 
         <StackPanel Grid.Row="3" Margin="0,0,0,12">
-            <TextBlock x:Name="VerifiedCountText" Foreground="{StaticResource TextSecondaryBrush}"
-                       TextWrapping="Wrap" Margin="0,0,0,8"/>
+            <DockPanel Margin="0,0,0,8">
+                <Button x:Name="ResetVerificationButton" DockPanel.Dock="Right"
+                        Content="Desfazer verificações" IsEnabled="False" Margin="8,0,0,0"
+                        Click="ResetVerification_Click"/>
+                <TextBlock x:Name="VerifiedCountText" Foreground="{StaticResource TextSecondaryBrush}"
+                           TextWrapping="Wrap" VerticalAlignment="Center"/>
+            </DockPanel>
             <StackPanel Orientation="Horizontal">
             <ToggleButton x:Name="AllFilterButton" Content="Todos" Tag="All" IsChecked="True"
                           Style="{StaticResource ReviewFilterChipStyle}" Click="Filter_Click"/>

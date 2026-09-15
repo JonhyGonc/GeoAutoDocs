@@ -12,7 +12,7 @@ public sealed class ReviewVerificationTests
     [InlineData(ReviewSeverity.Info)]
     public void VerificationIsExplicitReversibleAndDoesNotChangeRawResult(ReviewSeverity severity)
     {
-        var issue = Issue(severity, canAccept: true);
+        var issue = Issue(severity);
         var snapshot = Snapshot([issue]);
         var state = new ReviewVerificationState(snapshot);
 
@@ -39,7 +39,7 @@ public sealed class ReviewVerificationTests
     }
 
     [Fact]
-    public void ObjectiveErrorRemainsBlockingEvenWhenVerified()
+    public void VerifiedErrorIsResolvedInReviewAndNoLongerBlocksStructuredPolicy()
     {
         var issue = Issue(ReviewSeverity.Error);
         var snapshot = Snapshot([issue]);
@@ -47,8 +47,9 @@ public sealed class ReviewVerificationTests
         state.SetVerified(issue, true);
 
         Assert.True(state.IsVerified(issue));
-        Assert.Equal(1, state.BlockingErrorCount);
-        Assert.Equal(ReportGenerationReviewDecision.BlockErrors, Evaluate(snapshot, state));
+        Assert.Equal(0, state.BlockingErrorCount);
+        Assert.Empty(state.PendingIssues);
+        Assert.Equal(ReportGenerationReviewDecision.AllowGeneration, Evaluate(snapshot, state));
     }
 
     [Fact]
@@ -78,7 +79,7 @@ public sealed class ReviewVerificationTests
     [Fact]
     public void VerificationNeverApprovesChangedRevisionSelectionOrProject()
     {
-        var issue = Issue(ReviewSeverity.Error, canAccept: true);
+        var issue = Issue(ReviewSeverity.Error);
         var snapshot = Snapshot([issue]);
         var state = new ReviewVerificationState(snapshot);
         state.SetVerified(issue, true);
@@ -119,27 +120,84 @@ public sealed class ReviewVerificationTests
     }
 
     [Fact]
-    public void OnlyLengthBoundaryFindingAllowsHumanAcceptanceInOccurrenceRule()
+    public void HumanResolutionHandlesAllOccurrenceErrorsWithoutChangingTheirData()
     {
         var fixture = ReviewFixture.Create();
         fixture.Section.InvestigatedMeters = 20;
-        fixture.Section.Occurrences.Add(fixture.NewOccurrence(20.01m, "Raiz"));
-        fixture.Section.Occurrences.Add(fixture.NewOccurrence(-1, "Raiz"));
-
+        var boundary = fixture.NewOccurrence(20.01m, "Raiz");
+        var invalid = fixture.NewOccurrence(-1, "Raiz");
+        fixture.Section.Occurrences.Add(boundary);
+        fixture.Section.Occurrences.Add(invalid);
         var result = fixture.Review(new OccurrenceValidityRule());
-        var boundary = Assert.Single(result.Issues, x => x.CanBeAcceptedAfterVerification);
-        Assert.Equal("Ocorrência fora dos limites do trecho", boundary.Title);
-        Assert.All(result.Issues.Where(x => x != boundary),
-            x => Assert.False(x.CanBeAcceptedAfterVerification));
+        var snapshot = Snapshot(result.Issues);
+        var state = new ReviewVerificationState(snapshot);
+
+        Assert.Contains(result.Issues, x => x.Title == "Ocorrência fora dos limites do trecho");
+        Assert.Contains(result.Issues, x => x.Title == "Ocorrência inválida");
+        foreach (var issue in result.Issues) state.SetVerified(issue, true);
+
+        Assert.Empty(state.PendingIssues);
+        Assert.Equal(0, state.BlockingErrorCount);
+        Assert.Equal(ReportGenerationReviewDecision.AllowGeneration, Evaluate(snapshot, state));
+        Assert.Equal(20.01m, boundary.Meterage);
+        Assert.Equal(-1m, invalid.Meterage);
+        Assert.True(result.HasErrors);
     }
 
-    private static ReviewIssue Issue(ReviewSeverity severity, bool canAccept = false) => new()
+    [Fact]
+    public void VerifiedIssuesDisappearFromEveryFilterAndPendingCounter()
+    {
+        var error = Issue(ReviewSeverity.Error);
+        var warning = Issue(ReviewSeverity.Warning);
+        var info = Issue(ReviewSeverity.Info);
+        var state = new ReviewVerificationState(Snapshot([error, warning, info]));
+        state.SetVerified(error, true);
+        Assert.Single(ReviewIssueFiltering.Apply(state.PendingIssues, ReviewIssueFilter.Warnings));
+        Assert.Empty(ReviewIssueFiltering.Apply(state.PendingIssues, ReviewIssueFilter.Errors));
+        Assert.Equal(2, state.UnverifiedIssueCount);
+
+        state.SetVerified(warning, true);
+        state.SetVerified(info, true);
+
+        Assert.Equal(0, state.BlockingErrorCount);
+        Assert.Equal(0, state.UnverifiedWarningCount);
+        Assert.Equal(0, state.UnverifiedInfoCount);
+        Assert.Equal(0, state.UnverifiedIssueCount);
+        foreach (var filter in Enum.GetValues<ReviewIssueFilter>())
+            Assert.Empty(ReviewIssueFiltering.Apply(state.PendingIssues, filter));
+    }
+
+    [Fact]
+    public void ClearVerificationRestoresAllIssuesCountsAndGenerationGate()
+    {
+        var error = Issue(ReviewSeverity.Error);
+        var warning = Issue(ReviewSeverity.Warning);
+        var info = Issue(ReviewSeverity.Info);
+        var snapshot = Snapshot([error, warning, info]);
+        var state = new ReviewVerificationState(snapshot);
+        Assert.False(state.ClearVerified());
+        foreach (var issue in snapshot.Result.Issues) state.SetVerified(issue, true);
+        var version = state.Version;
+
+        Assert.True(state.ClearVerified());
+
+        Assert.Equal(version + 1, state.Version);
+        Assert.Equal(0, state.VerifiedCount);
+        Assert.Equal(snapshot.Result.Issues, state.PendingIssues);
+        Assert.Equal(1, state.BlockingErrorCount);
+        Assert.Equal(1, state.UnverifiedWarningCount);
+        Assert.Equal(1, state.UnverifiedInfoCount);
+        Assert.Equal(ReportGenerationReviewDecision.BlockErrors, Evaluate(snapshot, state));
+        Assert.False(state.ClearVerified());
+        Assert.Equal(version + 1, state.Version);
+    }
+
+    private static ReviewIssue Issue(ReviewSeverity severity) => new()
     {
         RuleId = "test.verification",
         Severity = severity,
         Title = "Apontamento",
-        Description = "Conferir",
-        CanBeAcceptedAfterVerification = canAccept
+        Description = "Conferir"
     };
 
     private static ReportReviewSnapshot Snapshot(IReadOnlyList<ReviewIssue> issues, bool incomplete = false) =>

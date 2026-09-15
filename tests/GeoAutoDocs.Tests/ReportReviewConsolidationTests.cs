@@ -181,9 +181,9 @@ public sealed class ReportReviewConsolidationTests
         var result = new ReportReviewService(ReportReviewRules.CreateDefault()).Review(context);
 
         Assert.True(result.IsComplete);
-        Assert.Equal(7, result.Issues.Count);
+        Assert.Equal(8, result.Issues.Count);
         Assert.Equal(3, result.ErrorCount);
-        Assert.Equal(3, result.WarningCount);
+        Assert.Equal(4, result.WarningCount);
         Assert.Equal(1, result.InfoCount);
         Assert.Equal(result.Issues.Count, result.Issues
             .Select(x => (x.RuleId, x.Title, x.SectionId, x.OccurrenceId, x.EvidenceId)).Distinct().Count());

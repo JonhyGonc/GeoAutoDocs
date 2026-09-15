@@ -59,6 +59,7 @@ public sealed class ReportReviewService
             }
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         var orderedIssues = issues
             .OrderBy(x => x.Severity)
             .ThenBy(x => OrderOf(context, x.LocationId, true))
@@ -69,6 +70,7 @@ public sealed class ReportReviewService
             .ThenBy(x => x.CaptureId)
             .ToList();
 
+        cancellationToken.ThrowIfCancellationRequested();
         return new ReviewResult(orderedIssues, failures, context.CreateMetrics());
     }
 

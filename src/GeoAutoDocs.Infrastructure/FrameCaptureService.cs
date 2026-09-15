@@ -11,6 +11,8 @@ public sealed record FrameCaptureDraft(
     Guid Id, Guid SectionId, Guid VideoReferenceId, string FilePath,
     string VideoFilePath, TimeSpan VideoTimestamp, DateTime CreatedAt);
 
+public sealed record PendingCaptureArchiveResult(int ArchivedFiles, int FailedFiles, string? RecoveryDirectory);
+
 public sealed class FrameCaptureService(AppDataPaths paths, LocalLogger logger)
 {
     public async Task<FrameCaptureDraft> CaptureCurrentFrameAsync(
@@ -107,6 +109,43 @@ public sealed class FrameCaptureService(AppDataPaths paths, LocalLogger logger)
         if (!project.Captures.Remove(capture)) return;
         if (capture.ManagedByGeoAutoDocs && IsInsideManagedCaptureDirectory(project, capture.FilePath))
             TryDelete(capture.FilePath);
+    }
+
+    public PendingCaptureArchiveResult ArchiveRemovedPendingFiles(
+        Project project, IReadOnlyList<Capture> captures, bool isReadOnly)
+    {
+        EnsureWritable(isReadOnly);
+        var referencedPaths = PendingCaptureRemoval.GetReferencedPaths(project);
+        var processed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var archived = 0;
+        var failed = 0;
+        string? recoveryDirectory = null;
+        foreach (var capture in captures)
+        {
+            try
+            {
+                var source = Path.GetFullPath(capture.FilePath);
+                if (capture.Status != CaptureStatus.Pending || !capture.ManagedByGeoAutoDocs ||
+                    project.Captures.Any(x => x.Id == capture.Id) ||
+                    referencedPaths.Contains(source) || !processed.Add(source) ||
+                    !string.Equals(Path.GetExtension(source), ".png", StringComparison.OrdinalIgnoreCase) ||
+                    !IsInsideManagedCaptureDirectory(project, source) || !File.Exists(source))
+                    continue;
+                recoveryDirectory ??= Path.Combine(
+                    GetManagedCaptureDirectory(project), "removed", Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(recoveryDirectory);
+                var target = Path.Combine(recoveryDirectory, $"{capture.Id:N}_{Path.GetFileName(source)}");
+                File.Move(source, target, overwrite: false);
+                archived++;
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            {
+                failed++;
+                logger.Error($"Captura {capture.Id} removida do projeto, mas seu PNG permaneceu no local original.", exception);
+            }
+        }
+        return new PendingCaptureArchiveResult(archived, failed, recoveryDirectory);
     }
 
     public static void RelocateVideo(VideoReference video, string newPath, bool isReadOnly)

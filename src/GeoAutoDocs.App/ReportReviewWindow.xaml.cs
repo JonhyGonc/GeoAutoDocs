@@ -36,6 +36,7 @@ public partial class ReportReviewWindow : Window
 
     public event EventHandler? ReviewRequested;
     public event EventHandler? CancelRequested;
+    public event EventHandler? ResetVerificationRequested;
     public event EventHandler<ReviewIssueNavigationEventArgs>? NavigateRequested;
     public event EventHandler<ReviewIssueVerificationEventArgs>? VerificationRequested;
     public event EventHandler<ReviewIssueNavigationEventArgs>? RemovePendingRequested;
@@ -56,17 +57,18 @@ public partial class ReportReviewWindow : Window
         _isReadOnly = isReadOnly;
         _result = snapshot.Result;
         _context = context;
-        ErrorCountText.Text = snapshot.Result.ErrorCount.ToString(CultureInfo.CurrentCulture);
-        WarningCountText.Text = snapshot.Result.WarningCount.ToString(CultureInfo.CurrentCulture);
-        InfoCountText.Text = snapshot.Result.InfoCount.ToString(CultureInfo.CurrentCulture);
+        ErrorCountText.Text = (_verification?.BlockingErrorCount ?? snapshot.Result.ErrorCount).ToString(CultureInfo.CurrentCulture);
+        WarningCountText.Text = (_verification?.UnverifiedWarningCount ?? snapshot.Result.WarningCount).ToString(CultureInfo.CurrentCulture);
+        InfoCountText.Text = (_verification?.UnverifiedInfoCount ?? snapshot.Result.InfoCount).ToString(CultureInfo.CurrentCulture);
         ReviewStatusText.Text =
             $"Revisão concluída às {snapshot.CompletedAt.ToLocalTime():HH:mm}";
         IncompleteBanner.Visibility = snapshot.Result.IsComplete
             ? Visibility.Collapsed
             : Visibility.Visible;
-        VerifiedCountText.Text = $"{_verification?.VerifiedCount ?? 0} item(ns) verificado(s). " +
+        VerifiedCountText.Text = $"{_verification?.VerifiedCount ?? 0} item(ns) resolvido(s) por verificação. " +
             "A conferência vale somente para esta revisão.";
         SetStale(isStale);
+        RefreshAvailability();
         if (changed) ApplyFilter();
     }
 
@@ -88,6 +90,7 @@ public partial class ReportReviewWindow : Window
         EmptyStateTitle.Text = "Revisão ainda não executada";
         EmptyStateDescription.Text = "Clique em “Executar revisão” para analisar o relatório atual.";
         VisibleCountText.Text = "";
+        RefreshAvailability();
     }
 
     public void SetRunning(bool running)
@@ -109,6 +112,8 @@ public partial class ReportReviewWindow : Window
     {
         RunReviewButton.IsEnabled = !_running && !_busy;
         IssuesList.IsEnabled = !_running && !_busy;
+        ResetVerificationButton.IsEnabled = !_running && !_busy && !_isStale &&
+            (_verification?.VerifiedCount ?? 0) > 0;
         foreach (var button in FilterButtons()) button.IsEnabled = !_running && !_busy;
     }
 
@@ -144,16 +149,19 @@ public partial class ReportReviewWindow : Window
             return;
         }
 
-        var filtered = ReviewIssueFiltering.Apply(_result.Issues, _filter)
+        var pending = (_verification?.PendingIssues ?? _result.Issues).ToList();
+        var filtered = ReviewIssueFiltering.Apply(pending, _filter)
             .Select(issue => ReviewIssueListItem.Create(issue, _context, _verification, _isStale, _isReadOnly))
             .ToList();
         IssuesList.ItemsSource = filtered;
         EmptyState.Visibility = filtered.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
-        if (_result.Issues.Count == 0 && _result.IsComplete)
+        if (pending.Count == 0 && _result.IsComplete)
         {
             EmptyStateTitle.Text = "Revisão concluída";
-            EmptyStateDescription.Text = "Nenhum problema foi encontrado.";
+            EmptyStateDescription.Text = (_verification?.VerifiedCount ?? 0) > 0
+                ? "Nenhuma pendência restante. Os itens verificados foram considerados resolvidos."
+                : "Nenhum problema foi encontrado.";
         }
         else if (_result.Issues.Count == 0)
         {
@@ -169,6 +177,12 @@ public partial class ReportReviewWindow : Window
         VisibleCountText.Text = filtered.Count == 1
             ? "1 resultado exibido"
             : $"{filtered.Count} resultados exibidos";
+    }
+
+    private void ResetVerification_Click(object sender, RoutedEventArgs e)
+    {
+        if (_running || _busy || _isStale) return;
+        ResetVerificationRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void RunReview_Click(object sender, RoutedEventArgs e) =>
@@ -274,9 +288,7 @@ public partial class ReportReviewWindow : Window
                 meterage.Length == 0 ? Visibility.Collapsed : Visibility.Visible,
                 verification?.IsVerified(issue) == true,
                 !isStale,
-                issue.Severity == ReviewSeverity.Error && !issue.CanBeAcceptedAfterVerification
-                    ? "Marca como conferido. Este erro objetivo ainda precisa ser corrigido para gerar."
-                    : "Confirme que conferiu este item. Clique novamente para desfazer.",
+                "Considera este item resolvido e o remove da lista de pendências desta revisão.",
                 issue.NavigationArea == ReviewNavigationArea.PendingCaptures &&
                     issue.RuleId == "report.coverage" && issue.SectionId.HasValue
                     ? Visibility.Visible : Visibility.Collapsed,

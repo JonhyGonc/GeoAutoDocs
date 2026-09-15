@@ -1628,7 +1628,8 @@ public partial class MainWindow : Window
 
     private async void GenerateReport_Click(object sender, RoutedEventArgs e)
     {
-        if (_currentProject is null || _currentReport is null || _reportGenerationInProgress)
+        if (_currentProject is null || _currentReport is null || _reportGenerationInProgress ||
+            _reportReviewCts is not null)
             return;
 
         _reportGenerationInProgress = true;
@@ -1787,7 +1788,7 @@ public partial class MainWindow : Window
             {
                 GenerateReportButton.Content = "Revisando...";
                 GeneratedReportText.Text = "Revisando relatório antes da geração...";
-                var outcome = await ExecuteReportReviewAsync(showWindow: false);
+                var outcome = await ExecuteReportReviewAsync(showWindow: false, forGeneration: true);
                 if (outcome.Status == ReportReviewExecutionStatus.Cancelled)
                 {
                     GeneratedReportText.Text = "Geração cancelada durante a revisão.";
@@ -2543,11 +2544,12 @@ public partial class MainWindow : Window
         UpdateSidebarNavigation();
     }
 
-    private async Task<ReportReviewExecutionOutcome> ExecuteReportReviewAsync(bool showWindow)
+    private async Task<ReportReviewExecutionOutcome> ExecuteReportReviewAsync(
+        bool showWindow, bool forGeneration = false)
     {
         if (_currentProject is null || _currentReport is null)
             return ReportReviewExecutionOutcome.Failed();
-        if (_reportReviewCts is not null)
+        if (_reportReviewCts is not null || (_reportGenerationInProgress && !forGeneration))
             return ReportReviewExecutionOutcome.Busy();
 
         ApplyFieldsToModel();

@@ -13,7 +13,7 @@ public static class PendingCaptureRemoval
         var evidencePaths = evidence.Where(x => !string.IsNullOrWhiteSpace(x.FilePath))
             .Select(x => NormalizePath(x.FilePath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         return project.Captures.Where(capture =>
-            capture.SectionId == sectionId && expected.Contains(capture.Id) &&
+            capture.ProjectId == project.Id && capture.SectionId == sectionId && expected.Contains(capture.Id) &&
             capture.Status == CaptureStatus.Pending && !assignedIds.Contains(capture.Id) &&
             !evidencePaths.Contains(NormalizePath(capture.FilePath))).ToList();
     }

@@ -107,7 +107,7 @@ jobs:
                   typeof(MainWindow).GetField(name, Private)!.SetValue(window, value);
               private static Task<ReportReviewExecutionOutcome> Execute(MainWindow window, bool showWindow) =>
                   (Task<ReportReviewExecutionOutcome>)typeof(MainWindow)
-                      .GetMethod("ExecuteReportReviewAsync", Private)!.Invoke(window, [showWindow])!;
+                      .GetMethod("ExecuteReportReviewAsync", Private)!.Invoke(window, [showWindow, false])!;
               private static void Invoke(MainWindow window, string name) =>
                   typeof(MainWindow).GetMethod(name, Private)!.Invoke(window, null);
               private static void Require(bool condition, string message)
@@ -181,6 +181,11 @@ jobs:
                   Require(ReferenceEquals(Get(window, "_reportReviewSnapshot"), second.Snapshot),
                       "Filtro substituiu snapshot.");
           
+                  Set(window, "_reportGenerationInProgress", true);
+                  Require((await Execute(window, false)).Status == ReportReviewExecutionStatus.Busy,
+                      "Revisão manual iniciou durante geração.");
+                  Set(window, "_reportGenerationInProgress", false);
+          
                   using var entered = new ManualResetEventSlim();
                   using var release = new ManualResetEventSlim();
                   Set(window, "_reportReviewService", new ReportReviewService([new BlockingRule(entered, release)]));
@@ -188,6 +193,11 @@ jobs:
                   Require(entered.Wait(TimeSpan.FromSeconds(15)), "Worker não iniciou.");
                   Require((await Execute(window, false)).Status == ReportReviewExecutionStatus.Busy,
                       "Duas revisões concorrentes foram permitidas.");
+                  typeof(MainWindow).GetMethod("GenerateReport_Click", Private)!
+                      .Invoke(window, [new Button(), new RoutedEventArgs()]);
+                  Require(!(bool)Get(window, "_reportGenerationInProgress")! &&
+                      !((FrameworkElement)window.FindName("EditorView")).IsEnabled,
+                      "Geração concorrente alterou o estado da revisão manual.");
                   ((CancellationTokenSource)Get(window, "_reportReviewCts")!).Cancel();
                   release.Set();
                   Require((await pending).Status == ReportReviewExecutionStatus.Cancelled, "Cancelamento falhou.");

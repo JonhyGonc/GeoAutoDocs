@@ -2653,7 +2653,7 @@ public partial class MainWindow : Window
             ReportReviewSelection.CreateSignature(_currentReport)) &&
         _reportReviewSnapshot.Result.Issues.Contains(issue) &&
         _reportReviewCts is null && !_reportGenerationInProgress &&
-        !_reportReviewActionInProgress && !_finalizationInProgress;
+        !_reportReviewActionInProgress && !_finalizationInProgress && !_reportDeletionInProgress;
 
     private void ReportReviewWindow_VerificationRequested(
         object? sender, ReviewIssueVerificationEventArgs e)
@@ -2664,6 +2664,7 @@ public partial class MainWindow : Window
             RefreshReportReview();
             return;
         }
+        var verification = _reportReviewVerification;
         if (e.Verified && e.Issue.Severity == ReviewSeverity.Error &&
             e.Issue.CanBeAcceptedAfterVerification &&
             MessageBox.Show(this,
@@ -2673,7 +2674,12 @@ public partial class MainWindow : Window
                 "Confirmar verificação", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
 
-        if (_reportReviewVerification.SetVerified(e.Issue, e.Verified))
+        if (!ReferenceEquals(verification, _reportReviewVerification) || !CanActOnCurrentReview(e.Issue))
+        {
+            RefreshReportReview();
+            return;
+        }
+        if (verification.SetVerified(e.Issue, e.Verified))
             _logger.Info($"Item da revisão conferido. RelatorioId='{_currentReport!.Id}'; " +
                          $"Regra='{e.Issue.RuleId}'; Severidade={e.Issue.Severity}; " +
                          $"SectionId='{e.Issue.SectionId}'; OccurrenceId='{e.Issue.OccurrenceId}'; " +
@@ -2711,6 +2717,11 @@ public partial class MainWindow : Window
                 "Confirmar remoção", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
 
+        if (!ReferenceEquals(snapshot, _reportReviewSnapshot) || !CanActOnCurrentReview(e.Issue))
+        {
+            RefreshReportReview();
+            return;
+        }
         _reportReviewActionInProgress = true;
         window?.SetActionBusy(true);
         var editorWasEnabled = EditorView.IsEnabled;
@@ -2723,7 +2734,7 @@ public partial class MainWindow : Window
             // Aguarda qualquer save anterior antes de alterar as referências em memória.
             await _persistenceGate.WaitAsync();
             _persistenceGate.Release();
-            if (!ReferenceEquals(project, _currentProject) || IsReadOnly ||
+            if (!ReferenceEquals(project, _currentProject) || _currentReport is null || IsReadOnly ||
                 !ReferenceEquals(snapshot, _reportReviewSnapshot) ||
                 !snapshot!.IsCurrent(project.Id, _currentReport!.Id, _reportReviewRevision,
                     ReportReviewSelection.CreateSignature(_currentReport)))

@@ -29,9 +29,9 @@ public static class PendingCaptureRemoval
             throw new InvalidOperationException(
                 "As capturas mudaram ou estão vinculadas a evidências. Execute a revisão novamente.");
         var original = project.Captures.ToList();
-        var ids = captures.Select(x => x.Id).ToHashSet();
+        var targets = captures.ToHashSet();
         var saved = false;
-        project.Captures.RemoveAll(x => ids.Contains(x.Id));
+        project.Captures.RemoveAll(targets.Contains);
         try
         {
             saved = await persist();

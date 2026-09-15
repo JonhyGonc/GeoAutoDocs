@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace GeoAutoDocs.Core.Review.Rules;
 
 public sealed class OccurrenceValidityRule : IReportReviewRule
@@ -81,8 +83,8 @@ public sealed class OccurrenceValidityRule : IReportReviewRule
                 maximum > ownerSection.Section.InvestigatedMeters.Value)
                 yield return Error(
                     "Ocorrência fora dos limites do trecho",
-                    $"A ocorrência está em {maximum:0.##} m, além da extensão cadastrada de " +
-                    $"{ownerSection.Section.InvestigatedMeters.Value:0.##} m.",
+                    $"A ocorrência está em {maximum.ToString("0.##", CultureInfo.GetCultureInfo("pt-BR"))} m, além da extensão cadastrada de " +
+                    $"{ownerSection.Section.InvestigatedMeters.Value.ToString("0.##", CultureInfo.GetCultureInfo("pt-BR"))} m.",
                     ownerSection,
                     occurrence,
                     field: nameof(Occurrence.Meterage),

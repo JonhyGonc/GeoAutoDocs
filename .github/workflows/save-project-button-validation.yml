@@ -1,0 +1,39 @@
+name: Save project button validation
+
+on:
+  push:
+    branches:
+      - fix/section-edit-save-stability
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Restore
+        run: dotnet restore GeoAutoDocs.sln
+      - name: Build Release
+        run: dotnet build GeoAutoDocs.sln --configuration Release --no-restore
+      - name: Test all
+        run: dotnet test GeoAutoDocs.sln --configuration Release --no-build --logger "console;verbosity=normal"
+      - name: Start application smoke test
+        shell: pwsh
+        run: |
+          $env:GEOAUTODOCS_DATA_ROOT = Join-Path $env:RUNNER_TEMP "GeoAutoDocsSaveButton"
+          New-Item -ItemType Directory -Path $env:GEOAUTODOCS_DATA_ROOT -Force | Out-Null
+          $exe = Join-Path $env:GITHUB_WORKSPACE "src\GeoAutoDocs.App\bin\Release\net8.0-windows\GeoAutoDocs.App.exe"
+          $process = Start-Process $exe -PassThru
+          Start-Sleep -Seconds 10
+          if ($process.HasExited) {
+            throw "GeoAutoDocs encerrou durante a inicialização. ExitCode=$($process.ExitCode)"
+          }
+          $logPath = Join-Path $env:GEOAUTODOCS_DATA_ROOT "logs\GeoAutoDocs.log"
+          if (-not (Test-Path $logPath) -or
+              -not (Select-String -Path $logPath -Pattern "Janela principal exibida" -Quiet)) {
+            throw "O log não confirmou a exibição da janela principal em $logPath."
+          }
+          Stop-Process -Id $process.Id -Force

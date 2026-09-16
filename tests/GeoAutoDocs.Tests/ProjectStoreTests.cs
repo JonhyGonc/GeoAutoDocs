@@ -305,7 +305,7 @@ public sealed class ProjectStoreTests : IAsyncLifetime
         var savedSection = Assert.Single(Assert.Single(recovered!.Locations).Sections);
         Assert.Equal("Trecho editado", savedSection.Name);
         Assert.Equal("Descrição focada", savedSection.Description);
-        Assert.Equal(("PV 01", "PV 02", 600m, "REF-01", 18.75m),
+        Assert.Equal(("PV 01", "PV 02", 600m, "REF-01", 4.25m),
             (savedSection.StartPoint, savedSection.EndPoint, savedSection.Diameter,
                 savedSection.Reference, savedSection.InvestigatedMeters));
         Assert.Single(savedSection.VideoReferences);

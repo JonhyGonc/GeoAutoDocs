@@ -1,4 +1,5 @@
 name: Save project button validation
+# Re-run after an isolated Named Pipe timing failure.
 
 on:
   push:

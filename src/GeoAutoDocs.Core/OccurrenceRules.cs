@@ -209,7 +209,17 @@ public static class OccurrenceRules
     public static Occurrence? GetTerminalOccurrence(InspectionSection section)
     {
         ArgumentNullException.ThrowIfNull(section);
-        return section.Occurrences
+
+        var highestMeterage = section.Occurrences
+            .Select(x => new { Occurrence = x, Meterage = GetFinalMeterage(x) })
+            .Where(x => x.Meterage.HasValue)
+            .OrderBy(x => x.Meterage)
+            .ThenBy(x => x.Occurrence.Order)
+            .ThenBy(x => x.Occurrence.CreatedAt)
+            .Select(x => x.Occurrence)
+            .LastOrDefault();
+
+        return highestMeterage ?? section.Occurrences
             .OrderBy(x => x.Order)
             .ThenBy(x => x.CreatedAt)
             .LastOrDefault();

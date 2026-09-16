@@ -176,5 +176,11 @@ public sealed class SectionMeteragePersistenceTests : IAsyncLifetime
         var stored = Assert.Single(Assert.Single(loaded!.Locations).Sections);
 
         Assert.Equal(27.4m, stored.InvestigatedMeters);
+
+        stored.InvestigatedMeters = 500;
+        await _store.SaveSectionAsync(stored);
+        loaded = await _store.GetAsync(project.Id);
+        stored = Assert.Single(Assert.Single(loaded!.Locations).Sections);
+        Assert.Equal(27.4m, stored.InvestigatedMeters);
     }
 }

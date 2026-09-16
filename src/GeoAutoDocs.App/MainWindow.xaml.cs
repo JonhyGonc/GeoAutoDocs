@@ -3357,6 +3357,7 @@ public partial class MainWindow : Window
             targetIndex++;
         ordered.Insert(targetIndex, source);
         for (var index = 0; index < ordered.Count; index++) ordered[index].Order = index;
+        OccurrenceRules.SynchronizeInvestigatedMeters(_currentSection);
         MarkPendingChanges();
         UpdateSectionReviewState();
         if (!await SavePendingAsync())

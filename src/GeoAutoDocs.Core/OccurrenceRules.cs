@@ -212,7 +212,6 @@ public static class OccurrenceRules
         return section.Occurrences
             .OrderBy(x => x.Order)
             .ThenBy(x => x.CreatedAt)
-            .ThenBy(x => x.Id)
             .LastOrDefault();
     }
 

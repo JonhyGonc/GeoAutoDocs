@@ -97,6 +97,7 @@ public static class ReportReviewRules
         .. CreateLegacy(),
         new Rules.StructureRule(),
         new Rules.OccurrenceValidityRule(),
+        new Rules.SectionCompletionRule(),
         new Rules.DuplicateOccurrenceRule(),
         new Rules.TextQualityRule(),
         new Rules.SectionSequenceRule(),

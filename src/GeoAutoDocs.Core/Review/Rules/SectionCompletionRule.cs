@@ -22,7 +22,7 @@ public sealed class SectionCompletionRule : IReportReviewRule
             if (!terminal.InterruptedRecording)
                 yield return Error(
                     "Última anomalia sem interrupção da gravação",
-                    "Marque “Esta anomalia interrompeu a gravação” na última anomalia do trecho.",
+                    "Marque “Esta anomalia interrompeu a gravação” na anomalia de maior metragem do trecho.",
                     sectionContext,
                     terminal,
                     nameof(Occurrence.InterruptedRecording),
@@ -32,7 +32,7 @@ public sealed class SectionCompletionRule : IReportReviewRule
             {
                 yield return Error(
                     "Última anomalia sem metragem final",
-                    "A última anomalia do trecho precisa possuir uma metragem final para definir a metragem inspecionada.",
+                    "A anomalia considerada final precisa possuir uma metragem para definir a metragem inspecionada do trecho.",
                     sectionContext,
                     terminal,
                     nameof(Occurrence.Meterage));
@@ -42,7 +42,7 @@ public sealed class SectionCompletionRule : IReportReviewRule
             if (section.InvestigatedMeters != finalMeterage)
                 yield return Error(
                     "Metragem inspecionada divergente",
-                    $"A metragem inspecionada do trecho deve ser {Format(finalMeterage.Value)} m, igual à metragem final da última anomalia. Valor atual: {Format(section.InvestigatedMeters)} m.",
+                    $"A metragem inspecionada do trecho deve ser {Format(finalMeterage.Value)} m, igual à maior metragem registrada nas anomalias. Valor atual: {Format(section.InvestigatedMeters)} m.",
                     sectionContext,
                     terminal,
                     nameof(InspectionSection.InvestigatedMeters),

@@ -3882,6 +3882,7 @@ public partial class MainWindow : Window
         _currentSection.EndPoint = draft.EndPoint;
         _currentSection.Reference = draft.Reference;
         _currentSection.InvestigatedMeters = draft.InvestigatedMeters;
+        OccurrenceRules.SynchronizeInvestigatedMeters(_currentSection);
         RefreshSectionMetadata();
         RefreshReportSectionSelection();
         await SaveSectionMetadataAsync(_currentSection);

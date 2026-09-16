@@ -237,6 +237,7 @@ public sealed class ProjectStore : IProjectStore
                     }
                     foreach (var evidence in occurrence.Evidence) evidence.OccurrenceId = occurrence.Id;
                 }
+                OccurrenceRules.SynchronizeInvestigatedMeters(section);
             }
         }
 

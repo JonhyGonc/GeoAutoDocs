@@ -710,6 +710,7 @@ public partial class MainWindow : Window
         EditorView.Margin = compactEditor ? new Thickness(8, 8, 8, 6) : new Thickness(22, 12, 20, 10);
         BackToProjectsText.Visibility = compactEditor ? Visibility.Collapsed : Visibility.Visible;
         ShareProjectText.Visibility = compactEditor ? Visibility.Collapsed : Visibility.Visible;
+        SaveProjectText.Visibility = compactEditor ? Visibility.Collapsed : Visibility.Visible;
         StorageStatus.Visibility = compactEditor ? Visibility.Collapsed : Visibility.Visible;
         var padding = compact ? new Thickness(8, 14, 8, 14) : new Thickness(16, 14, 16, 14);
         foreach (var card in new[] { TotalProjectsCard, TotalReportsCard, InProgressReportsCard, SharedProjectsCard })
@@ -876,6 +877,32 @@ public partial class MainWindow : Window
         _projectDialogProjectId = null;
     }
 
+    private async void SaveProject_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null || IsReadOnly || _finalizationInProgress) return;
+
+        _saveTimer.Stop();
+        SaveProjectButton.IsEnabled = false;
+        SaveProjectText.Text = "Salvando...";
+        SaveStatus.Text = "Salvando...";
+        UpdateSectionReviewState();
+
+        try
+        {
+            if (await SavePendingAsync())
+            {
+                SaveStatus.Text = "✓ Projeto salvo";
+                _logger.Info($"Projeto '{_currentProject.Name}' salvo manualmente.");
+            }
+        }
+        finally
+        {
+            SaveProjectText.Text = "Salvar projeto";
+            SaveProjectButton.IsEnabled = _currentProject is not null && !IsReadOnly &&
+                                          !_finalizationInProgress;
+        }
+    }
+
     private async void Back_Click(object sender, RoutedEventArgs e)
     {
         if (!await FinalizeCurrentProjectAsync()) return;
@@ -953,6 +980,7 @@ public partial class MainWindow : Window
             ? (_sharedSession?.IsReadOnly == true ? "Compartilhado • somente leitura" : "Compartilhado • editor com lock")
             : "Local";
         ShareProjectButton.IsEnabled = project.StorageKind == ProjectStorageKind.Local;
+        SaveProjectButton.IsEnabled = !IsReadOnly;
         NewReportButton.IsEnabled = _sharedSession?.IsReadOnly != true;
         ContinueReportButton.IsEnabled = !IsReadOnly && _currentProject is not null;
         HeaderNewReportButton.IsEnabled = _sharedSession?.IsReadOnly != true;

@@ -140,6 +140,7 @@ public sealed class ProjectStore : IProjectStore
     public async Task SaveSectionAsync(InspectionSection section, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(section);
+        OccurrenceRules.SynchronizeInvestigatedMeters(section);
         var name = section.Name.Trim();
         if (name.Length == 0) throw new InvalidOperationException("O nome do trecho é obrigatório.");
 

@@ -54,16 +54,16 @@ public sealed class SectionCompletionTests
     }
 
     [Fact]
-    public void OperationalOrderDefinesTerminalOccurrenceInsteadOfHighestMeterage()
+    public void HighestMeterageDefinesTerminalOccurrenceRegardlessOfListOrder()
     {
         var section = new InspectionSection { InvestigatedMeters = 40 };
         var highest = Occurrence(90, order: 0, interrupted: false);
-        var terminal = Occurrence(40, order: 1, interrupted: true);
-        section.Occurrences.AddRange([highest, terminal]);
+        var lastInList = Occurrence(40, order: 1, interrupted: true);
+        section.Occurrences.AddRange([highest, lastInList]);
 
-        Assert.Same(terminal, OccurrenceRules.GetTerminalOccurrence(section));
-        Assert.False(OccurrenceRules.SynchronizeInvestigatedMeters(section));
-        Assert.Equal(40m, section.InvestigatedMeters);
+        Assert.Same(highest, OccurrenceRules.GetTerminalOccurrence(section));
+        Assert.True(OccurrenceRules.SynchronizeInvestigatedMeters(section));
+        Assert.Equal(90m, section.InvestigatedMeters);
     }
 
     [Theory]

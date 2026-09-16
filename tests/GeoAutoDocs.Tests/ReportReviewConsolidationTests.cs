@@ -181,10 +181,12 @@ public sealed class ReportReviewConsolidationTests
         var result = new ReportReviewService(ReportReviewRules.CreateDefault()).Review(context);
 
         Assert.True(result.IsComplete);
-        Assert.Equal(8, result.Issues.Count);
-        Assert.Equal(3, result.ErrorCount);
+        Assert.Equal(10, result.Issues.Count);
+        Assert.Equal(5, result.ErrorCount);
         Assert.Equal(4, result.WarningCount);
         Assert.Equal(1, result.InfoCount);
+        Assert.Single(result.Issues, x => x.Title == "Última anomalia sem interrupção da gravação");
+        Assert.Single(result.Issues, x => x.Title == "Metragem inspecionada divergente");
         Assert.Equal(result.Issues.Count, result.Issues
             .Select(x => (x.RuleId, x.Title, x.SectionId, x.OccurrenceId, x.EvidenceId)).Distinct().Count());
         var outside = Assert.Single(result.Issues, x => x.Title == "Ocorrência fora dos limites do trecho");
@@ -270,6 +272,8 @@ public sealed class ReportReviewConsolidationTests
             var video = new VideoReference { InspectionSectionId = section.Id, FilePath = $"video{index}.mp4" };
             section.VideoReferences.Add(video);
             var occurrence = fixture.NewOccurrence(5m, "Raiz");
+            occurrence.InterruptedRecording = true;
+            section.InvestigatedMeters = occurrence.Meterage;
             occurrence.InspectionSectionId = section.Id;
             occurrence.VideoReferenceId = video.Id;
             occurrence.Evidence.Add(new Evidence { OccurrenceId = occurrence.Id, FilePath = $"evidence{index}.png" });

@@ -206,6 +206,38 @@ public static class OccurrenceRules
         return pending;
     }
 
+    public static Occurrence? GetTerminalOccurrence(InspectionSection section)
+    {
+        ArgumentNullException.ThrowIfNull(section);
+        return section.Occurrences
+            .OrderBy(x => x.Order)
+            .ThenBy(x => x.CreatedAt)
+            .ThenBy(x => x.Id)
+            .LastOrDefault();
+    }
+
+    public static decimal? GetFinalMeterage(Occurrence occurrence)
+    {
+        ArgumentNullException.ThrowIfNull(occurrence);
+        return occurrence.LocationMode switch
+        {
+            OccurrenceLocationMode.Point or OccurrenceLocationMode.From => occurrence.Meterage,
+            OccurrenceLocationMode.Range => occurrence.EndMeterage,
+            OccurrenceLocationMode.MultiPoint when occurrence.MeteragePoints.Count > 0 =>
+                occurrence.MeteragePoints.Max(x => x.Meterage),
+            _ => null
+        };
+    }
+
+    public static bool SynchronizeInvestigatedMeters(InspectionSection section)
+    {
+        var terminal = GetTerminalOccurrence(section);
+        var meterage = terminal is null ? null : GetFinalMeterage(terminal);
+        if (meterage is null || section.InvestigatedMeters == meterage) return false;
+        section.InvestigatedMeters = meterage;
+        return true;
+    }
+
     public static string FormatPosition(AnomalyPosition value) => value switch
     {
         AnomalyPosition.UpperGenerator => "Geratriz superior", AnomalyPosition.LowerGenerator => "Geratriz inferior",

@@ -101,6 +101,91 @@ public sealed class InspectionCorrectionTests : IAsyncLifetime
     }
 
     [Fact]
+    public void MeterageCorrectionRegeneratesDescriptionWhenEngineSendsOldText()
+    {
+        var (project, report, section, occurrence) = NewProject();
+        occurrence.Meterage = 12.5m;
+        var anomalyType = AnomalyCatalog.Defaults[0];
+        occurrence.Anomalies.Add(new OccurrenceAnomaly
+        {
+            OccurrenceId = occurrence.Id,
+            AnomalyTypeId = anomalyType.Id,
+            AnomalyType = anomalyType,
+            Position = AnomalyPosition.UpperGenerator
+        });
+        occurrence.GeneratedDescription = OccurrenceRules.GenerateDescription(occurrence);
+        var original = occurrence.EffectiveDescription;
+
+        var service = new InspectionCorrectionService();
+        var plan = service.Prepare(project, new InspectionCorrectionPackage
+        {
+            ReportId = report.Id,
+            Corrections =
+            [
+                new InspectionCorrection
+                {
+                    SectionId = section.Id,
+                    OccurrenceId = occurrence.Id,
+                    Meterage = 13.75m,
+                    Description = original
+                }
+            ]
+        });
+
+        var preview = Assert.Single(plan.Items);
+        Assert.Contains("13,75", preview.ProposedDescription);
+        Assert.DoesNotContain("12,5 metros", preview.ProposedDescription);
+        Assert.Equal(original, occurrence.EffectiveDescription);
+
+        var snapshots = service.Apply(plan);
+        Assert.Equal(13.75m, occurrence.Meterage);
+        Assert.Equal(preview.ProposedDescription, occurrence.EffectiveDescription);
+        Assert.Null(occurrence.ManualDescriptionOverride);
+
+        service.Rollback(snapshots);
+        Assert.Equal(12.5m, occurrence.Meterage);
+        Assert.Equal(original, occurrence.GeneratedDescription);
+        Assert.Null(occurrence.ManualDescriptionOverride);
+    }
+
+    [Fact]
+    public void ExplicitTextEditIsPreservedWhileMeterageChanges()
+    {
+        var (project, report, section, occurrence) = NewProject();
+        var anomalyType = AnomalyCatalog.Defaults[0];
+        occurrence.Anomalies.Add(new OccurrenceAnomaly
+        {
+            OccurrenceId = occurrence.Id,
+            AnomalyTypeId = anomalyType.Id,
+            AnomalyType = anomalyType
+        });
+        occurrence.GeneratedDescription = OccurrenceRules.GenerateDescription(occurrence);
+        var editedText = "Texto técnico revisado pelo operador.";
+
+        var service = new InspectionCorrectionService();
+        var plan = service.Prepare(project, new InspectionCorrectionPackage
+        {
+            ReportId = report.Id,
+            Corrections =
+            [
+                new InspectionCorrection
+                {
+                    SectionId = section.Id,
+                    OccurrenceId = occurrence.Id,
+                    Meterage = 2m,
+                    Description = editedText
+                }
+            ]
+        });
+
+        Assert.Equal(editedText, Assert.Single(plan.Items).ProposedDescription);
+        service.Apply(plan);
+        Assert.Equal(2m, occurrence.Meterage);
+        Assert.Equal(editedText, occurrence.EffectiveDescription);
+        Assert.Contains("2 metros", occurrence.GeneratedDescription);
+    }
+
+    [Fact]
     public void EngineRangePayloadUpdatesStartEndAndDescription()
     {
         var (project, report, section, occurrence) = NewProject(OccurrenceLocationMode.Range);

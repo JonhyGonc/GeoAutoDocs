@@ -140,6 +140,8 @@ public sealed class InspectionCorrectionResolution
     public decimal? ProposedEndMeterage { get; init; }
     public IReadOnlyList<decimal> ProposedMeteragePoints { get; init; } = [];
     public string ProposedDescription { get; init; } = string.Empty;
+    public string ProposedGeneratedDescription { get; init; } = string.Empty;
+    public string? ProposedManualDescriptionOverride { get; init; }
 
     [JsonIgnore]
     public Occurrence? Target { get; init; }
@@ -163,6 +165,7 @@ public sealed record InspectionCorrectionSnapshot(
     decimal? Meterage,
     decimal? EndMeterage,
     IReadOnlyList<decimal> MeteragePoints,
+    string GeneratedDescription,
     string? ManualDescriptionOverride);
 
 public sealed class InspectionCorrectionService
@@ -213,6 +216,7 @@ public sealed class InspectionCorrectionService
                 occurrence.Meterage,
                 occurrence.EndMeterage,
                 orderedPoints.Select(point => point.Meterage).ToArray(),
+                occurrence.GeneratedDescription,
                 occurrence.ManualDescriptionOverride));
 
             switch (occurrence.LocationMode)
@@ -237,9 +241,8 @@ public sealed class InspectionCorrectionService
                     break;
             }
 
-            if (item.Correction.HasDescription)
-                occurrence.ManualDescriptionOverride = NormalizeDescription(
-                    item.Correction.Description, occurrence.GeneratedDescription);
+            occurrence.GeneratedDescription = item.ProposedGeneratedDescription;
+            occurrence.ManualDescriptionOverride = item.ProposedManualDescriptionOverride;
         }
 
         return snapshots;
@@ -255,6 +258,7 @@ public sealed class InspectionCorrectionService
             var orderedPoints = OrderedPoints(snapshot.Occurrence);
             for (var index = 0; index < orderedPoints.Count && index < snapshot.MeteragePoints.Count; index++)
                 orderedPoints[index].Meterage = snapshot.MeteragePoints[index];
+            snapshot.Occurrence.GeneratedDescription = snapshot.GeneratedDescription;
             snapshot.Occurrence.ManualDescriptionOverride = snapshot.ManualDescriptionOverride;
         }
     }
@@ -331,19 +335,26 @@ public sealed class InspectionCorrectionService
                 break;
         }
 
-        var proposedDescription = correction.HasDescription
-            ? EffectiveDescription(correction.Description, occurrence.GeneratedDescription)
-            : occurrence.EffectiveDescription;
-        var proposedOverride = correction.HasDescription
-            ? NormalizeDescription(correction.Description, occurrence.GeneratedDescription)
-            : occurrence.ManualDescriptionOverride;
         var positionChanged = occurrence.Meterage != proposedMeterage ||
                               occurrence.EndMeterage != proposedEndMeterage ||
                               !currentPoints.SequenceEqual(proposedPoints);
-        var descriptionChanged = correction.HasDescription &&
-                                 !string.Equals(occurrence.ManualDescriptionOverride, proposedOverride,
-                                     StringComparison.Ordinal);
-        var changed = positionChanged || descriptionChanged;
+        var proposedGenerated = positionChanged && occurrence.Anomalies.Count > 0
+            ? GenerateDescriptionAt(occurrence, proposedMeterage, proposedEndMeterage, proposedPoints)
+            : occurrence.GeneratedDescription;
+
+        // O Engine envia a descrição atual mesmo quando só a metragem foi editada.
+        // Nesse caso, não transformá-la em texto manual que congelaria a metragem antiga.
+        var editedText = correction.HasDescription &&
+            !string.Equals(correction.Description?.Trim(), occurrence.EffectiveDescription.Trim(),
+                StringComparison.Ordinal);
+        var proposedOverride = editedText
+            ? NormalizeDescription(correction.Description, proposedGenerated)
+            : NormalizeDescription(occurrence.ManualDescriptionOverride, occurrence.GeneratedDescription);
+        var proposedDescription = string.IsNullOrWhiteSpace(proposedOverride)
+            ? proposedGenerated : proposedOverride;
+        var changed = positionChanged ||
+                      !string.Equals(occurrence.GeneratedDescription, proposedGenerated, StringComparison.Ordinal) ||
+                      !string.Equals(occurrence.ManualDescriptionOverride, proposedOverride, StringComparison.Ordinal);
 
         return new InspectionCorrectionResolution
         {
@@ -363,6 +374,8 @@ public sealed class InspectionCorrectionService
             ProposedEndMeterage = proposedEndMeterage,
             ProposedMeteragePoints = proposedPoints,
             ProposedDescription = proposedDescription,
+            ProposedGeneratedDescription = proposedGenerated,
+            ProposedManualDescriptionOverride = proposedOverride,
             Target = occurrence
         };
     }
@@ -535,9 +548,24 @@ public sealed class InspectionCorrectionService
             ? null : normalized;
     }
 
-    private static string EffectiveDescription(string? description, string generatedDescription)
+    private static string GenerateDescriptionAt(Occurrence occurrence, decimal? meterage,
+        decimal? endMeterage, IReadOnlyList<decimal> meteragePoints)
     {
-        var normalized = NormalizeDescription(description, generatedDescription);
-        return string.IsNullOrWhiteSpace(normalized) ? generatedDescription : normalized;
+        var positioned = new Occurrence
+        {
+            LocationMode = occurrence.LocationMode,
+            Meterage = meterage,
+            EndMeterage = endMeterage,
+            MeteragePoints = meteragePoints.Select((value, index) => new OccurrenceMeteragePoint
+            {
+                Meterage = value,
+                Order = index
+            }).ToList(),
+            Anomalies = occurrence.Anomalies,
+            ReferencePoint = occurrence.ReferencePoint,
+            InterruptedRecording = occurrence.InterruptedRecording,
+            IsSevere = occurrence.IsSevere
+        };
+        return OccurrenceRules.GenerateDescription(positioned);
     }
 }

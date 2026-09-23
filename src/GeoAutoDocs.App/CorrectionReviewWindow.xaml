@@ -4,7 +4,7 @@
         Title="Revisar correções do GeoAutoEngine"
         Width="860" Height="680" MinWidth="680" MinHeight="520"
         WindowStartupLocation="CenterOwner"
-        Background="{StaticResource BackgroundBrush}">
+        Background="{StaticResource WindowBackgroundBrush}">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
     </Window.Resources>

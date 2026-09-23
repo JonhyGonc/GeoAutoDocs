@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -12,9 +13,12 @@ using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using GeoAutoDocs.Core;
+using GeoAutoDocs.Core.Review;
 using GeoAutoDocs.Infrastructure;
 using LibVLCSharp.Shared;
 using Microsoft.Win32;
+using Drawing = System.Drawing;
+using WinForms = System.Windows.Forms;
 
 namespace GeoAutoDocs.App;
 
@@ -31,13 +35,19 @@ public partial class MainWindow : Window
     private readonly IAnomalyCatalogService _anomalyCatalogService;
     private readonly InspectionExchangeService _inspectionExchangeService;
     private readonly IInspectionTransport _geoAutoEngineTransport;
+    private readonly IInspectionCorrectionChannel? _correctionChannel;
+    private readonly InspectionCorrectionService _correctionService = new();
+    private readonly SemaphoreSlim _correctionReviewGate = new(1, 1);
+    private readonly ReportReviewService _reportReviewService;
     private BackupStatus _backupStatus;
     private readonly LibVLC _libVlc;
     private readonly MediaPlayer _mediaPlayer;
     private readonly DispatcherTimer _saveTimer;
+    private readonly SemaphoreSlim _persistenceGate = new(1, 1);
     private readonly DispatcherTimer _syncTimer;
     private readonly DispatcherTimer _heartbeatTimer;
     private readonly DispatcherTimer _playerTimer;
+    private readonly DispatcherTimer _overviewRefreshTimer;
     private readonly ObservableCollection<Project> _projects = [];
     private Project? _currentProject;
     private Report? _currentReport;
@@ -48,19 +58,58 @@ public partial class MainWindow : Window
     private Media? _currentMedia;
     private FrameCaptureDraft? _captureDraft;
     private bool _loadingFields;
+    private bool _refreshingReportSectionSelection;
+    private bool _reportSectionBulkUpdateInProgress;
+    private readonly ObservableCollection<ReportSectionSelectionItem> _reportSectionItems = [];
     private bool _hasPendingChanges;
+    private long _pendingSaveRevision;
+    private long _reportReviewRevision;
     private bool _sharedDirty;
+    private bool _checkpointInProgress;
+    private bool _finalizationInProgress;
     private bool _closingAfterSave;
+    private bool _exitRequested;
+    private bool _hideToTrayInProgress;
+    private bool _closeToTrayEnabled = true;
+    private bool _trayNoticeShown;
+    private WinForms.NotifyIcon? _trayIcon;
+    private WinForms.ContextMenuStrip? _trayMenu;
+    private WinForms.ToolStripMenuItem? _trayPendingCapturesItem;
+    private WinForms.ToolStripMenuItem? _closeToTrayMenuItem;
+    private Drawing.Icon? _trayIconImage;
     private bool _saveErrorNotified;
+    private bool _reportDeletionInProgress;
+    private bool _reportGenerationInProgress;
+    private ReportReviewWindow? _reportReviewWindow;
+    private ReportReviewSnapshot? _reportReviewSnapshot;
+    private ReportReviewContext? _reportReviewContext;
+    private ReviewVerificationState? _reportReviewVerification;
+    private bool _reportReviewActionInProgress;
+    private CancellationTokenSource? _reportReviewCts;
     private bool _seeking;
     private bool _playerOperationInProgress;
     private bool _videoLoadInProgress;
     private bool _updatingSpeedSelection;
     private float _selectedPlaybackRate = 1f;
     private long _lastKnownPlayerTime;
-    private readonly SemaphoreSlim _videoLoadLock = new(1, 1);
+    private readonly SemaphoreSlim _playerLifecycleGate = new(1, 1);
+    private readonly BoundedAsyncExecutor _thumbnailLoadExecutor = new(3);
+    private readonly object _thumbnailCacheSync = new();
+    private readonly Dictionary<string, BitmapImage> _thumbnailCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly LinkedList<string> _thumbnailCacheOrder = [];
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _thumbnailFailures = new(StringComparer.OrdinalIgnoreCase);
+    private CancellationTokenSource? _inspectionLoadCts;
+    private CancellationTokenSource? _mediaLoadCts;
+    private long _inspectionLoadGeneration;
+    private long _mediaGeneration;
+    private long _activeMediaGeneration;
+    private long _videoSurfaceGeneration;
+    private string _inspectionLoadStage = "idle";
+    private readonly ConcurrentDictionary<string, byte> _reportedLibVlcLogs = new(StringComparer.Ordinal);
     private bool _playerErrorNotified;
+    private bool _playerTelemetryErrorNotified;
     private bool _playerDisposed;
+    private bool _playerDisposeInProgress;
     private bool _captureInProgress;
     private bool _loadingInspections;
     private bool _sectionReviewInProgress;
@@ -71,10 +120,13 @@ public partial class MainWindow : Window
     private bool _inspectionLayoutReady;
     private bool _inspectionSideVisible = true;
     private bool _videoFocusMode;
-    private double _inspectionSideWidth = 420;
+    private double _inspectionSideWidth = 320;
     private static string InspectionLayoutPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "GeoAutoDocs", "inspection-layout.json");
+    private static string TrayPreferencesPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "GeoAutoDocs", "tray-preferences.json");
 
     public MainWindow(IProjectStore store, WordReportService wordReportService,
         SharedProjectService sharedProjects, LocalLogger logger, FrameCaptureService frameCaptureService,
@@ -88,46 +140,62 @@ public partial class MainWindow : Window
         _wordReportService = wordReportService;
         _sharedProjects = sharedProjects;
         _logger = logger;
+        _reportReviewService = new ReportReviewService(
+            ReportReviewRules.CreateDefault(), new LocalReportReviewLogger(logger));
+        LoadTrayPreferences();
+        InitializeTrayIcon();
         _frameCaptureService = frameCaptureService;
         _occurrenceService = occurrenceService;
         _anomalyCatalogService = anomalyCatalogService;
         _inspectionExchangeService = inspectionExchangeService;
         _geoAutoEngineTransport = geoAutoEngineTransport;
+        _correctionChannel = geoAutoEngineTransport as IInspectionCorrectionChannel;
+        _correctionChannel?.SetCorrectionHandler(ReceiveCorrectionsAsync);
         _backupStatus = backupStatus;
         LibVLCSharp.Shared.Core.Initialize();
-        _libVlc = new LibVLC("--no-video-title-show", "--quiet", "--no-audio");
+        _libVlc = new LibVLC(MediaPlaybackSafety.LibVlcOptions.ToArray());
+        _libVlc.Log += OnLibVlcLog;
         _mediaPlayer = new MediaPlayer(_libVlc);
         VideoView.MediaPlayer = _mediaPlayer;
         CaptureFrameOverlayButton.Visibility = Visibility.Collapsed;
         CaptureFrameButton.Visibility = Visibility.Visible;
         CaptureFrameButton.Content = "Capturar evidência";
         RefreshBackupStatus();
-        _mediaPlayer.EncounteredError += (_, _) => Dispatcher.BeginInvoke(() => HandlePlayerError());
-        _mediaPlayer.Playing += (_, _) => Dispatcher.BeginInvoke(() =>
+        _mediaPlayer.EncounteredError += (_, _) =>
         {
-            VideoEmptyState.Visibility = Visibility.Collapsed;
-            VideoLoadedBadge.Visibility = Visibility.Visible;
-            UpdatePlayerControlState();
-            if (!TryApplyPlaybackRate(_selectedPlaybackRate))
+            var generation = Volatile.Read(ref _activeMediaGeneration);
+            QueuePlayerUiUpdate(generation, HandlePlayerError);
+        };
+        _mediaPlayer.Playing += (_, _) =>
+        {
+            var generation = Volatile.Read(ref _activeMediaGeneration);
+            Dispatcher.BeginInvoke(new Action(async () =>
             {
-                var rejectedRate = _selectedPlaybackRate;
-                _selectedPlaybackRate = 1f;
-                TryApplyPlaybackRate(1f);
-                SelectSpeed(1f);
-                MessageBox.Show($"O formato deste vídeo não aceita {rejectedRate:0.##}x. A velocidade voltou para 1,0x.",
-                    "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Warning);
-            }
-            PlayPauseButton.Content = "❚❚";
-        });
-        _mediaPlayer.Paused += (_, _) => Dispatcher.BeginInvoke(() => PlayPauseButton.Content = "▶");
-        _mediaPlayer.Stopped += (_, _) => Dispatcher.BeginInvoke(() => PlayPauseButton.Content = "▶");
-        _mediaPlayer.EndReached += (_, _) => Dispatcher.BeginInvoke(() =>
+                try { await HandlePlayerPlayingAsync(generation); }
+                catch (Exception ex) { LogPlayerControlFailure("callback Playing", ex); }
+            }));
+        };
+        _mediaPlayer.Paused += (_, _) =>
         {
-            _lastKnownPlayerTime = Math.Max(_lastKnownPlayerTime, Math.Max(0, _mediaPlayer.Length));
-            PlayPauseButton.Content = "▶";
-            RefreshPlayerPosition();
-        });
+            var generation = Volatile.Read(ref _activeMediaGeneration);
+            QueuePlayerUiUpdate(generation, () => PlayPauseButton.Content = "▶");
+        };
+        _mediaPlayer.Stopped += (_, _) =>
+        {
+            var generation = Volatile.Read(ref _activeMediaGeneration);
+            QueuePlayerUiUpdate(generation, () => PlayPauseButton.Content = "▶");
+        };
+        _mediaPlayer.EndReached += (_, _) =>
+        {
+            var generation = Volatile.Read(ref _activeMediaGeneration);
+            Dispatcher.BeginInvoke(new Action(async () =>
+            {
+                try { await HandlePlayerEndedAsync(generation); }
+                catch (Exception ex) { LogPlayerControlFailure("callback EndReached", ex); }
+            }));
+        };
         ProjectsList.ItemsSource = _projects;
+        ReportSectionsList.ItemsSource = _reportSectionItems;
         _saveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
         _saveTimer.Tick += async (_, _) => { _saveTimer.Stop(); await SavePendingAsync(); };
         _syncTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
@@ -137,6 +205,23 @@ public partial class MainWindow : Window
         _playerTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         _playerTimer.Tick += (_, _) => RefreshPlayerPosition();
         _playerTimer.Start();
+        _overviewRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        _overviewRefreshTimer.Tick += (_, _) =>
+        {
+            _overviewRefreshTimer.Stop();
+            var watch = Stopwatch.StartNew();
+            try
+            {
+                RefreshOverview();
+                _logger.Info($"RefreshOverview adiado concluido. Tempo={watch.ElapsedMilliseconds}ms; " +
+                             $"MemoriaGerenciada={GC.GetTotalMemory(false)}; WorkingSet={Environment.WorkingSet}.");
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"Falha no RefreshOverview adiado. Tempo={watch.ElapsedMilliseconds}ms; " +
+                              $"MemoriaGerenciada={GC.GetTotalMemory(false)}; WorkingSet={Environment.WorkingSet}.", ex);
+            }
+        };
         SizeChanged += (_, _) => { ApplyDashboardDensity(); ApplyInspectionLayout(); };
         Loaded += async (_, _) => await ReloadProjectsAsync();
         ContentRendered += (_, _) => _logger.Info("Janela principal exibida.");
@@ -146,6 +231,238 @@ public partial class MainWindow : Window
         ApplyInspectionLayout();
     }
 
+    private void QueuePlayerUiUpdate(long generation, Action update)
+    {
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (_playerDisposed || generation <= 0 ||
+                generation != Volatile.Read(ref _activeMediaGeneration)) return;
+            try { update(); }
+            catch (Exception ex) { LogPlayerControlFailure("atualização de estado", ex); }
+        }));
+    }
+
+    private async Task HandlePlayerPlayingAsync(long generation)
+    {
+        if (_playerDisposed || generation <= 0) return;
+        await _playerLifecycleGate.WaitAsync();
+        float? rejectedRate = null;
+        try
+        {
+            if (_playerDisposed || _currentMedia is null ||
+                generation != Volatile.Read(ref _activeMediaGeneration)) return;
+            VideoEmptyState.Visibility = Visibility.Collapsed;
+            VideoLoadedBadge.Visibility = Visibility.Visible;
+            UpdatePlayerControlState();
+            if (!TryApplyPlaybackRate(_selectedPlaybackRate))
+            {
+                rejectedRate = _selectedPlaybackRate;
+                _selectedPlaybackRate = 1f;
+                TryApplyPlaybackRate(1f);
+                SelectSpeed(1f);
+            }
+            PlayPauseButton.Content = "❚❚";
+        }
+        finally { _playerLifecycleGate.Release(); }
+
+        if (rejectedRate is not null)
+            MessageBox.Show($"O formato deste vídeo não aceita {rejectedRate:0.##}x. A velocidade voltou para 1,0x.",
+                "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+
+    private async Task HandlePlayerEndedAsync(long generation)
+    {
+        if (_playerDisposed || generation <= 0) return;
+        await _playerLifecycleGate.WaitAsync();
+        try
+        {
+            if (_playerDisposed || _currentMedia is null ||
+                generation != Volatile.Read(ref _activeMediaGeneration)) return;
+            _lastKnownPlayerTime = Math.Max(_lastKnownPlayerTime, Math.Max(0, _mediaPlayer.Length));
+            PlayPauseButton.Content = "▶";
+            RefreshPlayerPositionUnsafe();
+        }
+        finally { _playerLifecycleGate.Release(); }
+    }
+
+    private void OnLibVlcLog(object? sender, LogEventArgs e)
+    {
+        if (e.Level < LogLevel.Warning) return;
+        var message = e.Message.Length <= 800 ? e.Message : e.Message[..800];
+        var path = _currentVideo?.FilePath ?? "(nenhum)";
+        var key = $"{path}|{e.Level}|{e.Module}|{message}";
+        if (!_reportedLibVlcLogs.TryAdd(key, 0)) return;
+        _logger.Error(
+            $"LibVLC nativo. Nivel={e.Level}; Modulo='{e.Module ?? "desconhecido"}'; Caminho='{path}'.",
+            new IOException(message));
+    }
+
+    private void LogPlayerControlFailure(string operation, Exception exception)
+    {
+        if (_playerDisposed) return;
+        _logger.Error($"Falha durante {operation} do player. Caminho='{_currentVideo?.FilePath}'.", exception);
+    }
+
+    private void LoadTrayPreferences()
+    {
+        try
+        {
+            if (!File.Exists(TrayPreferencesPath)) return;
+            var preferences = JsonSerializer.Deserialize<TrayPreferences>(
+                File.ReadAllText(TrayPreferencesPath));
+            if (preferences is null) return;
+            _closeToTrayEnabled = preferences.CloseToTray;
+            _trayNoticeShown = preferences.NoticeShown;
+        }
+        catch (Exception ex)
+        {
+            _logger.Info($"Preferências da bandeja ignoradas: {ex.Message}");
+        }
+    }
+
+    private void SaveTrayPreferences()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(TrayPreferencesPath)!);
+            File.WriteAllText(TrayPreferencesPath, JsonSerializer.Serialize(
+                new TrayPreferences(_closeToTrayEnabled, _trayNoticeShown)));
+        }
+        catch (Exception ex)
+        {
+            _logger.Info($"Não foi possível salvar as preferências da bandeja: {ex.Message}");
+        }
+    }
+
+    private void InitializeTrayIcon()
+    {
+        try
+        {
+            var resource = System.Windows.Application.GetResourceStream(
+                new Uri("pack://application:,,,/Assets/GeoAutoDocs.ico"));
+            if (resource?.Stream is not null)
+            {
+                using (resource.Stream)
+                using (var sourceIcon = new Drawing.Icon(resource.Stream))
+                    _trayIconImage = (Drawing.Icon)sourceIcon.Clone();
+            }
+            _trayIconImage ??= new Drawing.Icon(Drawing.SystemIcons.Application, 32, 32);
+
+            var openItem = new WinForms.ToolStripMenuItem("Abrir GeoAutoDocs");
+            openItem.Click += (_, _) => Dispatcher.BeginInvoke(new Action(RestoreFromTray));
+
+            _trayPendingCapturesItem = new WinForms.ToolStripMenuItem("Capturas pendentes")
+            {
+                Enabled = false
+            };
+            _trayPendingCapturesItem.Click += (_, _) => Dispatcher.BeginInvoke(new Action(() =>
+            {
+                RestoreFromTray();
+                OpenPendingCaptures_Click(this, new RoutedEventArgs());
+            }));
+
+            _closeToTrayMenuItem = new WinForms.ToolStripMenuItem("Fechar para a bandeja")
+            {
+                CheckOnClick = true,
+                Checked = _closeToTrayEnabled
+            };
+            _closeToTrayMenuItem.CheckedChanged += (_, _) => Dispatcher.BeginInvoke(new Action(() =>
+            {
+                _closeToTrayEnabled = _closeToTrayMenuItem.Checked;
+                SaveTrayPreferences();
+                _logger.Info($"Fechar para a bandeja alterado. Ativo={_closeToTrayEnabled}.");
+            }));
+
+            var exitItem = new WinForms.ToolStripMenuItem("Sair");
+            exitItem.Click += (_, _) => Dispatcher.BeginInvoke(new Action(RequestApplicationExit));
+
+            _trayMenu = new WinForms.ContextMenuStrip();
+            _trayMenu.Items.Add(openItem);
+            _trayMenu.Items.Add(_trayPendingCapturesItem);
+            _trayMenu.Items.Add(new WinForms.ToolStripSeparator());
+            _trayMenu.Items.Add(_closeToTrayMenuItem);
+            _trayMenu.Items.Add(new WinForms.ToolStripSeparator());
+            _trayMenu.Items.Add(exitItem);
+
+            _trayIcon = new WinForms.NotifyIcon
+            {
+                Icon = _trayIconImage,
+                Text = "GeoAutoDocs — clique duas vezes para abrir",
+                ContextMenuStrip = _trayMenu,
+                Visible = true
+            };
+            _trayIcon.DoubleClick += (_, _) => Dispatcher.BeginInvoke(new Action(RestoreFromTray));
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Não foi possível criar o ícone da bandeja.", ex);
+            DisposeTrayIcon();
+        }
+    }
+
+    private async Task<bool> HideToTrayAsync()
+    {
+        _saveTimer.Stop();
+        if (_hasPendingChanges && !await SavePendingAsync())
+        {
+            SaveStatus.Text = "Não foi possível ocultar — alterações ainda não foram salvas";
+            return false;
+        }
+
+        if (_mediaPlayer.IsPlaying) _mediaPlayer.Pause();
+        _reportReviewWindow?.Hide();
+        ShowInTaskbar = false;
+        Hide();
+        _logger.Info("Janela principal ocultada na bandeja do Windows.");
+
+        if (!_trayNoticeShown && _trayIcon is not null)
+        {
+            _trayNoticeShown = true;
+            SaveTrayPreferences();
+            _trayIcon.ShowBalloonTip(4000, "GeoAutoDocs continua aberto",
+                "Clique duas vezes no ícone para reabrir ou use “Sair” para encerrar.",
+                WinForms.ToolTipIcon.Info);
+        }
+
+        return true;
+    }
+
+    private void RestoreFromTray()
+    {
+        if (_closingAfterSave || _playerDisposed) return;
+        ShowInTaskbar = true;
+        Show();
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
+        Focus();
+        _logger.Info("Janela principal restaurada a partir da bandeja do Windows.");
+    }
+
+    public void RequestApplicationExit()
+    {
+        _exitRequested = true;
+        RestoreFromTray();
+        Close();
+    }
+
+    public void PrepareForSystemShutdown() => _exitRequested = true;
+
+    private void DisposeTrayIcon()
+    {
+        if (_trayIcon is not null)
+        {
+            _trayIcon.Visible = false;
+            _trayIcon.Dispose();
+            _trayIcon = null;
+        }
+        _trayMenu?.Dispose();
+        _trayMenu = null;
+        _trayPendingCapturesItem = null;
+        _closeToTrayMenuItem = null;
+        _trayIconImage?.Dispose();
+        _trayIconImage = null;
+    }
+
     private void LoadInspectionLayoutPreferences()
     {
         try
@@ -153,7 +470,7 @@ public partial class MainWindow : Window
             if (!File.Exists(InspectionLayoutPath)) return;
             var value = JsonSerializer.Deserialize<InspectionLayoutPreferences>(File.ReadAllText(InspectionLayoutPath));
             if (value is null) return;
-            _inspectionSideWidth = Math.Clamp(value.SideWidth, 400, 560);
+            _inspectionSideWidth = Math.Clamp(value.SideWidth, 290, 400);
             _videoFocusMode = value.FocusMode;
             InspectionContextExpander.IsExpanded = value.ContextExpanded;
         }
@@ -181,7 +498,7 @@ public partial class MainWindow : Window
         InspectionSideSplitter.Visibility = showSide ? Visibility.Visible : Visibility.Collapsed;
         InspectionSplitterColumn.Width = showSide ? new GridLength(6) : new GridLength(0);
         var responsiveWidth = ActualWidth > 0 && ActualWidth < 1100
-            ? Math.Min(_inspectionSideWidth, 400) : _inspectionSideWidth;
+            ? Math.Min(_inspectionSideWidth, 300) : _inspectionSideWidth;
         InspectionSideColumn.Width = showSide ? new GridLength(responsiveWidth) : new GridLength(0);
         FocusVideoButton.Content = _videoFocusMode ? "Sair do modo foco" : "Modo foco";
     }
@@ -203,7 +520,8 @@ public partial class MainWindow : Window
 
     private void InspectionSideSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
     {
-        if (InspectionSideColumn.ActualWidth >= 380) _inspectionSideWidth = InspectionSideColumn.ActualWidth;
+        if (InspectionSideColumn.ActualWidth >= 290)
+            _inspectionSideWidth = Math.Clamp(InspectionSideColumn.ActualWidth, 290, 400);
         SaveInspectionLayoutPreferences();
     }
 
@@ -389,17 +707,18 @@ public partial class MainWindow : Window
     {
         var compact = ActualWidth > 0 && ActualWidth < 1100;
         var compactEditor = ActualWidth > 0 && ActualWidth < 1050;
-        EditorView.Margin = compactEditor ? new Thickness(8, 10, 8, 8) : new Thickness(16, 14, 18, 10);
+        EditorView.Margin = compactEditor ? new Thickness(8, 8, 8, 6) : new Thickness(22, 12, 20, 10);
         BackToProjectsText.Visibility = compactEditor ? Visibility.Collapsed : Visibility.Visible;
         ShareProjectText.Visibility = compactEditor ? Visibility.Collapsed : Visibility.Visible;
+        SaveProjectText.Visibility = compactEditor ? Visibility.Collapsed : Visibility.Visible;
         StorageStatus.Visibility = compactEditor ? Visibility.Collapsed : Visibility.Visible;
-        var padding = compact ? new Thickness(8, 16, 8, 16) : new Thickness(18, 16, 18, 16);
+        var padding = compact ? new Thickness(8, 14, 8, 14) : new Thickness(16, 14, 16, 14);
         foreach (var card in new[] { TotalProjectsCard, TotalReportsCard, InProgressReportsCard, SharedProjectsCard })
             card.Padding = padding;
         foreach (var column in new[] { TotalProjectsIconColumn, TotalReportsIconColumn, InProgressReportsIconColumn, SharedProjectsIconColumn })
-            column.Width = new GridLength(compact ? 44 : 54);
+            column.Width = new GridLength(compact ? 38 : 42);
         foreach (var label in new[] { TotalProjectsLabel, TotalReportsLabel, InProgressReportsLabel, SharedProjectsLabel })
-            label.FontSize = compact ? 9.5 : 13;
+            label.FontSize = compact ? 9.5 : 11;
         foreach (var detail in new[] { TotalProjectsDetail, TotalReportsDetail, InProgressReportsDetail, SharedProjectsDetail })
             detail.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
         ProjectsHeaderGrid.RowDefinitions[1].Height = compact ? GridLength.Auto : new GridLength(0);
@@ -451,6 +770,7 @@ public partial class MainWindow : Window
             NewProjectView.Visibility = Visibility.Collapsed;
             HomeShell.Visibility = Visibility.Collapsed;
             EditorView.Visibility = Visibility.Visible;
+            UpdateSidebarNavigation();
             SetSharedTimers(_sharedSession is { IsReadOnly: false });
         }
         catch (OperationCanceledException) { }
@@ -557,20 +877,92 @@ public partial class MainWindow : Window
         _projectDialogProjectId = null;
     }
 
+    private async void SaveProject_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null || IsReadOnly || _finalizationInProgress) return;
+
+        _saveTimer.Stop();
+        SaveProjectButton.IsEnabled = false;
+        SaveProjectText.Text = "Salvando...";
+        SaveStatus.Text = "Salvando...";
+        UpdateSectionReviewState();
+
+        try
+        {
+            if (await SavePendingAsync())
+            {
+                SaveStatus.Text = "✓ Projeto salvo";
+                _logger.Info($"Projeto '{_currentProject.Name}' salvo manualmente.");
+            }
+        }
+        finally
+        {
+            SaveProjectText.Text = "Salvar projeto";
+            SaveProjectButton.IsEnabled = _currentProject is not null && !IsReadOnly &&
+                                          !_finalizationInProgress;
+        }
+    }
+
     private async void Back_Click(object sender, RoutedEventArgs e)
     {
         if (!await FinalizeCurrentProjectAsync()) return;
-        StopAndReleaseCurrentMedia();
+        await StopAndReleaseCurrentMediaAsync();
+        ResetReportReviewState();
         _currentProject = null; _currentReport = null; _sharedSession = null;
         EditorView.Visibility = Visibility.Collapsed;
         HomeShell.Visibility = Visibility.Visible;
         NewProjectView.Visibility = Visibility.Collapsed;
         ProjectsView.Visibility = Visibility.Visible;
+        UpdateSidebarNavigation();
         await ReloadProjectsAsync();
+    }
+
+    private void SidebarProjects_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is not null && EditorView.Visibility == Visibility.Visible)
+            OverviewTab.IsSelected = true;
+        UpdateSidebarNavigation();
+    }
+
+    private void SidebarInspection_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null) return;
+        InspectionsTab.IsSelected = true;
+        UpdateSidebarNavigation();
+    }
+
+    private void SidebarReports_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null) return;
+        WordConfigTab.IsSelected = true;
+        UpdateSidebarNavigation();
+    }
+
+    private void UpdateSidebarNavigation()
+    {
+        if (SidebarProjectsButton is null || SidebarInspectionButton is null || SidebarReportsButton is null ||
+            SidebarReviewButton is null || OverviewTab is null || InspectionsTab is null || WordConfigTab is null)
+            return;
+        var projectOpen = _currentProject is not null && EditorView.Visibility == Visibility.Visible;
+        var reviewActive = _reportReviewWindow?.IsVisible == true;
+        SidebarInspectionButton.IsEnabled = projectOpen;
+        SidebarReportsButton.IsEnabled = projectOpen;
+        SidebarReviewButton.IsEnabled = projectOpen;
+
+        var projectsActive = !reviewActive && (!projectOpen || OverviewTab.IsSelected);
+        SidebarProjectsButton.Style = (Style)FindResource(
+            projectsActive ? "SidebarItemActiveStyle" : "SidebarItemStyle");
+        SidebarInspectionButton.Style = (Style)FindResource(
+            !reviewActive && projectOpen && InspectionsTab.IsSelected ? "SidebarItemActiveStyle" : "SidebarItemStyle");
+        SidebarReportsButton.Style = (Style)FindResource(
+            !reviewActive && projectOpen && WordConfigTab.IsSelected ? "SidebarItemActiveStyle" : "SidebarItemStyle");
+        SidebarReviewButton.Style = (Style)FindResource(
+            reviewActive ? "SidebarItemActiveStyle" : "SidebarItemStyle");
     }
 
     private void LoadProject(Project project)
     {
+        ResetReportReviewState();
         _loadingFields = true;
         ProjectTitle.Text = project.Name;
         ProjectClientSummary.Text = string.IsNullOrWhiteSpace(project.DefaultClient)
@@ -588,6 +980,7 @@ public partial class MainWindow : Window
             ? (_sharedSession?.IsReadOnly == true ? "Compartilhado • somente leitura" : "Compartilhado • editor com lock")
             : "Local";
         ShareProjectButton.IsEnabled = project.StorageKind == ProjectStorageKind.Local;
+        SaveProjectButton.IsEnabled = !IsReadOnly;
         NewReportButton.IsEnabled = _sharedSession?.IsReadOnly != true;
         ContinueReportButton.IsEnabled = !IsReadOnly && _currentProject is not null;
         HeaderNewReportButton.IsEnabled = _sharedSession?.IsReadOnly != true;
@@ -603,6 +996,7 @@ public partial class MainWindow : Window
         RefreshFilePreviews();
         RefreshOverview();
         OverviewTab.IsSelected = true;
+        UpdateSidebarNavigation();
         SaveStatus.Text = "✓ Salvo";
         _hasPendingChanges = false;
         _loadingFields = false;
@@ -697,7 +1091,7 @@ public partial class MainWindow : Window
         _loadingFields = false;
         LoadReport(_currentReport);
         WordConfigTab.IsSelected = true;
-        _hasPendingChanges = true;
+        MarkPendingChanges();
         await SavePendingAsync();
         ReportCodeBox.Focus();
         ReportCodeBox.SelectAll();
@@ -705,22 +1099,127 @@ public partial class MainWindow : Window
 
     private async void DeleteReport_Click(object sender, RoutedEventArgs e)
     {
-        if (_currentProject is null || _currentReport is null || IsReadOnly) return;
-        var report = _currentReport;
-        if (MessageBox.Show($"Excluir o relatório '{report.DisplayCode}'? O arquivo DOCX já gerado será preservado.",
-                "Excluir relatório", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        _currentProject.Reports.Remove(report);
-        _currentReport = _currentProject.Reports.OrderBy(x => x.Order).FirstOrDefault();
-        _loadingFields = true;
+        try
+        {
+            if (_currentReport is not null) await DeleteReportAsync(_currentReport);
+        }
+        catch (Exception ex)
+        {
+            ShowError("Não foi possível excluir o relatório.", ex);
+        }
+    }
+
+    private async void DeleteReportCard_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        try
+        {
+            if (_currentProject is null || sender is not Button { Tag: Guid reportId }) return;
+            var report = _currentProject.Reports.SingleOrDefault(x => x.Id == reportId);
+            if (report is not null) await DeleteReportAsync(report);
+        }
+        catch (Exception ex)
+        {
+            ShowError("Não foi possível excluir o relatório selecionado.", ex);
+        }
+    }
+
+    private async Task DeleteReportAsync(Report report)
+    {
+        var project = _currentProject;
+        if (project is null || _reportDeletionInProgress || !project.Reports.Contains(report)) return;
+        if (IsReadOnly)
+        {
+            MessageBox.Show("Este projeto está aberto somente para leitura. Não é possível excluir relatórios.",
+                "Excluir relatório", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (MessageBox.Show($"Excluir o relatório '{report.DisplayCode}'?\n\n" +
+                            "Os dados de preparação serão removidos do projeto. O arquivo DOCX já gerado será preservado.",
+                "Excluir relatório", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        ApplyFieldsToModel();
+        var originalIndex = project.Reports.IndexOf(report);
+        var originalSelection = _currentReport;
+        _reportDeletionInProgress = true;
+        ReportsList.IsEnabled = false;
+        NewReportButton.IsEnabled = false;
+        HeaderNewReportButton.IsEnabled = false;
+        DeleteReportButton.IsEnabled = false;
+
+        try
+        {
+            project.Reports.RemoveAt(originalIndex);
+            var remaining = project.Reports.OrderBy(x => x.Order).ToList();
+            var nextSelection = originalSelection is not null && originalSelection.Id != report.Id &&
+                                remaining.Contains(originalSelection)
+                ? originalSelection
+                : remaining.ElementAtOrDefault(Math.Min(originalIndex, Math.Max(0, remaining.Count - 1)));
+            RefreshReportListSelection(nextSelection);
+            DeleteReportButton.IsEnabled = false;
+
+            MarkPendingChanges();
+            if (await SavePendingAsync())
+            {
+                _logger.Info($"Relatório excluído. ProjetoId='{project.Id}'; RelatórioId='{report.Id}'; " +
+                             $"Código='{report.DisplayCode}'; ArquivoGeradoPreservado='{report.GeneratedReportPath}'.");
+                return;
+            }
+
+            project.Reports.Insert(Math.Min(originalIndex, project.Reports.Count), report);
+            RefreshReportListSelection(originalSelection ?? report);
+            MarkPendingChanges();
+            _logger.Info($"Exclusão do relatório revertida após falha de salvamento. " +
+                         $"ProjetoId='{project.Id}'; RelatórioId='{report.Id}'.");
+            MessageBox.Show("A exclusão não foi concluída porque o projeto não pôde ser salvo. " +
+                            "O relatório foi restaurado na lista.",
+                "Excluir relatório", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        catch
+        {
+            if (!project.Reports.Contains(report))
+                project.Reports.Insert(Math.Min(originalIndex, project.Reports.Count), report);
+            RefreshReportListSelection(originalSelection ?? report);
+            MarkPendingChanges();
+            throw;
+        }
+        finally
+        {
+            _reportDeletionInProgress = false;
+            ReportsList.IsEnabled = true;
+            var canEdit = _currentProject is not null && !IsReadOnly;
+            NewReportButton.IsEnabled = canEdit;
+            HeaderNewReportButton.IsEnabled = canEdit;
+            DeleteReportButton.IsEnabled = canEdit && _currentReport is not null;
+        }
+    }
+
+    private void RefreshReportListSelection(Report? selectedReport)
+    {
+        if (_currentProject is null) return;
         var reports = _currentProject.Reports.OrderBy(x => x.Order).ToList();
-        ReportsCombo.ItemsSource = reports;
-        ReportsList.ItemsSource = reports;
-        ReportsCombo.SelectedItem = _currentReport;
-        ReportsList.SelectedItem = _currentReport;
-        ReportsEmptyState.Visibility = reports.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        _loadingFields = false;
+        _currentReport = selectedReport is not null && reports.Contains(selectedReport)
+            ? selectedReport
+            : reports.FirstOrDefault();
+
+        _loadingFields = true;
+        try
+        {
+            ReportsCombo.ItemsSource = reports;
+            ReportsList.ItemsSource = reports;
+            ReportsCombo.SelectedItem = _currentReport;
+            ReportsList.SelectedItem = _currentReport;
+            ReportsEmptyState.Visibility = reports.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        finally
+        {
+            _loadingFields = false;
+        }
+
         LoadReport(_currentReport);
-        await SaveInspectionChangesAsync();
+        RefreshOverview();
     }
 
     private void ContinueInspection_Click(object sender, RoutedEventArgs e) => InspectionsTab.IsSelected = true;
@@ -749,7 +1248,7 @@ public partial class MainWindow : Window
     private void FieldChanged(object sender, RoutedEventArgs e)
     {
         if (_loadingFields || _currentProject is null || _sharedSession?.IsReadOnly == true) return;
-        _hasPendingChanges = true;
+        MarkPendingChanges();
         SaveStatus.Text = "Salvando...";
         if (sender == OpeningCheck || sender == GprCheck) RefreshDevelopmentImageSummary();
         _saveTimer.Stop(); _saveTimer.Start();
@@ -790,49 +1289,98 @@ public partial class MainWindow : Window
     private async Task<bool> SavePendingAsync()
     {
         _saveTimer.Stop();
-        if (!_hasPendingChanges || _currentProject is null || _sharedSession?.IsReadOnly == true)
-            return !_saveErrorNotified;
+        await _persistenceGate.WaitAsync();
         try
         {
-            ApplyFieldsToModel();
-            await _store.SaveAsync(_currentProject);
-            if (_sharedSession is not null) { await _sharedSession.SaveLocalAsync(); _sharedDirty = true; }
-            _hasPendingChanges = false;
-            _saveErrorNotified = false;
-            RefreshHomeStatus();
-            ProjectClientSummary.Text = string.IsNullOrWhiteSpace(_currentProject.DefaultClient)
-                ? "Dados do cliente ainda não informados" : _currentProject.DefaultClient;
-            ActiveReportTitle.Text = _currentReport?.DisplayCode ?? "Selecione um relatório";
-            ReportsList.Items.Refresh();
-            RefreshOverview();
-            RefreshReportReview();
-            SaveStatus.Text = "✓ Salvo";
-            UpdateSectionReviewState();
-            return true;
+            if (!_hasPendingChanges || _currentProject is null || _sharedSession?.IsReadOnly == true)
+                return !_saveErrorNotified;
+            try
+            {
+                do
+                {
+                    var saveRevision = _pendingSaveRevision;
+                    ApplyFieldsToModel();
+                    await _store.SaveAsync(_currentProject);
+                    if (_sharedSession is not null)
+                    {
+                        await _sharedSession.SaveLocalAsync();
+                        _sharedDirty = true;
+                    }
+                    _hasPendingChanges = _pendingSaveRevision != saveRevision;
+                }
+                while (_hasPendingChanges);
+
+                _saveErrorNotified = false;
+                RefreshHomeStatus();
+                ProjectClientSummary.Text = string.IsNullOrWhiteSpace(_currentProject.DefaultClient)
+                    ? "Dados do cliente ainda não informados" : _currentProject.DefaultClient;
+                ActiveReportTitle.Text = _currentReport?.DisplayCode ?? "Selecione um relatório";
+                ReportsList.Items.Refresh();
+                RefreshOverview();
+                RefreshReportReview();
+                SaveStatus.Text = "✓ Salvo";
+                UpdateSectionReviewState();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                SaveStatus.Text = "Falha ao salvar — consulte o log";
+                UpdateSectionReviewState();
+                _logger.Error("Não foi possível salvar as alterações.", ex);
+                if (_saveErrorNotified) return false;
+                _saveErrorNotified = true;
+                RefreshHomeStatus();
+                MessageBox.Show("Não foi possível salvar as alterações. Consulte o log.",
+                    "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
+                return false;
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            SaveStatus.Text = "Falha ao salvar — consulte o log";
-            UpdateSectionReviewState();
-            _logger.Error("Não foi possível salvar as alterações.", ex);
-            if (_saveErrorNotified) return false;
-            _saveErrorNotified = true;
-            RefreshHomeStatus();
-            MessageBox.Show("Não foi possível salvar as alterações. Consulte o log.",
-                "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
-            return false;
+            _persistenceGate.Release();
         }
     }
 
     private async Task CheckpointSharedAsync()
     {
-        if (_sharedSession is null || _sharedSession.IsReadOnly || !_sharedDirty) return;
+        if (_checkpointInProgress || _finalizationInProgress ||
+            _sharedSession is null || _sharedSession.IsReadOnly || !_sharedDirty) return;
+
+        _checkpointInProgress = true;
         try
         {
-            await SavePendingAsync(); await _sharedSession.CheckpointAsync(); _sharedDirty = false;
-            SaveStatus.Text = "Sincronizado com o servidor";
+            if (!await SavePendingAsync())
+            {
+                _sharedDirty = true;
+                SaveStatus.Text = "Sincronização adiada — alterações locais não foram salvas";
+                return;
+            }
+
+            await _persistenceGate.WaitAsync();
+            try
+            {
+                if (_sharedSession is null || _sharedSession.IsReadOnly || !_sharedDirty) return;
+                await _sharedSession.CheckpointAsync();
+                _sharedDirty = _hasPendingChanges;
+                SaveStatus.Text = _sharedDirty
+                    ? "Alterações pendentes de sincronização"
+                    : "Sincronizado com o servidor";
+            }
+            finally
+            {
+                _persistenceGate.Release();
+            }
         }
-        catch (Exception ex) { SaveStatus.Text = "Servidor indisponível — alterações protegidas localmente"; _logger.Error("Falha no checkpoint compartilhado.", ex); }
+        catch (Exception ex)
+        {
+            _sharedDirty = true;
+            SaveStatus.Text = "Servidor indisponível — alterações protegidas localmente";
+            _logger.Error("Falha no checkpoint compartilhado.", ex);
+        }
+        finally
+        {
+            _checkpointInProgress = false;
+        }
     }
 
     private async Task HeartbeatAsync()
@@ -843,39 +1391,111 @@ public partial class MainWindow : Window
 
     private async Task<bool> FinalizeCurrentProjectAsync()
     {
+        if (_finalizationInProgress || _reportReviewActionInProgress) return false;
+        _finalizationInProgress = true;
+        var session = _sharedSession;
+        var restoreSharedTimers = session is { IsReadOnly: false };
+        var completed = false;
+        if (restoreSharedTimers) SetSharedTimers(false);
+
         try
         {
-            _frameCaptureService.Discard(_captureDraft);
-            _captureDraft = null;
-            StopAndReleaseCurrentMedia();
-            await SavePendingAsync();
-            if (_sharedSession is not null)
+            if (!await SavePendingAsync())
             {
-                await _sharedSession.CloseAsync();
+                SaveStatus.Text = "Fechamento cancelado — alterações ainda não foram salvas";
+                return false;
+            }
+
+            if (session is not null)
+            {
+                await session.CloseAsync();
                 _sharedDirty = false;
             }
+
+            _frameCaptureService.Discard(_captureDraft);
+            _captureDraft = null;
+            await StopAndReleaseCurrentMediaAsync();
             SetSharedTimers(false);
+            completed = true;
             return true;
         }
         catch (Exception ex)
         {
-            ShowError("A sincronização final falhou. O cache local foi preservado.", ex);
+            _sharedDirty = _hasPendingChanges || session is { IsReadOnly: false, IsClosed: false };
+            ShowError("A sincronização final falhou. O projeto permanece aberto.", ex);
             return false;
+        }
+        finally
+        {
+            if (!completed && restoreSharedTimers && session is { IsClosed: false })
+                SetSharedTimers(true);
+            _finalizationInProgress = false;
         }
     }
 
     private async void OnClosing(object? sender, CancelEventArgs e)
     {
         SaveInspectionLayoutPreferences();
-        if (_closingAfterSave || (_currentProject is null && !_hasPendingChanges))
+        if (_closingAfterSave && _playerDisposed)
         {
-            DisposePlayer();
+            DisposeTrayIcon();
             return;
         }
+
         e.Cancel = true;
-        if (!await FinalizeCurrentProjectAsync()) return;
-        _closingAfterSave = true;
-        _ = Dispatcher.BeginInvoke(Close);
+        if (_playerDisposeInProgress || _finalizationInProgress || _hideToTrayInProgress) return;
+
+        if (!_exitRequested && _closeToTrayEnabled && _trayIcon is not null)
+        {
+            _hideToTrayInProgress = true;
+            try
+            {
+                if (!await HideToTrayAsync())
+                {
+                    ShowInTaskbar = true;
+                    Show();
+                    Activate();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("Falha ao ocultar o GeoAutoDocs na bandeja.", ex);
+                ShowInTaskbar = true;
+                Show();
+                Activate();
+                MessageBox.Show("Não foi possível enviar o GeoAutoDocs para a bandeja. Consulte o log.",
+                    "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                _hideToTrayInProgress = false;
+            }
+            return;
+        }
+
+        _reportReviewCts?.Cancel();
+        try
+        {
+            if ((_currentProject is not null || _hasPendingChanges) &&
+                !await FinalizeCurrentProjectAsync())
+            {
+                _exitRequested = false;
+                return;
+            }
+            if (_correctionChannel is not null)
+                await _correctionChannel.StopCorrectionSessionAsync();
+            await DisposePlayerAsync();
+            _closingAfterSave = true;
+            DisposeTrayIcon();
+            _ = Dispatcher.BeginInvoke(Close);
+        }
+        catch (Exception ex)
+        {
+            _exitRequested = false;
+            _logger.Error("Falha ao finalizar o player durante o fechamento.", ex);
+            MessageBox.Show("Não foi possível concluir o fechamento com segurança. Consulte o log.",
+                "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private async void ShareProject_Click(object sender, RoutedEventArgs e)
@@ -883,15 +1503,59 @@ public partial class MainWindow : Window
         if (_currentProject is null) return;
         var dialog = new OpenFolderDialog { Title = "Selecione a pasta do projeto compartilhado", Multiselect = false };
         if (dialog.ShowDialog(this) != true) return;
+
+        var project = _currentProject;
+        var previousStorageKind = project.StorageKind;
+        var previousSharedPath = project.SharedProjectPath;
+        var previousVersion = project.ProjectDataVersion;
+        SharedProjectSession? openedSession = null;
         try
         {
             ApplyFieldsToModel();
-            _sharedSession = await _sharedProjects.OpenAsync(_currentProject, dialog.FolderName);
-            _currentProject = _sharedSession.Project;
-            await _store.SaveAsync(_currentProject);
-            LoadProject(_currentProject); SetSharedTimers(true);
+            if (!await SavePendingAsync()) return;
+            openedSession = await _sharedProjects.OpenAsync(project, dialog.FolderName);
+            await _store.SaveAsync(openedSession.Project);
+            _sharedSession = openedSession;
+            _currentProject = openedSession.Project;
+            LoadProject(_currentProject);
+            SetSharedTimers(true);
         }
-        catch (Exception ex) { ShowError("Não foi possível compartilhar o projeto.", ex); }
+        catch (Exception ex)
+        {
+            SetSharedTimers(false);
+            var sessionReleased = openedSession is null;
+            if (openedSession is { IsClosed: false })
+            {
+                try
+                {
+                    await openedSession.AbandonAsync();
+                    sessionReleased = true;
+                }
+                catch (Exception releaseError)
+                {
+                    _logger.Error("Falha ao liberar lock após compartilhamento incompleto.", releaseError);
+                }
+            }
+
+            if (sessionReleased)
+            {
+                project.StorageKind = previousStorageKind;
+                project.SharedProjectPath = previousSharedPath;
+                project.ProjectDataVersion = previousVersion;
+                _sharedSession = null;
+                _currentProject = project;
+                _sharedDirty = false;
+            }
+            else
+            {
+                _sharedSession = openedSession;
+                _currentProject = openedSession!.Project;
+                _sharedDirty = true;
+                LoadProject(_currentProject);
+                SetSharedTimers(true);
+            }
+            ShowError("Não foi possível compartilhar o projeto.", ex);
+        }
     }
 
     private void SetSharedTimers(bool enabled)
@@ -994,21 +1658,83 @@ public partial class MainWindow : Window
 
     private async void GenerateReport_Click(object sender, RoutedEventArgs e)
     {
-        if (_currentProject is null || _currentReport is null) return;
-        ApplyFieldsToModel();
-        await SavePendingAsync();
+        if (_currentProject is null || _currentReport is null || _reportGenerationInProgress ||
+            _reportReviewCts is not null || _reportReviewActionInProgress)
+            return;
+
+        _reportGenerationInProgress = true;
+        _saveTimer.Stop();
+        var originalButtonContent = GenerateReportButton.Content;
+        GenerateReportButton.IsEnabled = false;
+        EditorView.IsEnabled = false;
         try
         {
-            var validation = _wordReportService.Validate(_currentProject, _currentReport);
-            RefreshReportReview(validation);
-            if (validation.Errors.Count > 0 || validation.Warnings.Count > 0)
+            ApplyFieldsToModel();
+            var approvedReview = await ApproveReviewForGenerationAsync();
+            if (approvedReview is null) return;
+
+            GenerateReportButton.Content = "Salvando...";
+            if (!await SavePendingAsync()) return;
+
+            var finalDecision = EvaluateCurrentReviewForGeneration(warningsAccepted: true);
+            if (finalDecision != ReportGenerationReviewDecision.AllowGeneration)
             {
-                var validationWindow = new ReportValidationWindow(validation) { Owner = this };
-                if (validationWindow.ShowDialog() != true) return;
+                _logger.Info(
+                    $"Revisão deixou de ser válida antes da geração. Decisao='{finalDecision}'.");
+                MessageBox.Show(
+                    "Os dados relevantes do relatório mudaram antes da geração. Execute a revisão novamente.",
+                    "Revisão do relatório", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var validation = _wordReportService.Validate(_currentProject, _currentReport);
+            var legacyRuleIds = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "report.required",
+                "files.references",
+                "report.coverage"
+            };
+            var structuredLegacyErrors = approvedReview.Result.Issues
+                .Where(x => legacyRuleIds.Contains(x.RuleId) &&
+                            x.Severity == ReviewSeverity.Error)
+                .Select(x => x.Description)
+                .Distinct(StringComparer.Ordinal)
+                .ToHashSet(StringComparer.Ordinal);
+            var structuredLegacyWarnings = approvedReview.Result.Issues
+                .Where(x => legacyRuleIds.Contains(x.RuleId) &&
+                            x.Severity == ReviewSeverity.Warning)
+                .Select(x => x.Description)
+                .Distinct(StringComparer.Ordinal)
+                .ToHashSet(StringComparer.Ordinal);
+            var unexpectedDefensiveErrors = validation.Errors
+                .Where(x => !structuredLegacyErrors.Contains(x))
+                .ToList();
+            var unexpectedDefensiveWarnings = validation.Warnings
+                .Where(x => !structuredLegacyWarnings.Contains(x))
+                .ToList();
+
+            if (validation.Errors.Count > 0 || unexpectedDefensiveWarnings.Count > 0)
+            {
+                var details = validation.Errors
+                    .Select(x => "Erro: " + x)
+                    .Concat(unexpectedDefensiveWarnings.Select(x => "Aviso inesperado: " + x));
+                _logger.Error(
+                    "Divergência entre a revisão estruturada e a validação defensiva. " +
+                    $"RelatorioId='{_currentReport.Id}'; " +
+                    $"ErrosDefensivos={validation.Errors.Count}; " +
+                    $"ErrosInesperados={unexpectedDefensiveErrors.Count}; " +
+                    $"AvisosInesperados={unexpectedDefensiveWarnings.Count}.",
+                    new InvalidOperationException(string.Join(" | ", details)));
+                RefreshReportReview(validation);
+                var validationWindow = new ReportValidationWindow(
+                    validation, defensiveOnly: true) { Owner = this };
+                validationWindow.ShowDialog();
+                return;
             }
 
             var reportsDirectory = Path.Combine(_currentProject.ProjectPath ?? "", "reports");
-            if (!string.IsNullOrWhiteSpace(_currentProject.ProjectPath)) Directory.CreateDirectory(reportsDirectory);
+            if (!string.IsNullOrWhiteSpace(_currentProject.ProjectPath))
+                Directory.CreateDirectory(reportsDirectory);
             var fileName = SanitizeSuggestedFileName($"{_currentReport.DisplayCode}.docx");
             var dialog = new SaveFileDialog
             {
@@ -1022,26 +1748,183 @@ public partial class MainWindow : Window
             };
             if (dialog.ShowDialog(this) != true) return;
 
+            GenerateReportButton.Content = "Gerando...";
             GeneratedReportText.Text = "Preparando relatório... Processando trechos e inserindo imagens...";
-            var path = await _wordReportService.GenerateToAsync(_currentProject, _currentReport, dialog.FileName);
-            if (_sharedSession?.IsReadOnly != true) { _hasPendingChanges = true; await SavePendingAsync(); }
-            GeneratedReportText.Text = $"✓ Relatório gerado\n{Path.GetFileName(path)}";
-            OpenReportButton.IsEnabled = true; OpenReportFolderButton.IsEnabled = true;
+            var path = await _wordReportService.GenerateToAsync(
+                _currentProject, _currentReport, dialog.FileName);
+            var persisted = true;
+            if (_sharedSession?.IsReadOnly != true)
+            {
+                MarkOperationalPendingChanges();
+                persisted = await SavePendingAsync();
+            }
+            GeneratedReportText.Text = persisted
+                ? $"✓ Relatório gerado\n{Path.GetFileName(path)}"
+                : $"⚠ Relatório gerado, mas o estado permanece pendente de salvamento\n{Path.GetFileName(path)}";
+            OpenReportButton.IsEnabled = true;
+            OpenReportFolderButton.IsEnabled = true;
             ReportsList.Items.Refresh();
             RefreshOverview();
             RefreshReportReview();
         }
         catch (InspectionExchangeExportException ex)
         {
-            if (_sharedSession?.IsReadOnly != true) { _hasPendingChanges = true; await SavePendingAsync(); }
-            GeneratedReportText.Text = $"⚠ DOCX gerado; falha no arquivo de intercâmbio\n{Path.GetFileName(ex.DocxPath)}";
+            var persisted = true;
+            if (_sharedSession?.IsReadOnly != true)
+            {
+                MarkOperationalPendingChanges();
+                persisted = await SavePendingAsync();
+            }
+            GeneratedReportText.Text = persisted
+                ? $"⚠ DOCX gerado; falha no arquivo de intercâmbio\n{Path.GetFileName(ex.DocxPath)}"
+                : $"⚠ DOCX gerado; intercâmbio falhou e o estado permanece pendente de salvamento\n{Path.GetFileName(ex.DocxPath)}";
             OpenReportButton.IsEnabled = true;
             OpenReportFolderButton.IsEnabled = true;
             ReportsList.Items.Refresh();
             RefreshOverview();
             ShowError(ex.Message, ex);
         }
-        catch (Exception ex) { GeneratedReportText.Text = "Falha ao gerar relatório."; ShowError(ex.Message, ex); }
+        catch (Exception ex)
+        {
+            GeneratedReportText.Text = "Falha ao gerar relatório.";
+            ShowError(ex.Message, ex);
+        }
+        finally
+        {
+            EditorView.IsEnabled = true;
+            GenerateReportButton.Content = originalButtonContent;
+            GenerateReportButton.IsEnabled = _currentReport is not null && !IsReadOnly;
+            _reportGenerationInProgress = false;
+            if (_hasPendingChanges && !IsReadOnly)
+            {
+                _saveTimer.Stop();
+                _saveTimer.Start();
+            }
+        }
+    }
+
+    private async Task<ReportReviewSnapshot?> ApproveReviewForGenerationAsync()
+    {
+        var forceReview = false;
+        var warningsAccepted = false;
+        while (_currentProject is not null && _currentReport is not null)
+        {
+            var decision = forceReview
+                ? ReportGenerationReviewDecision.ExecuteReview
+                : EvaluateCurrentReviewForGeneration(warningsAccepted);
+            forceReview = false;
+
+            if (decision == ReportGenerationReviewDecision.ExecuteReview)
+            {
+                GenerateReportButton.Content = "Revisando...";
+                GeneratedReportText.Text = "Revisando relatório antes da geração...";
+                var outcome = await ExecuteReportReviewAsync(showWindow: false, forGeneration: true);
+                if (outcome.Status == ReportReviewExecutionStatus.Cancelled)
+                {
+                    GeneratedReportText.Text = "Geração cancelada durante a revisão.";
+                    return null;
+                }
+                if (outcome.Status == ReportReviewExecutionStatus.Busy)
+                {
+                    GeneratedReportText.Text = "Aguarde a revisão em andamento.";
+                    return null;
+                }
+                if (outcome.Status != ReportReviewExecutionStatus.Completed ||
+                    outcome.Snapshot is null)
+                {
+                    GeneratedReportText.Text = "A revisão não pôde ser concluída.";
+                    MessageBox.Show(
+                        "Não foi possível concluir todas as verificações do relatório. " +
+                        "Consulte o log e tente novamente.",
+                        "Revisão do relatório", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return null;
+                }
+                warningsAccepted = false;
+                continue;
+            }
+
+            var snapshot = _reportReviewSnapshot;
+            if (snapshot is null) return null;
+
+            if (decision == ReportGenerationReviewDecision.BlockIncomplete)
+            {
+                var dialog = new ReportGenerationReviewDialog(
+                    ReportGenerationReviewDialogMode.Incomplete,
+                    failedRuleCount: snapshot.Result.RuleFailures.Count) { Owner = this };
+                dialog.ShowDialog();
+                switch (dialog.Choice)
+                {
+                    case ReportGenerationReviewChoice.OpenReview:
+                        GeneratedReportText.Text = "Geração bloqueada: revisão incompleta.";
+                        ShowReportReview(ReviewIssueFilter.All);
+                        return null;
+                    case ReportGenerationReviewChoice.Retry:
+                        forceReview = true;
+                        continue;
+                    default:
+                        GeneratedReportText.Text = "Geração cancelada: revisão incompleta.";
+                        return null;
+                }
+            }
+
+            if (decision == ReportGenerationReviewDecision.BlockErrors)
+            {
+                var dialog = new ReportGenerationReviewDialog(
+                    ReportGenerationReviewDialogMode.Errors,
+                    _reportReviewVerification?.BlockingErrorCount ?? snapshot.Result.ErrorCount) { Owner = this };
+                dialog.ShowDialog();
+                if (dialog.Choice == ReportGenerationReviewChoice.OpenReview)
+                {
+                    GeneratedReportText.Text = "Geração bloqueada: corrija os erros da revisão.";
+                    ShowReportReview(ReviewIssueFilter.Errors);
+                }
+                else
+                {
+                    GeneratedReportText.Text = "Geração cancelada: a revisão possui erros.";
+                }
+                return null;
+            }
+
+            if (decision == ReportGenerationReviewDecision.ConfirmWarnings)
+            {
+                var dialog = new ReportGenerationReviewDialog(
+                    ReportGenerationReviewDialogMode.Warnings,
+                    _reportReviewVerification?.UnverifiedWarningCount ?? snapshot.Result.WarningCount) { Owner = this };
+                dialog.ShowDialog();
+                switch (dialog.Choice)
+                {
+                    case ReportGenerationReviewChoice.OpenReview:
+                        GeneratedReportText.Text = "Geração pausada para revisão dos avisos.";
+                        ShowReportReview(ReviewIssueFilter.Warnings);
+                        return null;
+                    case ReportGenerationReviewChoice.GenerateAnyway:
+                        warningsAccepted = true;
+                        continue;
+                    default:
+                        GeneratedReportText.Text = "Geração cancelada pelo usuário.";
+                        return null;
+                }
+            }
+
+            return snapshot;
+        }
+
+        return null;
+    }
+
+    private ReportGenerationReviewDecision EvaluateCurrentReviewForGeneration(
+        bool warningsAccepted = false)
+    {
+        if (_currentProject is null || _currentReport is null)
+            return ReportGenerationReviewDecision.ExecuteReview;
+        return ReportGenerationReviewPolicy.Evaluate(
+            _reportReviewSnapshot,
+            _currentProject.Id,
+            _currentReport.Id,
+            _reportReviewRevision,
+            ReportReviewSelection.CreateSignature(_currentReport),
+            warningsAccepted,
+            _reportReviewVerification);
     }
 
     private async void ExportInspection_Click(object sender, RoutedEventArgs e)
@@ -1052,7 +1935,7 @@ public partial class MainWindow : Window
             if (!IsReadOnly)
             {
                 ApplyFieldsToModel();
-                await SavePendingAsync();
+                if (!await SavePendingAsync()) return;
             }
             var document = _inspectionExchangeService.Build(_currentProject, _currentReport);
             var reportsDirectory = Path.Combine(_currentProject.ProjectPath ?? "", "reports");
@@ -1094,7 +1977,12 @@ public partial class MainWindow : Window
             if (!IsReadOnly)
             {
                 ApplyFieldsToModel();
-                await SavePendingAsync();
+                if (!await SavePendingAsync())
+                {
+                    GeoAutoEngineStatusText.Text = "Envio cancelado — alterações locais não foram salvas.";
+                    GeoAutoEngineStatusText.Foreground = (System.Windows.Media.Brush)FindResource("WarningBrush");
+                    return;
+                }
             }
             var document = _inspectionExchangeService.Build(_currentProject, _currentReport);
             var result = await _geoAutoEngineTransport.SendAsync(document);
@@ -1152,7 +2040,7 @@ public partial class MainWindow : Window
         else
         {
             ApplyFieldsToModel();
-            await SavePendingAsync();
+            if (!await SavePendingAsync()) return;
         }
 
         var window = new ContinueReportWindow(_currentProject, report, _wordReportService) { Owner = this };
@@ -1190,8 +2078,8 @@ public partial class MainWindow : Window
             Status = "Concluído",
             Message = $"{result.AddedOccurrences} anomalia(s), {result.AddedEvidences} evidência(s)"
         });
-        _hasPendingChanges = true;
-        await SavePendingAsync();
+        MarkPendingChanges();
+        if (!await SavePendingAsync()) return;
         LoadReport(report);
         ReportsList.Items.Refresh();
     }
@@ -1212,22 +2100,42 @@ public partial class MainWindow : Window
 
     private void RefreshReportSectionSelection()
     {
-        if (_currentProject is null)
+        var wasRefreshing = _refreshingReportSectionSelection;
+        _refreshingReportSectionSelection = true;
+        try
         {
-            ReportSectionsList.ItemsSource = null;
-            return;
+            _reportSectionItems.Clear();
+            if (_currentProject is null)
+            {
+                UpdateReportSectionBulkButtons();
+                return;
+            }
+
+            var selectedIds = _currentReport?.SectionLinks.Select(x => x.SectionId).ToHashSet() ?? [];
+            foreach (var location in _currentProject.Locations.OrderBy(x => x.Order).ThenBy(x => x.Name))
+            foreach (var section in location.Sections.OrderBy(x => x.Order).ThenBy(x => x.Name))
+                _reportSectionItems.Add(new ReportSectionSelectionItem(
+                    section.Id, $"{location.Name} — {section.Name}", selectedIds.Contains(section.Id)));
+            UpdateReportSectionBulkButtons();
         }
-        var selectedIds = _currentReport?.SectionLinks.Select(x => x.SectionId).ToHashSet() ?? [];
-        ReportSectionsList.ItemsSource = _currentProject.Locations.OrderBy(x => x.Order).ThenBy(x => x.Name)
-            .SelectMany(location => location.Sections.OrderBy(x => x.Order).ThenBy(x => x.Name)
-                .Select(section => new ReportSectionSelectionItem(section.Id,
-                    $"{location.Name} — {section.Name}", selectedIds.Contains(section.Id))))
-            .ToList();
+        finally
+        {
+            _refreshingReportSectionSelection = wasRefreshing;
+        }
+    }
+
+    private void UpdateReportSectionBulkButtons()
+    {
+        var canChange = !_reportSectionBulkUpdateInProgress && _currentReport is not null &&
+                        _currentProject is not null && !IsReadOnly && _reportSectionItems.Count > 0;
+        SelectAllReportSectionsButton.IsEnabled = canChange && _reportSectionItems.Any(x => !x.IsSelected);
+        ClearReportSectionsButton.IsEnabled = canChange && _reportSectionItems.Any(x => x.IsSelected);
     }
 
     private void ReportSectionSelectionChanged(object sender, RoutedEventArgs e)
     {
-        if (_loadingFields || _loadingInspections || _currentProject is null || _currentReport is null || IsReadOnly ||
+        if (_loadingFields || _loadingInspections || _refreshingReportSectionSelection ||
+            _currentProject is null || _currentReport is null || IsReadOnly ||
             sender is not CheckBox { Tag: Guid sectionId } checkBox) return;
         var section = _currentProject.Locations.SelectMany(x => x.Sections).SingleOrDefault(x => x.Id == sectionId);
         if (section is null) return;
@@ -1235,27 +2143,93 @@ public partial class MainWindow : Window
         else _currentReport.SectionLinks.RemoveAll(x => x.SectionId == sectionId);
         NormalizeReportSectionOrder();
         RefreshReportReview();
+        UpdateReportSectionBulkButtons();
         ScheduleSave();
     }
 
-    private void SelectAllReportSections_Click(object sender, RoutedEventArgs e)
-    {
-        if (_currentProject is null || _currentReport is null || IsReadOnly) return;
-        foreach (var section in _currentProject.Locations.OrderBy(x => x.Order).SelectMany(x => x.Sections.OrderBy(y => y.Order)))
-            _currentReport.SelectSection(section);
-        NormalizeReportSectionOrder();
-        RefreshReportSectionSelection();
-        RefreshReportReview();
-        ScheduleSave();
-    }
+    private async void SelectAllReportSections_Click(object sender, RoutedEventArgs e) =>
+        await SetAllReportSectionsAsync(true);
 
-    private void ClearReportSections_Click(object sender, RoutedEventArgs e)
+    private async void ClearReportSections_Click(object sender, RoutedEventArgs e) =>
+        await SetAllReportSectionsAsync(false);
+
+    private async Task SetAllReportSectionsAsync(bool selected)
     {
-        if (_currentReport is null || IsReadOnly) return;
-        _currentReport.SectionLinks.Clear();
-        RefreshReportSectionSelection();
-        RefreshReportReview();
-        ScheduleSave();
+        if (_reportSectionBulkUpdateInProgress) return;
+        if (_currentProject is null || _currentReport is null)
+        {
+            MessageBox.Show("Selecione um relatório antes de alterar seus trechos.",
+                "Trechos do relatório", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (IsReadOnly)
+        {
+            MessageBox.Show("Este projeto está aberto somente para leitura.",
+                "Trechos do relatório", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var project = _currentProject;
+        var report = _currentReport;
+        var previousLinks = report.SectionLinks.ToList();
+        var previousSelection = previousLinks.Select(x => x.SectionId).ToHashSet();
+        var orderedSections = project.Locations.OrderBy(x => x.Order).ThenBy(x => x.Name)
+            .SelectMany(x => x.Sections.OrderBy(y => y.Order).ThenBy(y => y.Name))
+            .ToList();
+        var expectedCount = selected ? orderedSections.Count : 0;
+        if (report.SectionLinks.Count == expectedCount &&
+            (!selected || orderedSections.All(x => previousSelection.Contains(x.Id))))
+        {
+            RefreshReportSectionSelection();
+            return;
+        }
+
+        _reportSectionBulkUpdateInProgress = true;
+        _refreshingReportSectionSelection = true;
+        UpdateReportSectionBulkButtons();
+        try
+        {
+            ReportSectionSelection.SetAll(report, orderedSections, selected);
+            foreach (var item in _reportSectionItems)
+                item.IsSelected = selected;
+            RefreshReportReview();
+
+            MarkPendingChanges();
+            SaveStatus.Text = selected ? "Selecionando todos os trechos..." : "Limpando trechos do relatório...";
+            if (!await SavePendingAsync())
+            {
+                report.SectionLinks.Clear();
+                report.SectionLinks.AddRange(previousLinks);
+                foreach (var item in _reportSectionItems)
+                    item.IsSelected = previousSelection.Contains(item.SectionId);
+                MarkPendingChanges();
+                RefreshReportReview();
+                _logger.Info($"Seleção em massa revertida após falha de salvamento. " +
+                             $"RelatórioId='{report.Id}'; Selecionar={selected}.");
+                return;
+            }
+
+            _logger.Info(selected
+                ? $"Todos os trechos do relatório foram selecionados e persistidos. RelatórioId='{report.Id}'; Trechos={expectedCount}."
+                : $"Todos os trechos do relatório foram removidos e a alteração foi persistida. RelatórioId='{report.Id}'.");
+        }
+        catch (Exception ex)
+        {
+            report.SectionLinks.Clear();
+            report.SectionLinks.AddRange(previousLinks);
+            foreach (var item in _reportSectionItems)
+                item.IsSelected = previousSelection.Contains(item.SectionId);
+            RefreshReportReview();
+            _logger.Error("Falha ao alterar todos os trechos do relatório.", ex);
+            MessageBox.Show("Não foi possível alterar os trechos do relatório. A seleção anterior foi restaurada.",
+                "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            _refreshingReportSectionSelection = false;
+            _reportSectionBulkUpdateInProgress = false;
+            UpdateReportSectionBulkButtons();
+        }
     }
 
     private void NormalizeReportSectionOrder()
@@ -1276,8 +2250,215 @@ public partial class MainWindow : Window
 
     private bool IsReadOnly => _sharedSession?.IsReadOnly == true;
 
-    private void AnomalyCatalog_Click(object sender, RoutedEventArgs e) =>
-        new AnomalyCatalogWindow(_anomalyCatalogService, IsReadOnly) { Owner = this }.ShowDialog();
+    private Task<InspectionCorrectionAcknowledgement> ReceiveCorrectionsAsync(
+        InspectionCorrectionPackage package, CancellationToken cancellationToken)
+    {
+        if (Dispatcher.CheckAccess())
+            return ReviewAndApplyCorrectionsAsync(package, cancellationToken);
+
+        return Dispatcher.InvokeAsync(
+            () => ReviewAndApplyCorrectionsAsync(package, cancellationToken),
+            DispatcherPriority.Normal, cancellationToken).Task.Unwrap();
+    }
+
+    private async Task<InspectionCorrectionAcknowledgement> ReviewAndApplyCorrectionsAsync(
+        InspectionCorrectionPackage package, CancellationToken cancellationToken)
+    {
+        await _correctionReviewGate.WaitAsync(cancellationToken);
+        try
+        {
+            var requestedCount = package.Corrections?.Count ?? 0;
+            _logger.Info($"CorrectionPush recebido. ReportId='{package.ReportId}'; " +
+                         $"Correções={requestedCount}.");
+            RestoreFromTray();
+
+            if (_closingAfterSave || _finalizationInProgress)
+                return CorrectionFailure(package, "O GeoAutoDocs está finalizando o projeto.");
+            if (_currentProject is null)
+            {
+                MessageBox.Show("Foram recebidas correções do GeoAutoEngine, mas nenhum projeto está aberto.",
+                    "Correções do GeoAutoEngine", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return CorrectionFailure(package, "Nenhum projeto está aberto no GeoAutoDocs.");
+            }
+            if (IsReadOnly)
+            {
+                MessageBox.Show("Foram recebidas correções, mas o projeto está aberto somente para leitura.",
+                    "Correções do GeoAutoEngine", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return CorrectionFailure(package, "O projeto está aberto somente para leitura.");
+            }
+
+            InspectionCorrectionPlan plan;
+            try
+            {
+                plan = _correctionService.Prepare(_currentProject, package);
+            }
+            catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException)
+            {
+                _logger.Error("Pacote de correções rejeitado durante a validação.", ex);
+                MessageBox.Show(ex.Message, "Correções do GeoAutoEngine",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return CorrectionFailure(package, ex.Message);
+            }
+
+            if (plan.Items.Count == 0)
+            {
+                MessageBox.Show("O GeoAutoEngine enviou um pacote sem ocorrências alteradas.",
+                    "Correções do GeoAutoEngine", MessageBoxButton.OK, MessageBoxImage.Information);
+                return CorrectionFailure(package, "O pacote não contém correções.");
+            }
+
+            if (plan.Items.All(x => x.Status == InspectionCorrectionResolutionStatus.Unchanged))
+            {
+                MessageBox.Show("As correções recebidas já estão aplicadas neste projeto.",
+                    "Correções do GeoAutoEngine", MessageBoxButton.OK, MessageBoxImage.Information);
+                return CorrectionAcknowledgement(plan, "Success", 0,
+                    "Os valores recebidos já estavam atualizados.");
+            }
+
+            HideVideoSurfaceForOverlay();
+            bool approved;
+            try
+            {
+                await Dispatcher.Yield(DispatcherPriority.Render);
+                var review = new CorrectionReviewWindow(plan.Items) { Owner = this };
+                approved = review.ShowDialog() == true;
+            }
+            finally
+            {
+                RestoreVideoSurfaceAfterOverlay();
+            }
+
+            if (!approved)
+                return CorrectionAcknowledgement(plan, "Failure", 0,
+                    "As correções foram canceladas pelo usuário.", cancelled: true);
+            if (plan.ApplicableCount == 0)
+                return CorrectionAcknowledgement(plan, "Failure", 0,
+                    "Nenhuma correção válida pôde ser aplicada.");
+
+            var snapshots = _correctionService.Apply(plan);
+            MarkPendingChanges();
+            if (!await SavePendingAsync())
+            {
+                _correctionService.Rollback(snapshots);
+                MarkPendingChanges();
+                RefreshCorrectionAffectedViews(plan);
+                _logger.Info($"CorrectionPush revertido após falha de salvamento. " +
+                             $"ReportId='{package.ReportId}'; Correções={requestedCount}.");
+                return CorrectionAcknowledgement(plan, "Failure", 0,
+                    "As correções foram revertidas porque o projeto não pôde ser salvo.",
+                    saveFailed: true);
+            }
+
+            RefreshCorrectionAffectedViews(plan);
+            var status = plan.InvalidCount > 0 ? "Partial" : "Success";
+            var message = status == "Partial"
+                ? $"{snapshots.Count} correção(ões) aplicada(s); {plan.InvalidCount} item(ns) não foi(ram) localizado(s) ou validado(s)."
+                : $"{snapshots.Count} correção(ões) aplicada(s) e salva(s).";
+            _logger.Info($"Correções do GeoAutoEngine aplicadas. ReportId='{package.ReportId}'; " +
+                         $"Status='{status}'; Aplicadas={snapshots.Count}; Inválidas={plan.InvalidCount}.");
+            return CorrectionAcknowledgement(plan, status, snapshots.Count, message);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return CorrectionFailure(package, "A revisão foi cancelada porque o canal foi encerrado.");
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            _logger.Error("Falha ao revisar ou aplicar correções do GeoAutoEngine.", ex);
+            return CorrectionFailure(package, "O GeoAutoDocs falhou ao revisar ou aplicar as correções.");
+        }
+        finally
+        {
+            _correctionReviewGate.Release();
+        }
+    }
+
+    private void RefreshCorrectionAffectedViews(InspectionCorrectionPlan plan)
+    {
+        if (_currentSection is not null &&
+            plan.Items.Any(x => x.CanApply && x.Correction.SectionId == _currentSection.Id))
+            RefreshOccurrences();
+        ReportsList.Items.Refresh();
+        RefreshReportReview();
+        ScheduleOverviewRefresh();
+    }
+
+    private static InspectionCorrectionAcknowledgement CorrectionFailure(
+        InspectionCorrectionPackage package, string message) => new()
+    {
+        Accepted = false,
+        Status = "Failure",
+        Message = message,
+        RequestedCount = package.Corrections?.Count ?? 0,
+        AppliedCount = 0,
+        Results = (package.Corrections ?? []).Select(x => new InspectionCorrectionItemAcknowledgement
+        {
+            SectionId = x.SectionId,
+            OccurrenceId = x.OccurrenceId,
+            Applied = false,
+            Status = "Failure",
+            Message = message
+        }).ToList()
+    };
+
+    private static InspectionCorrectionAcknowledgement CorrectionAcknowledgement(
+        InspectionCorrectionPlan plan, string status, int appliedCount, string message,
+        bool cancelled = false, bool saveFailed = false) => new()
+    {
+        Accepted = status is "Success" or "Partial",
+        Status = status,
+        Message = message,
+        RequestedCount = plan.Items.Count,
+        AppliedCount = appliedCount,
+        Results = plan.Items.Select(item =>
+        {
+            var applied = status is "Success" or "Partial" && item.CanApply;
+            var itemStatus = applied ? "Applied" : item.Status switch
+            {
+                InspectionCorrectionResolutionStatus.Unchanged => "Unchanged",
+                InspectionCorrectionResolutionStatus.NotFound => "NotFound",
+                InspectionCorrectionResolutionStatus.Invalid => "Invalid",
+                _ when cancelled => "Cancelled",
+                _ when saveFailed => "SaveFailed",
+                _ => "NotApplied"
+            };
+            return new InspectionCorrectionItemAcknowledgement
+            {
+                SectionId = item.Correction.SectionId,
+                OccurrenceId = item.Correction.OccurrenceId,
+                Applied = applied,
+                Status = itemStatus,
+                Message = applied ? "Correção aplicada." :
+                    cancelled ? "Cancelada pelo usuário." :
+                    saveFailed && item.CanApply ? "Revertida após falha de salvamento." :
+                    item.Message
+            };
+        }).ToList()
+    };
+
+    private async void AnomalyCatalog_Click(object sender, RoutedEventArgs e)
+    {
+        if (_playerDisposed || _playerDisposeInProgress) return;
+        AnomalyCatalogButton.IsEnabled = false;
+        HideVideoSurfaceForOverlay();
+        try
+        {
+            await Dispatcher.Yield(DispatcherPriority.Render);
+            var catalog = new AnomalyCatalogWindow(_anomalyCatalogService, IsReadOnly) { Owner = this };
+            catalog.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Falha ao abrir o catálogo de anomalias.", ex);
+            MessageBox.Show("Não foi possível abrir o catálogo de anomalias. Consulte o log.",
+                "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            RestoreVideoSurfaceAfterOverlay();
+            AnomalyCatalogButton.IsEnabled = true;
+        }
+    }
 
     private void RefreshOverview()
     {
@@ -1325,6 +2506,460 @@ public partial class MainWindow : Window
         OverviewActivityEmptyState.Visibility = latestActivity.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
+    private void RefreshOverviewCounters()
+    {
+        if (_currentProject is null) return;
+        OverviewProjectName.Text = _currentProject.Name;
+        OverviewClientName.Text = string.IsNullOrWhiteSpace(_currentProject.DefaultClient)
+            ? "Cliente não informado" : _currentProject.DefaultClient;
+        OverviewReportsCount.Text = _currentProject.Reports.Count.ToString(CultureInfo.CurrentCulture);
+        OverviewSectionsCount.Text = _currentProject.Locations.Sum(x => x.Sections.Count).ToString(CultureInfo.CurrentCulture);
+        OverviewOccurrencesCount.Text = _currentProject.Locations.Sum(x => x.Sections.Sum(y => y.Occurrences.Count))
+            .ToString(CultureInfo.CurrentCulture);
+        OverviewUpdatedAt.Text = _currentProject.UpdatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
+    }
+
+    private void OpenReportReview_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null)
+            return;
+        if (_currentReport is null)
+        {
+            WordConfigTab.IsSelected = true;
+            UpdateSidebarNavigation();
+            MessageBox.Show("Crie ou selecione um relatório antes de executar a revisão.",
+                "Revisão do relatório", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        ApplyFieldsToModel();
+        var window = EnsureReportReviewWindow();
+        RefreshReportReview();
+        if (!window.IsVisible) window.Show();
+        window.Activate();
+        UpdateSidebarNavigation();
+    }
+
+    private ReportReviewWindow EnsureReportReviewWindow()
+    {
+        if (_reportReviewWindow is not null) return _reportReviewWindow;
+        var window = new ReportReviewWindow { Owner = this };
+        window.ReviewRequested += ReportReviewWindow_ReviewRequested;
+        window.CancelRequested += ReportReviewWindow_CancelRequested;
+        window.NavigateRequested += ReportReviewWindow_NavigateRequested;
+        window.VerificationRequested += ReportReviewWindow_VerificationRequested;
+        window.ResetVerificationRequested += ReportReviewWindow_ResetVerificationRequested;
+        window.RemovePendingRequested += ReportReviewWindow_RemovePendingRequested;
+        window.Closed += ReportReviewWindow_Closed;
+        _reportReviewWindow = window;
+        return window;
+    }
+
+    private async void ReportReviewWindow_ReviewRequested(object? sender, EventArgs e)
+    {
+        var outcome = await ExecuteReportReviewAsync(showWindow: true);
+        if (outcome.Status == ReportReviewExecutionStatus.Failed)
+            MessageBox.Show("Não foi possível executar a revisão. Consulte o log.",
+                "Revisão do relatório", MessageBoxButton.OK, MessageBoxImage.Error);
+    }
+
+    private void ReportReviewWindow_CancelRequested(object? sender, EventArgs e) =>
+        _reportReviewCts?.Cancel();
+
+    private async void ReportReviewWindow_NavigateRequested(
+        object? sender, ReviewIssueNavigationEventArgs e) =>
+        await NavigateToReviewIssueAsync(e.Issue);
+
+    private void ReportReviewWindow_Closed(object? sender, EventArgs e)
+    {
+        if (!ReferenceEquals(sender, _reportReviewWindow)) return;
+        _reportReviewCts?.Cancel();
+        _reportReviewWindow = null;
+        UpdateSidebarNavigation();
+    }
+
+    private async Task<ReportReviewExecutionOutcome> ExecuteReportReviewAsync(
+        bool showWindow, bool forGeneration = false)
+    {
+        if (_currentProject is null || _currentReport is null)
+            return ReportReviewExecutionOutcome.Failed();
+        if (_reportReviewCts is not null || _reportReviewActionInProgress ||
+            (_reportGenerationInProgress && !forGeneration))
+            return ReportReviewExecutionOutcome.Busy();
+
+        ApplyFieldsToModel();
+        var project = _currentProject;
+        var report = _currentReport;
+        var revision = _reportReviewRevision;
+        var sectionSelectionSignature = ReportReviewSelection.CreateSignature(report);
+        var configuredTemplate = string.IsNullOrWhiteSpace(report.TemplatePath)
+            ? _wordReportService.DefaultTemplatePath
+            : report.TemplatePath;
+        var context = new ReportReviewContext(
+            project, report, configuredTemplate, ReviewFileSystem.Instance);
+        var cancellation = new CancellationTokenSource();
+        _reportReviewCts = cancellation;
+        var reviewWatch = Stopwatch.StartNew();
+        _logger.Info($"Revisão iniciada. ProjetoId='{project.Id}'; RelatorioId='{report.Id}'; " +
+                     $"Trechos={context.SelectedSections.Count}; Ocorrencias={context.Occurrences.Count}; " +
+                     $"Evidencias={context.Evidences.Count}.");
+        var window = showWindow ? EnsureReportReviewWindow() : _reportReviewWindow;
+        window?.SetRunning(true);
+        var editorWasEnabled = EditorView.IsEnabled;
+        var resumeScheduledSave = _saveTimer.IsEnabled;
+        _saveTimer.Stop();
+        EditorView.IsEnabled = false;
+
+        try
+        {
+            var result = await Task.Run(
+                () => _reportReviewService.Review(context, cancellation.Token),
+                cancellation.Token);
+            cancellation.Token.ThrowIfCancellationRequested();
+            if (!ReferenceEquals(project, _currentProject) ||
+                !ReferenceEquals(report, _currentReport))
+                return ReportReviewExecutionOutcome.Cancelled();
+
+            var snapshot = new ReportReviewSnapshot(
+                project.Id, report.Id, revision, DateTimeOffset.Now, result)
+            {
+                SectionSelectionSignature = sectionSelectionSignature
+            };
+            _reportReviewSnapshot = snapshot;
+            _reportReviewContext = context;
+            _reportReviewVerification = new ReviewVerificationState(snapshot);
+            if (window is not null && ReferenceEquals(window, _reportReviewWindow))
+                window!.ShowSnapshot(
+                    snapshot,
+                    context,
+                    !snapshot.IsCurrent(
+                        project.Id,
+                        report.Id,
+                        _reportReviewRevision,
+                        ReportReviewSelection.CreateSignature(report)),
+                    _reportReviewVerification,
+                    IsReadOnly);
+            RefreshReportReview();
+            _logger.Info(
+                $"Revisão concluída. RelatorioId='{report.Id}'; Erros={result.ErrorCount}; " +
+                $"Avisos={result.WarningCount}; Informacoes={result.InfoCount}; Completa={result.IsComplete}; " +
+                $"TempoMs={reviewWatch.ElapsedMilliseconds}.");
+            return ReportReviewExecutionOutcome.Completed(snapshot);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            if (window is not null && ReferenceEquals(window, _reportReviewWindow))
+                window!.ShowCancelled();
+            _logger.Info($"Revisão cancelada. RelatorioId='{report.Id}'; TempoMs={reviewWatch.ElapsedMilliseconds}.");
+            return ReportReviewExecutionOutcome.Cancelled();
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"Falha ao executar a revisão do relatório. RelatorioId='{report.Id}'; " +
+                          $"TempoMs={reviewWatch.ElapsedMilliseconds}.", ex);
+            if (window is not null && ReferenceEquals(window, _reportReviewWindow))
+                window!.ShowExecutionError();
+            return ReportReviewExecutionOutcome.Failed();
+        }
+        finally
+        {
+            EditorView.IsEnabled = editorWasEnabled;
+            if (window is not null && ReferenceEquals(window, _reportReviewWindow))
+                window!.SetRunning(false);
+            if (ReferenceEquals(_reportReviewCts, cancellation))
+                _reportReviewCts = null;
+            cancellation.Dispose();
+            if (resumeScheduledSave && _hasPendingChanges && !IsReadOnly)
+                _saveTimer.Start();
+        }
+    }
+
+    private bool CanActOnCurrentReview(ReviewIssue issue) =>
+        _currentProject is not null && _currentReport is not null &&
+        _reportReviewSnapshot is not null &&
+        _reportReviewSnapshot.IsCurrent(
+            _currentProject.Id, _currentReport.Id, _reportReviewRevision,
+            ReportReviewSelection.CreateSignature(_currentReport)) &&
+        _reportReviewSnapshot.Result.Issues.Contains(issue) &&
+        _reportReviewCts is null && !_reportGenerationInProgress &&
+        !_reportReviewActionInProgress && !_finalizationInProgress && !_reportDeletionInProgress;
+
+    private void ReportReviewWindow_VerificationRequested(
+        object? sender, ReviewIssueVerificationEventArgs e)
+    {
+        if (!ReferenceEquals(sender, _reportReviewWindow) ||
+            !CanActOnCurrentReview(e.Issue) || _reportReviewVerification is null)
+        {
+            RefreshReportReview();
+            return;
+        }
+        var verification = _reportReviewVerification;
+        if (verification.SetVerified(e.Issue, e.Verified))
+            _logger.Info($"Item da revisão conferido. RelatorioId='{_currentReport!.Id}'; " +
+                         $"Regra='{e.Issue.RuleId}'; Severidade={e.Issue.Severity}; " +
+                         $"SectionId='{e.Issue.SectionId}'; OccurrenceId='{e.Issue.OccurrenceId}'; " +
+                         $"Verificado={e.Verified}.");
+        RefreshReportReview();
+    }
+
+    private void ReportReviewWindow_ResetVerificationRequested(object? sender, EventArgs e)
+    {
+        var issue = _reportReviewSnapshot?.Result.Issues.FirstOrDefault();
+        if (!ReferenceEquals(sender, _reportReviewWindow) || issue is null ||
+            !CanActOnCurrentReview(issue) || _reportReviewVerification is null)
+            return;
+        if (_reportReviewVerification.ClearVerified())
+            _logger.Info($"Verificações do relatório desfeitas. RelatorioId='{_currentReport!.Id}'.");
+        RefreshReportReview();
+    }
+
+    private async void ReportReviewWindow_RemovePendingRequested(
+        object? sender, ReviewIssueNavigationEventArgs e)
+    {
+        if (!ReferenceEquals(sender, _reportReviewWindow) || !CanActOnCurrentReview(e.Issue) ||
+            IsReadOnly || e.Issue.RuleId != "report.coverage" ||
+            e.Issue.NavigationArea != ReviewNavigationArea.PendingCaptures ||
+            e.Issue.SectionId is not Guid sectionId || _reportReviewContext is null)
+            return;
+
+        var project = _currentProject!;
+        var window = _reportReviewWindow;
+        var snapshot = _reportReviewSnapshot;
+        var expectedIds = _reportReviewContext.GetPendingCaptures(sectionId).Select(x => x.Id).ToList();
+        var captures = PendingCaptureRemoval.FindRemovable(project, sectionId, expectedIds);
+        if (captures.Count == 0)
+        {
+            MessageBox.Show(this,
+                "Nenhuma captura pendente removível foi encontrada. Evidências vinculadas serão preservadas. " +
+                "Execute a revisão novamente.",
+                "Capturas pendentes", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (MessageBox.Show(this,
+                $"Remover {captures.Count} captura(s) pendente(s) deste trecho?\n\n" +
+                "Capturas cadastradas como evidência não serão alteradas. " +
+                "Após salvar, os PNGs gerenciados serão movidos para uma pasta de recuperação. " +
+                "Arquivos externos não serão apagados.",
+                "Confirmar remoção", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        if (!ReferenceEquals(snapshot, _reportReviewSnapshot) || !CanActOnCurrentReview(e.Issue))
+        {
+            RefreshReportReview();
+            return;
+        }
+        _reportReviewActionInProgress = true;
+        window?.SetActionBusy(true);
+        var editorWasEnabled = EditorView.IsEnabled;
+        var resumeSave = _saveTimer.IsEnabled;
+        _saveTimer.Stop();
+        EditorView.IsEnabled = false;
+        var persisted = false;
+        try
+        {
+            // Aguarda qualquer save anterior antes de alterar as referências em memória.
+            await _persistenceGate.WaitAsync();
+            _persistenceGate.Release();
+            if (!ReferenceEquals(project, _currentProject) || _currentReport is null || IsReadOnly ||
+                !ReferenceEquals(snapshot, _reportReviewSnapshot) ||
+                !snapshot!.IsCurrent(project.Id, _currentReport!.Id, _reportReviewRevision,
+                    ReportReviewSelection.CreateSignature(_currentReport)))
+                return;
+
+            persisted = await PendingCaptureRemoval.RemoveAsync(project, captures, async () =>
+            {
+                MarkPendingChanges();
+                return await SavePendingAsync();
+            });
+            if (!persisted)
+            {
+                MarkPendingChanges();
+                _logger.Info("Remoção de capturas pendentes revertida após falha de salvamento; nenhum PNG foi movido.");
+                return;
+            }
+
+            var archiveReadOnly = IsReadOnly;
+            var archived = await Task.Run(() =>
+                _frameCaptureService.ArchiveRemovedPendingFiles(project, captures, archiveReadOnly));
+            _logger.Info($"Capturas pendentes removidas pela revisão. ProjectId='{project.Id}'; " +
+                         $"SectionId='{sectionId}'; Capturas={captures.Count}; " +
+                         $"PNGsRecuperaveis={archived.ArchivedFiles}; FalhasArquivo={archived.FailedFiles}.");
+            var recovery = archived.ArchivedFiles > 0
+                ? $"\n\nPasta de recuperação:\n{archived.RecoveryDirectory}" : "";
+            var failures = archived.FailedFiles > 0
+                ? $"\n{archived.FailedFiles} arquivo(s) não puderam ser movidos e foram mantidos no local original." : "";
+            MessageBox.Show(this,
+                $"{captures.Count} captura(s) removida(s) do projeto. " +
+                "Execute a revisão novamente para atualizar os resultados." + failures + recovery,
+                "Capturas pendentes", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception exception)
+        {
+            _logger.Error("Falha ao remover capturas pendentes pela revisão.", exception);
+            if (!persisted) MarkPendingChanges();
+            MessageBox.Show(this,
+                persisted
+                    ? "As referências foram removidas do projeto, mas nem todos os arquivos puderam ser movidos. Consulte o log."
+                    : "Não foi possível remover as capturas. As referências foram preservadas e nenhum PNG foi movido.",
+                "Capturas pendentes", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _reportReviewActionInProgress = false;
+            EditorView.IsEnabled = editorWasEnabled;
+            if (ReferenceEquals(window, _reportReviewWindow)) window?.SetActionBusy(false);
+            if (ReferenceEquals(project, _currentProject))
+            {
+                RefreshCaptures();
+                RefreshOverviewCounters();
+                ScheduleOverviewRefresh();
+                RefreshReportReview();
+                if (resumeSave && _hasPendingChanges && !IsReadOnly) _saveTimer.Start();
+            }
+        }
+    }
+
+    private void ShowReportReview(ReviewIssueFilter filter)
+    {
+        var window = EnsureReportReviewWindow();
+        RefreshReportReview();
+        window.SelectFilter(filter);
+        if (!window.IsVisible) window.Show();
+        window.Activate();
+        UpdateSidebarNavigation();
+    }
+
+    private async Task NavigateToReviewIssueAsync(ReviewIssue issue)
+    {
+        if (_currentProject is null || _currentReport is null) return;
+        var target = ReviewNavigationTarget.FromIssue(issue);
+        _reportReviewWindow?.Hide();
+        UpdateSidebarNavigation();
+
+        try
+        {
+            if (target.Area == ReviewNavigationArea.Report)
+            {
+                NavigateToReportField(target.ReportField);
+                return;
+            }
+
+            var location = target.LocationId is Guid locationId
+                ? _currentProject.Locations.FirstOrDefault(x => x.Id == locationId)
+                : null;
+            var section = target.SectionId is Guid sectionId
+                ? _currentProject.Locations.SelectMany(x => x.Sections)
+                    .FirstOrDefault(x => x.Id == sectionId)
+                : null;
+
+            if (section is null && target.OccurrenceId is Guid occurrenceId)
+                section = _currentProject.Locations.SelectMany(x => x.Sections)
+                    .FirstOrDefault(x => x.Occurrences.Any(o => o.Id == occurrenceId));
+            if (section is null && target.CaptureId is Guid captureId)
+            {
+                var capture = _currentProject.Captures.FirstOrDefault(x => x.Id == captureId);
+                section = capture is null
+                    ? null
+                    : _currentProject.Locations.SelectMany(x => x.Sections)
+                        .FirstOrDefault(x => x.Id == capture.SectionId);
+            }
+            if (section is null && target.VideoReferenceId is Guid videoId)
+                section = _currentProject.Locations.SelectMany(x => x.Sections)
+                    .FirstOrDefault(x => x.VideoReferences.Any(v => v.Id == videoId));
+            if (section is null && target.EvidenceId is Guid evidenceId)
+                section = _currentProject.Locations.SelectMany(x => x.Sections)
+                    .FirstOrDefault(x => x.Occurrences.Any(o => o.Evidence.Any(ev => ev.Id == evidenceId)));
+            location ??= section is null
+                ? null
+                : _currentProject.Locations.FirstOrDefault(x => x.Sections.Contains(section));
+
+            if (location is null)
+            {
+                MessageBox.Show("O item indicado pela revisão não foi encontrado no projeto atual.",
+                    "Revisão do relatório", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            InspectionsTab.IsSelected = true;
+            UpdateSidebarNavigation();
+            await ChangeInspectionContextAsync(location, section, section is null);
+
+            if (target.OccurrenceId is Guid selectedOccurrenceId)
+            {
+                var item = OccurrencesList.Items.OfType<OccurrenceListItem>()
+                    .FirstOrDefault(x => x.Id == selectedOccurrenceId);
+                if (item is null)
+                {
+                    MessageBox.Show("A ocorrência indicada pela revisão não foi encontrada neste trecho.",
+                        "Revisão do relatório", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+                OccurrencesList.SelectedItem = item;
+                OccurrencesList.UpdateLayout();
+                OccurrencesList.ScrollIntoView(item);
+                OccurrencesList.Focus();
+            }
+
+            if (target.Area == ReviewNavigationArea.PendingCaptures &&
+                target.CaptureId is Guid highlightedCaptureId)
+                await OpenPendingCapturesAsync(highlightedCaptureId);
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Falha ao navegar para o item da revisão.", ex);
+            MessageBox.Show("Não foi possível abrir o item indicado pela revisão. Consulte o log.",
+                "Revisão do relatório", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void NavigateToReportField(string? reportField)
+    {
+        FrameworkElement? target = reportField switch
+        {
+            "Client" => DefaultClientBox,
+            "Cnpj" => DefaultCnpjBox,
+            "Area" => DefaultAreaBox,
+            "Contract" => DefaultContractBox,
+            "PurchaseOrder" => DefaultPurchaseOrderBox,
+            "LogoPath" => DefaultLogoBox,
+            "ReportCode" => ReportCodeBox,
+            "ReportDate" => ReportDatePicker,
+            "TotalInvestigatedMeters" => MetersBox,
+            "Diameters" or "CustomDiameters" => D300Check,
+            _ => null
+        };
+
+        var overviewTarget = ReferenceEquals(target, DefaultClientBox) ||
+                             ReferenceEquals(target, DefaultCnpjBox) ||
+                             ReferenceEquals(target, DefaultAreaBox) ||
+                             ReferenceEquals(target, DefaultContractBox) ||
+                             ReferenceEquals(target, DefaultPurchaseOrderBox) ||
+                             ReferenceEquals(target, DefaultLogoBox) ||
+                             string.Equals(reportField, "Project.Name", StringComparison.Ordinal);
+        if (overviewTarget)
+            OverviewTab.IsSelected = true;
+        else
+            WordConfigTab.IsSelected = true;
+        UpdateSidebarNavigation();
+
+        if (target is null) return;
+        target.Focus();
+        if (target is TextBox textBox) textBox.SelectAll();
+    }
+
+    private void ResetReportReviewState()
+    {
+        _reportReviewCts?.Cancel();
+        _reportReviewSnapshot = null;
+        _reportReviewContext = null;
+        _reportReviewVerification = null;
+        if (_reportReviewWindow is not null)
+        {
+            _reportReviewWindow.Close();
+            _reportReviewWindow = null;
+        }
+    }
+
     private void RefreshReportReview(ReportValidationResult? validation = null)
     {
         if (_currentProject is null || _currentReport is null)
@@ -1332,29 +2967,86 @@ public partial class MainWindow : Window
             ReportReviewTitle.Text = "Selecione um relatório";
             ReportReviewSummary.Text = "";
             ReportReviewIssues.Text = "";
+            OpenReportReviewButton.IsEnabled = false;
+            _reportReviewWindow?.ShowNoReview("Selecione um relatório para executar a revisão.");
             return;
         }
 
-        validation ??= _wordReportService.Validate(_currentProject, _currentReport);
-        var emissionReady = !string.IsNullOrWhiteSpace(_currentReport.ReportCode) &&
-                            _currentReport.ReportDate is not null && _currentReport.TotalInvestigatedMeters > 0;
-        var equipmentCount = Enum.GetValues<EquipmentSelection>()
-            .Count(x => x != EquipmentSelection.None && _currentReport.Equipments.HasFlag(x));
-        ReportReviewTitle.Text = validation.Errors.Count == 0
-            ? validation.Warnings.Count == 0 ? "Relatório pronto" : "Relatório pronto com avisos"
-            : "Revisão necessária";
+        OpenReportReviewButton.IsEnabled = true;
+        if (validation is not null)
+        {
+            var emissionReady = !string.IsNullOrWhiteSpace(_currentReport.ReportCode) &&
+                                _currentReport.ReportDate is not null && _currentReport.TotalInvestigatedMeters > 0;
+            var equipmentCount = Enum.GetValues<EquipmentSelection>()
+                .Count(x => x != EquipmentSelection.None && _currentReport.Equipments.HasFlag(x));
+            ReportReviewTitle.Text = validation.Errors.Count == 0
+                ? validation.Warnings.Count == 0 ? "Relatório pronto" : "Relatório pronto com avisos"
+                : "Revisão necessária";
+            ReportReviewSummary.Text =
+                $"Dados da emissão        {(emissionReady ? "✓" : "• pendente")}\n" +
+                $"Equipamentos            {(equipmentCount > 0 ? $"✓ {equipmentCount}" : "• nenhum selecionado")}\n" +
+                $"Desenvolvimento         ✓\n" +
+                $"Trechos                 ✓ {validation.SelectedSections}\n" +
+                $"Anomalias               ✓ {validation.Occurrences}\n" +
+                $"Imagens                 ✓ {validation.Evidences + _currentReport.DevelopmentImages.Count}";
+            var issues = validation.Errors.Select(x => "• " + x)
+                .Concat(validation.Warnings.Select(x => "⚠ " + x)).Take(6).ToList();
+            ReportReviewIssues.Text = issues.Count == 0
+                ? "Nenhuma pendência encontrada."
+                : string.Join("\n", issues);
+            ReportReviewIssues.Foreground = (System.Windows.Media.Brush)FindResource(
+                validation.Errors.Count == 0 && validation.Warnings.Count == 0
+                    ? "SuccessBrush"
+                    : "WarningBrush");
+            return;
+        }
+
+        var snapshot = _reportReviewSnapshot;
+        var context = _reportReviewContext;
+        if (snapshot is null || context is null ||
+            !snapshot.AppliesTo(_currentProject.Id, _currentReport.Id))
+        {
+            ReportReviewTitle.Text = "Revisão ainda não executada";
+            ReportReviewSummary.Text = "Execute uma auditoria do relatório atual antes da emissão.";
+            ReportReviewIssues.Text = "";
+            ReportReviewIssues.Foreground =
+                (System.Windows.Media.Brush)FindResource("TextSecondaryBrush");
+            _reportReviewWindow?.ShowNoReview(
+                "Execute a revisão para analisar o relatório selecionado.");
+            return;
+        }
+
+        var stale = !snapshot.IsCurrent(
+            _currentProject.Id,
+            _currentReport.Id,
+            _reportReviewRevision,
+            ReportReviewSelection.CreateSignature(_currentReport));
+        ReportReviewTitle.Text = !snapshot.Result.IsComplete
+            ? "Revisão incompleta"
+            : stale
+                ? "Revisão desatualizada"
+                : (_reportReviewVerification?.BlockingErrorCount ?? snapshot.Result.ErrorCount) > 0
+                    ? "Revisão necessária"
+                    : "Revisão concluída";
         ReportReviewSummary.Text =
-            $"Dados da emissão        {(emissionReady ? "✓" : "• pendente")}\n" +
-            $"Equipamentos            {(equipmentCount > 0 ? $"✓ {equipmentCount}" : "• nenhum selecionado")}\n" +
-            $"Desenvolvimento         ✓\n" +
-            $"Trechos                 ✓ {validation.SelectedSections}\n" +
-            $"Anomalias               ✓ {validation.Occurrences}\n" +
-            $"Imagens                 ✓ {validation.Evidences + _currentReport.DevelopmentImages.Count}";
-        var issues = validation.Errors.Select(x => "• " + x)
-            .Concat(validation.Warnings.Select(x => "⚠ " + x)).Take(6).ToList();
-        ReportReviewIssues.Text = issues.Count == 0 ? "Nenhuma pendência encontrada." : string.Join("\n", issues);
+            $"{_reportReviewVerification?.BlockingErrorCount ?? snapshot.Result.ErrorCount} erro(s) • " +
+            $"{_reportReviewVerification?.UnverifiedWarningCount ?? snapshot.Result.WarningCount} aviso(s) • " +
+            $"{_reportReviewVerification?.UnverifiedInfoCount ?? snapshot.Result.InfoCount} informação(ões)\n" +
+            $"Concluída às {snapshot.CompletedAt.ToLocalTime():HH:mm} • " +
+            $"{_reportReviewVerification?.VerifiedCount ?? 0} verificado(s)";
+        ReportReviewIssues.Text = stale
+            ? "⚠ O projeto foi alterado após a última revisão. Execute novamente."
+            : snapshot.Result.IsComplete
+                ? (_reportReviewVerification?.UnverifiedIssueCount ?? snapshot.Result.Issues.Count) == 0
+                    ? "Nenhuma pendência restante nesta revisão."
+                    : "Abra a revisão para consultar e navegar pelos resultados."
+                : "⚠ Uma ou mais verificações não puderam ser executadas.";
         ReportReviewIssues.Foreground = (System.Windows.Media.Brush)FindResource(
-            validation.Errors.Count == 0 && validation.Warnings.Count == 0 ? "SuccessBrush" : "WarningBrush");
+            stale || !snapshot.Result.IsComplete ||
+                (_reportReviewVerification?.BlockingErrorCount ?? snapshot.Result.ErrorCount) > 0
+                ? "WarningBrush"
+                : "SuccessBrush");
+        _reportReviewWindow?.ShowSnapshot(snapshot, context, stale, _reportReviewVerification, IsReadOnly);
     }
 
     private void RefreshInspectionTree()
@@ -1368,20 +3060,34 @@ public partial class MainWindow : Window
         LocationsList.SelectedItem = _currentLocation;
         RefreshSections();
         RefreshReportSectionSelection();
-        RefreshOverview();
+        RefreshOverviewCounters();
+        ScheduleOverviewRefresh();
         _loadingInspections = false;
     }
 
     private void RefreshSections()
+    {
+        RefreshSectionSelector();
+        RefreshVideos();
+        RefreshCaptures();
+        RefreshOccurrences();
+        UpdateInspectionWriteState();
+        ScheduleOverviewRefresh();
+    }
+
+    private void RefreshSectionSelector()
     {
         var sectionId = _currentSection?.Id;
         SectionsList.ItemsSource = _currentLocation?.Sections.OrderBy(x => x.Order).ToList() ?? [];
         _currentSection = _currentLocation?.Sections.FirstOrDefault(x => x.Id == sectionId)
                           ?? _currentLocation?.Sections.OrderBy(x => x.Order).FirstOrDefault();
         SectionsList.SelectedItem = _currentSection;
-        RefreshVideos();
-        RefreshCaptures();
-        RefreshOccurrences();
+    }
+
+    private void RefreshSectionMetadata()
+    {
+        SectionsList.Items.Refresh();
+        SectionsList.SelectedItem = _currentSection;
         UpdateInspectionWriteState();
     }
 
@@ -1400,25 +3106,90 @@ public partial class MainWindow : Window
             ShowVideoState("Este trecho ainda não possui vídeos vinculados.", !IsReadOnly);
         else if (selected is null)
             ShowVideoState("Escolha um dos vídeos vinculados ao trecho.", false);
-        else if (_currentMedia is null && File.Exists(selected.Video.FilePath))
+        else if (_currentMedia is null)
             ShowVideoState("O vídeo já está vinculado. Clique em “Recarregar vídeo” para exibi-lo.", false);
         UpdateInspectionWriteState();
+        StartVideoAvailabilityScan(Volatile.Read(ref _inspectionLoadGeneration),
+            _inspectionLoadCts?.Token ?? CancellationToken.None);
+    }
+
+    private void StartVideoAvailabilityScan(long generation, CancellationToken token)
+    {
+        if (VideosList.ItemsSource is not IEnumerable<VideoListItem> source) return;
+        var items = source.ToList();
+        if (items.Count == 0) return;
+        _ = UpdateVideoAvailabilityAsync(items, generation, token);
+    }
+
+    private async Task UpdateVideoAvailabilityAsync(IReadOnlyCollection<VideoListItem> items, long generation,
+        CancellationToken token)
+    {
+        try
+        {
+            await Parallel.ForEachAsync(items, new ParallelOptions
+            {
+                CancellationToken = token,
+                MaxDegreeOfParallelism = 4
+            }, async (item, cancellationToken) =>
+            {
+                bool available;
+                try { available = File.Exists(item.Video.FilePath); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+                {
+                    available = false;
+                    _logger.Error($"Falha ao verificar disponibilidade do video. Caminho='{item.Video.FilePath}'.", ex);
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    if (generation != Volatile.Read(ref _inspectionLoadGeneration) ||
+                        _currentSection?.Id != item.Video.InspectionSectionId ||
+                        VideosList.ItemsSource is not IEnumerable<VideoListItem> currentItems ||
+                        !currentItems.Contains(item)) return;
+                    item.SetAvailability(available);
+                    UpdateInspectionWriteState();
+                    if (_currentVideo?.Id == item.Id && _currentMedia is null)
+                        ShowVideoState(available
+                            ? "O vídeo já está vinculado. Clique em “Recarregar vídeo” para exibi-lo."
+                            : "O arquivo está ausente, bloqueado ou ainda indisponível no Dropbox.", false,
+                            available ? VideoSurfaceState.Empty : VideoSurfaceState.Missing);
+                }, DispatcherPriority.Background, cancellationToken);
+            });
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            _logger.Info($"Verificacao de disponibilidade de videos cancelada. Geracao={generation}.");
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"Falha ao atualizar disponibilidade da lista de videos. Geracao={generation}.", ex);
+        }
     }
 
     private void RefreshCaptures()
     {
-        if (_currentProject is null || _currentSection is null)
+        var count = _currentProject is null || _currentSection is null
+            ? 0
+            : _currentProject.Captures.Count(x =>
+                x.SectionId == _currentSection.Id && x.Status == CaptureStatus.Pending);
+        PendingCapturesCountText.Text = count.ToString();
+        PendingCapturesButton.ToolTip = count switch
         {
-            CapturesList.ItemsSource = null;
-            PendingCapturesSummary.Text = "(0)";
-            return;
+            0 => "Nenhuma captura pendente neste trecho",
+            1 => "Abrir 1 captura pendente",
+            _ => $"Abrir {count} capturas pendentes"
+        };
+        PendingCapturesButton.IsEnabled = _currentProject is not null && _currentSection is not null && count > 0;
+        if (_trayPendingCapturesItem is not null)
+        {
+            _trayPendingCapturesItem.Text = count switch
+            {
+                0 => "Capturas pendentes",
+                1 => "Capturas pendentes (1)",
+                _ => $"Capturas pendentes ({count})"
+            };
+            _trayPendingCapturesItem.Enabled = count > 0;
         }
-        CapturesList.ItemsSource = _currentProject.Captures
-            .Where(x => x.SectionId == _currentSection.Id && x.Status == CaptureStatus.Pending)
-            .OrderBy(x => x.Order)
-            .Select(x => new CaptureListItem(x, FindVideo(x.VideoReferenceId)?.DisplayName ?? Path.GetFileName(x.VideoFilePath)))
-            .ToList();
-        PendingCapturesSummary.Text = $"({_currentProject.Captures.Count(x => x.SectionId == _currentSection.Id && x.Status == CaptureStatus.Pending)})";
     }
 
     private void RefreshOccurrences()
@@ -1439,6 +3210,30 @@ public partial class MainWindow : Window
         var all = _currentSection.Occurrences
             .OrderBy(x => x.Order).ThenBy(x => x.CreatedAt)
             .Select(x => new OccurrenceListItem(x, canModify, modifyToolTip)).ToList();
+        ApplyOccurrenceItems(all);
+    }
+
+    private async Task RefreshOccurrencesAsync(CancellationToken cancellationToken, long generation)
+    {
+        var section = _currentSection;
+        if (section is null)
+        {
+            RefreshOccurrences();
+            return;
+        }
+        var canModify = !IsReadOnly && section.AnomalyReviewStatus != SectionAnomalyReviewStatus.Completed;
+        var modifyToolTip = IsReadOnly ? "Projeto aberto somente para leitura."
+            : IsSectionReviewLocked ? "Reabra o trecho para editar" : "Arraste para reordenar";
+        var snapshot = section.Occurrences.OrderBy(x => x.Order).ThenBy(x => x.CreatedAt).ToList();
+        var all = await Task.Run(() => snapshot
+            .Select(x => new OccurrenceListItem(x, canModify, modifyToolTip)).ToList(), cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (generation != Volatile.Read(ref _inspectionLoadGeneration) || _currentSection?.Id != section.Id) return;
+        ApplyOccurrenceItems(all);
+    }
+
+    private void ApplyOccurrenceItems(List<OccurrenceListItem> all)
+    {
         var unfilteredCount = all.Count;
         var incomplete = all.Count(x => !x.IsComplete);
         AnomalySummaryText.Text = $"{all.Count} apontamento(s) • {all.Sum(x => x.EvidenceCount)} imagem(ns) • {incomplete} pendência(s)";
@@ -1447,19 +3242,21 @@ public partial class MainWindow : Window
             all = all.Where(x => x.Location.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
                                  x.Anomalies.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
                                  x.PositionSummary.Contains(query, StringComparison.CurrentCultureIgnoreCase)).ToList();
-        var status = (AnomalyStatusFilter?.SelectedItem as ComboBoxItem)?.Tag as string;
-        if (status == "Complete") all = all.Where(x => x.IsComplete).ToList();
-        if (status == "Incomplete") all = all.Where(x => !x.IsComplete).ToList();
         OccurrencesList.ItemsSource = all;
         OccurrencesEmptyTitle.Text = unfilteredCount == 0
             ? "Nenhuma anomalia registrada neste trecho."
             : "Nenhuma anomalia encontrada.";
         OccurrencesEmptyDescription.Text = unfilteredCount == 0
             ? "Durante a inspeção, capture um frame para começar."
-            : "Ajuste a pesquisa ou o filtro para ver outros registros.";
+            : "Ajuste a pesquisa para ver outros registros.";
         OccurrencesEmptyState.Visibility = all.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         UpdateSectionReviewState();
-        RefreshOverview();
+    }
+
+    private void ScheduleOverviewRefresh()
+    {
+        _overviewRefreshTimer.Stop();
+        _overviewRefreshTimer.Start();
     }
 
     private bool IsSectionReviewLocked =>
@@ -1539,7 +3336,7 @@ public partial class MainWindow : Window
         var previousUpdatedAt = _currentSection.AnomalyReviewUpdatedAt;
         _currentSection.AnomalyReviewStatus = status;
         _currentSection.AnomalyReviewUpdatedAt = DateTime.UtcNow;
-        _hasPendingChanges = true;
+        MarkPendingChanges();
         SectionPersistenceStatusText.Text = "Salvando...";
         if (await SavePendingAsync()) return true;
         _currentSection.AnomalyReviewStatus = previousStatus;
@@ -1588,7 +3385,8 @@ public partial class MainWindow : Window
             targetIndex++;
         ordered.Insert(targetIndex, source);
         for (var index = 0; index < ordered.Count; index++) ordered[index].Order = index;
-        _hasPendingChanges = true;
+        OccurrenceRules.SynchronizeInvestigatedMeters(_currentSection);
+        MarkPendingChanges();
         UpdateSectionReviewState();
         if (!await SavePendingAsync())
             foreach (var occurrence in ordered) occurrence.Order = previousOrders[occurrence.Id];
@@ -1665,13 +3463,29 @@ public partial class MainWindow : Window
 
     private void UpdateInspectionWriteState()
     {
-        LocationsList.IsEnabled = _currentProject is not null && !_captureInProgress && !_videoLoadInProgress;
-        SectionsList.IsEnabled = _currentLocation is not null && !_captureInProgress && !_videoLoadInProgress;
-        VideosList.IsEnabled = _currentSection is not null && !_captureInProgress && !_videoLoadInProgress;
+        var selectedVideoAvailability = (VideosList.SelectedItem as VideoListItem)?.IsAvailable;
+        LocationsList.IsEnabled = _currentProject is not null && !_captureInProgress;
+        SectionsList.IsEnabled = _currentLocation is not null && !_captureInProgress;
+        VideosList.IsEnabled = _currentSection is not null && !_captureInProgress;
         AddLocationButton.IsEnabled = !IsReadOnly && !_captureInProgress && _currentProject is not null;
         AddSectionButton.IsEnabled = !IsReadOnly && !_captureInProgress && _currentLocation is not null;
         RenameLocationButton.IsEnabled = !IsReadOnly && !_captureInProgress && _currentLocation is not null;
         DeleteLocationButton.IsEnabled = !IsReadOnly && !_captureInProgress && _currentLocation is not null;
+        ReorderLocationsButton.IsEnabled = !IsReadOnly && !_captureInProgress &&
+                                            _currentProject?.Locations.Count > 1;
+        ReorderLocationsButton.ToolTip = IsReadOnly ? "Projeto aberto somente para leitura."
+            : _currentProject?.Locations.Count > 1 ? "Ordenar locais arrastando para cima ou para baixo"
+            : "Crie pelo menos dois locais para alterar a ordem.";
+        ReorderSectionsButton.IsEnabled = !IsReadOnly && !_captureInProgress &&
+                                          _currentLocation?.Sections.Count > 1;
+        ReorderSectionsButton.ToolTip = IsReadOnly ? "Projeto aberto somente para leitura."
+            : _currentLocation?.Sections.Count > 1 ? "Ordenar trechos arrastando para cima ou para baixo"
+            : "Crie pelo menos dois trechos para alterar a ordem.";
+        var hasProjectSections = _currentProject?.Locations.Any(x => x.Sections.Count > 0) == true;
+        RenameSectionsButton.IsEnabled = !IsReadOnly && !_captureInProgress && hasProjectSections;
+        RenameSectionsButton.ToolTip = IsReadOnly ? "Projeto aberto somente para leitura."
+            : hasProjectSections ? "Renomear todos os trechos em sequência"
+            : "Crie pelo menos um trecho para usar a renomeação automática.";
         EditSectionButton.IsEnabled = !IsReadOnly && !IsSectionReviewLocked && !_captureInProgress && _currentSection is not null;
         EditSectionButton.ToolTip = IsReadOnly ? "Projeto aberto somente para leitura."
             : IsSectionReviewLocked ? "Reabra o trecho para editar"
@@ -1683,12 +3497,13 @@ public partial class MainWindow : Window
             : "Adicionar vídeo ao trecho selecionado";
         EmptyVideoButton.IsEnabled = AddVideoButton.IsEnabled;
         ReloadVideoButton.IsEnabled = !_captureInProgress && !_playerOperationInProgress && !_videoLoadInProgress &&
-                                      _currentVideo is not null && File.Exists(_currentVideo.FilePath);
+                                      _currentVideo is not null && selectedVideoAvailability == true;
         CaptureFrameButton.IsEnabled = !_captureInProgress && !IsReadOnly && !IsSectionReviewLocked &&
-                                       _currentVideo is not null && File.Exists(_currentVideo.FilePath);
+                                       _currentVideo is not null && _currentMedia is not null;
         CaptureFrameOverlayButton.IsEnabled = CaptureFrameButton.IsEnabled;
-        RelocateVideoButton.IsEnabled = !IsReadOnly && !_captureInProgress && _currentVideo is not null && !File.Exists(_currentVideo.FilePath);
-        RelocateVideoButton.Visibility = _currentVideo is not null && !File.Exists(_currentVideo.FilePath)
+        RelocateVideoButton.IsEnabled = !IsReadOnly && !_captureInProgress && _currentVideo is not null &&
+                                        selectedVideoAvailability == false;
+        RelocateVideoButton.Visibility = _currentVideo is not null && selectedVideoAvailability == false
             ? Visibility.Visible : Visibility.Collapsed;
         RemoveVideoButton.IsEnabled = !IsReadOnly && !_captureInProgress && _currentVideo is not null;
         NewOccurrenceButton.IsEnabled = !IsReadOnly && !IsSectionReviewLocked && !_captureInProgress && _currentSection is not null;
@@ -1711,7 +3526,7 @@ public partial class MainWindow : Window
         {
             ProjectId = _currentProject.Id,
             Name = name,
-            Order = _currentProject.Locations.Count
+            Order = NextOrder(_currentProject.Locations.Select(x => x.Order))
         };
         _currentProject.Locations.Add(location);
         _currentLocation = location;
@@ -1729,7 +3544,7 @@ public partial class MainWindow : Window
             NewLocationNameBox.Focus();
             return;
         }
-        var location = new Location { ProjectId = _currentProject.Id, Name = name, Order = _currentProject.Locations.Count };
+        var location = new Location { ProjectId = _currentProject.Id, Name = name, Order = NextOrder(_currentProject.Locations.Select(x => x.Order)) };
         _currentProject.Locations.Add(location);
         _currentLocation = location;
         CloseInspectionForm();
@@ -1756,7 +3571,7 @@ public partial class MainWindow : Window
             EndPoint = draft.EndPoint,
             Reference = draft.Reference,
             InvestigatedMeters = draft.InvestigatedMeters,
-            Order = _currentLocation.Sections.Count
+            Order = NextOrder(_currentLocation.Sections.Select(x => x.Order))
         };
         _currentLocation.Sections.Add(section);
         _currentSection = section;
@@ -1781,7 +3596,7 @@ public partial class MainWindow : Window
         if (MessageBox.Show($"Excluir o local '{location.Name}' e todos os seus trechos, ocorrências e capturas?",
                 "Excluir local", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
 
-        StopAndReleaseCurrentMedia();
+        await StopAndReleaseCurrentMediaAsync();
         var sectionIds = location.Sections.Select(x => x.Id).ToHashSet();
         _currentProject.Captures.RemoveAll(x => sectionIds.Contains(x.SectionId));
         foreach (var report in _currentProject.Reports)
@@ -1792,6 +3607,286 @@ public partial class MainWindow : Window
         _currentVideo = null;
         RefreshInspectionTree();
         await SaveInspectionChangesAsync();
+    }
+
+    private async void RenameSectionsAutomatically_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await RenameSectionsAutomaticallyAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Falha inesperada na renomeação automática dos trechos.", ex);
+            ShowError("Não foi possível renomear os trechos.", ex);
+        }
+    }
+
+    private async Task RenameSectionsAutomaticallyAsync()
+    {
+        if (_currentProject is null || IsReadOnly) return;
+
+        var project = _currentProject;
+        var selectedLocationId = _currentLocation?.Id;
+        var selectedSectionId = _currentSection?.Id;
+        IReadOnlyList<SectionRenamePlanItem>? requestedPlan = null;
+
+        HideVideoSurfaceForOverlay();
+        try
+        {
+            var dialog = new SectionAutomaticNamingWindow(project) { Owner = this };
+            if (dialog.ShowDialog() == true) requestedPlan = dialog.RenamePlan;
+        }
+        finally
+        {
+            RestoreVideoSurfaceAfterOverlay();
+        }
+
+        if (requestedPlan is null) return;
+
+        var sectionsById = project.Locations
+            .SelectMany(location => location.Sections)
+            .ToDictionary(section => section.Id);
+        if (requestedPlan.Count != sectionsById.Count ||
+            requestedPlan.Select(item => item.SectionId).Distinct().Count() != requestedPlan.Count ||
+            requestedPlan.Any(item => !sectionsById.ContainsKey(item.SectionId)))
+            throw new InvalidDataException("A prévia de renomeação não corresponde aos trechos atuais do projeto.");
+
+        var previousNames = sectionsById.ToDictionary(pair => pair.Key, pair => pair.Value.Name);
+        if (requestedPlan.All(item =>
+                string.Equals(sectionsById[item.SectionId].Name, item.ProposedName, StringComparison.Ordinal)))
+            return;
+
+        try
+        {
+            foreach (var item in requestedPlan)
+            {
+                if (string.IsNullOrWhiteSpace(item.ProposedName))
+                    throw new InvalidDataException($"O novo nome do trecho '{item.SectionId}' está vazio.");
+                sectionsById[item.SectionId].Name = item.ProposedName;
+            }
+
+            MarkPendingChanges();
+            SaveStatus.Text = "Salvando novos nomes dos trechos...";
+            if (!await SavePendingAsync())
+            {
+                foreach (var pair in previousNames)
+                    sectionsById[pair.Key].Name = pair.Value;
+                _logger.Info($"Renomeação automática revertida após falha de salvamento. ProjectId='{project.Id}'.");
+            }
+            else
+            {
+                _logger.Info(
+                    $"Trechos renomeados automaticamente. ProjectId='{project.Id}'; Quantidade='{requestedPlan.Count}'; " +
+                    $"PrimeiroNome='{requestedPlan.FirstOrDefault()?.ProposedName}'; UltimoNome='{requestedPlan.LastOrDefault()?.ProposedName}'.");
+            }
+        }
+        catch
+        {
+            foreach (var pair in previousNames)
+                sectionsById[pair.Key].Name = pair.Value;
+            throw;
+        }
+        finally
+        {
+            if (_currentProject?.Id == project.Id)
+            {
+                _loadingInspections = true;
+                try
+                {
+                    _currentLocation = project.Locations.FirstOrDefault(x => x.Id == selectedLocationId)
+                                       ?? project.Locations.OrderBy(x => x.Order).FirstOrDefault();
+                    _currentSection = _currentLocation?.Sections.FirstOrDefault(x => x.Id == selectedSectionId)
+                                      ?? _currentLocation?.Sections.OrderBy(x => x.Order).FirstOrDefault();
+                    LocationsList.Items.Refresh();
+                    RefreshSectionSelector();
+                    RefreshReportSectionSelection();
+                    RefreshReportReview();
+                    ScheduleOverviewRefresh();
+                }
+                finally
+                {
+                    _loadingInspections = false;
+                    UpdateInspectionWriteState();
+                }
+            }
+        }
+    }
+
+    private async void ReorderLocations_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProject is null || IsReadOnly || _currentProject.Locations.Count < 2) return;
+
+        var project = _currentProject;
+        var selectedLocationId = _currentLocation?.Id;
+        var selectedSectionId = _currentSection?.Id;
+        IReadOnlyList<Guid>? requestedOrder = null;
+        HideVideoSurfaceForOverlay();
+        try
+        {
+            var dialog = new LocationOrderWindow(project.Locations) { Owner = this };
+            if (dialog.ShowDialog() == true) requestedOrder = dialog.OrderedLocationIds;
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"Falha ao abrir a ordenação de locais. ProjectId='{project.Id}'.", ex);
+            ShowError("Não foi possível abrir a ordenação de locais.", ex);
+        }
+        finally
+        {
+            RestoreVideoSurfaceAfterOverlay();
+        }
+
+        if (requestedOrder is null) return;
+        var previousOrders = project.Locations.ToDictionary(x => x.Id, x => x.Order);
+        var previousReportOrders = project.Reports
+            .SelectMany(report => report.SectionLinks.Select(link =>
+                (Key: (report.Id, link.SectionId), link.Order)))
+            .ToDictionary(x => x.Key, x => x.Order);
+        var currentIds = project.Locations.OrderBy(x => x.Order).Select(x => x.Id).ToList();
+        if (currentIds.SequenceEqual(requestedOrder)) return;
+
+        try
+        {
+            LocationOrdering.Apply(project, requestedOrder);
+            NormalizeAllReportSectionOrders(project);
+            MarkPendingChanges();
+            SaveStatus.Text = "Salvando nova ordem dos locais...";
+            if (!await SavePendingAsync())
+            {
+                RestoreLocationAndReportOrders(project, previousOrders, previousReportOrders);
+                MarkPendingChanges();
+                _logger.Info($"Reordenação de locais revertida após falha de salvamento. ProjectId='{project.Id}'.");
+            }
+            else
+            {
+                _logger.Info($"Locais reordenados. ProjectId='{project.Id}'; Ordem='{string.Join(",", requestedOrder)}'.");
+            }
+        }
+        catch (Exception ex)
+        {
+            RestoreLocationAndReportOrders(project, previousOrders, previousReportOrders);
+            _logger.Error($"Falha ao aplicar a ordenação de locais. ProjectId='{project.Id}'.", ex);
+            ShowError("Não foi possível alterar a ordem dos locais.", ex);
+        }
+        finally
+        {
+            if (_currentProject?.Id == project.Id)
+            {
+                _currentLocation = project.Locations.FirstOrDefault(x => x.Id == selectedLocationId)
+                                   ?? project.Locations.OrderBy(x => x.Order).FirstOrDefault();
+                _currentSection = _currentLocation?.Sections.FirstOrDefault(x => x.Id == selectedSectionId)
+                                  ?? _currentLocation?.Sections.OrderBy(x => x.Order).FirstOrDefault();
+                RefreshInspectionTree();
+                RefreshReportReview();
+            }
+        }
+    }
+
+    private static void NormalizeAllReportSectionOrders(Project project)
+    {
+        var order = project.Locations.OrderBy(x => x.Order).ThenBy(x => x.Name)
+            .SelectMany(x => x.Sections.OrderBy(y => y.Order).ThenBy(y => y.Name))
+            .Select((section, index) => (section.Id, index))
+            .ToDictionary(x => x.Id, x => x.index);
+        foreach (var report in project.Reports)
+        foreach (var link in report.SectionLinks)
+            link.Order = order.GetValueOrDefault(link.SectionId, int.MaxValue);
+    }
+
+    private static void RestoreLocationAndReportOrders(
+        Project project,
+        IReadOnlyDictionary<Guid, int> locationOrders,
+        IReadOnlyDictionary<(Guid ReportId, Guid SectionId), int> reportOrders)
+    {
+        foreach (var location in project.Locations)
+            if (locationOrders.TryGetValue(location.Id, out var order)) location.Order = order;
+        foreach (var report in project.Reports)
+        foreach (var link in report.SectionLinks)
+            if (reportOrders.TryGetValue((report.Id, link.SectionId), out var order)) link.Order = order;
+    }
+
+    private async void ReorderSections_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentLocation is null || IsReadOnly || _currentLocation.Sections.Count < 2) return;
+
+        var location = _currentLocation;
+        var selectedId = _currentSection?.Id;
+        IReadOnlyList<Guid>? requestedOrder = null;
+        HideVideoSurfaceForOverlay();
+        try
+        {
+            var dialog = new SectionOrderWindow(location.Sections) { Owner = this };
+            if (dialog.ShowDialog() == true) requestedOrder = dialog.OrderedSectionIds;
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"Falha ao abrir a ordenação de trechos. LocalId='{location.Id}'.", ex);
+            ShowError("Não foi possível abrir a ordenação de trechos.", ex);
+        }
+        finally
+        {
+            RestoreVideoSurfaceAfterOverlay();
+        }
+
+        if (requestedOrder is null) return;
+        var previousOrder = location.Sections.ToDictionary(x => x.Id, x => x.Order);
+        var previousIds = location.Sections.OrderBy(x => x.Order).Select(x => x.Id).ToList();
+        if (previousIds.SequenceEqual(requestedOrder)) return;
+
+        try
+        {
+            var sectionsById = location.Sections.ToDictionary(x => x.Id);
+            if (requestedOrder.Count != sectionsById.Count ||
+                requestedOrder.Any(id => !sectionsById.ContainsKey(id)) ||
+                requestedOrder.Distinct().Count() != requestedOrder.Count)
+                throw new InvalidDataException("A ordenação retornada não corresponde aos trechos do Local.");
+
+            for (var index = 0; index < requestedOrder.Count; index++)
+                sectionsById[requestedOrder[index]].Order = index;
+
+            MarkPendingChanges();
+            SaveStatus.Text = "Salvando nova ordem dos trechos...";
+            if (!await SavePendingAsync())
+            {
+                foreach (var section in location.Sections)
+                    section.Order = previousOrder[section.Id];
+                _logger.Info($"Reordenação de trechos revertida após falha de salvamento. LocalId='{location.Id}'.");
+            }
+            else
+            {
+                _logger.Info($"Trechos reordenados. LocalId='{location.Id}'; Ordem='{string.Join(",", requestedOrder)}'.");
+            }
+
+            if (_currentLocation?.Id == location.Id)
+            {
+                _currentSection = location.Sections.FirstOrDefault(x => x.Id == selectedId)
+                                  ?? location.Sections.OrderBy(x => x.Order).FirstOrDefault();
+                _loadingInspections = true;
+                try
+                {
+                    RefreshSectionSelector();
+                    RefreshReportSectionSelection();
+                }
+                finally
+                {
+                    _loadingInspections = false;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            foreach (var section in location.Sections)
+                if (previousOrder.TryGetValue(section.Id, out var order)) section.Order = order;
+            _logger.Error($"Falha ao aplicar a ordenação de trechos. LocalId='{location.Id}'.", ex);
+            ShowError("Não foi possível alterar a ordem dos trechos.", ex);
+            if (_currentLocation?.Id == location.Id)
+            {
+                _loadingInspections = true;
+                try { RefreshSectionSelector(); }
+                finally { _loadingInspections = false; }
+            }
+        }
     }
 
     private async void EditSection_Click(object sender, RoutedEventArgs e)
@@ -1815,9 +3910,10 @@ public partial class MainWindow : Window
         _currentSection.EndPoint = draft.EndPoint;
         _currentSection.Reference = draft.Reference;
         _currentSection.InvestigatedMeters = draft.InvestigatedMeters;
-        RefreshSections();
+        OccurrenceRules.SynchronizeInvestigatedMeters(_currentSection);
+        RefreshSectionMetadata();
         RefreshReportSectionSelection();
-        await SaveInspectionChangesAsync();
+        await SaveSectionMetadataAsync(_currentSection);
     }
 
     private async void DeleteSection_Click(object sender, RoutedEventArgs e)
@@ -1827,7 +3923,7 @@ public partial class MainWindow : Window
         if (MessageBox.Show($"Excluir o trecho '{section.Name}' e todas as suas ocorrências e capturas?",
                 "Excluir trecho", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
 
-        StopAndReleaseCurrentMedia();
+        await StopAndReleaseCurrentMediaAsync();
         _currentProject.Captures.RemoveAll(x => x.SectionId == section.Id);
         foreach (var report in _currentProject.Reports)
             report.SectionLinks.RemoveAll(x => x.SectionId == section.Id);
@@ -1867,7 +3963,7 @@ public partial class MainWindow : Window
             StartPoint = EmptyToNull(NewSectionStartBox.Text),
             EndPoint = EmptyToNull(NewSectionEndBox.Text),
             Reference = EmptyToNull(NewSectionReferenceBox.Text),
-            Order = _currentLocation.Sections.Count
+            Order = NextOrder(_currentLocation.Sections.Select(x => x.Order))
         };
         _currentLocation.Sections.Add(section);
         _currentSection = section;
@@ -1886,31 +3982,156 @@ public partial class MainWindow : Window
         RestoreVideoSurfaceAfterOverlay();
     }
 
-    private void LocationsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async void LocationsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_loadingInspections) return;
-        DiscardCaptureDraft();
-        StopAndReleaseCurrentMedia();
-        _currentLocation = LocationsList.SelectedItem as Location;
-        _currentSection = null;
-        _currentVideo = null;
-        _loadingInspections = true;
-        RefreshSections();
-        _loadingInspections = false;
+        var location = LocationsList.SelectedItem as Location;
+        try
+        {
+            await ChangeInspectionContextAsync(location, null, true);
+        }
+        catch (Exception ex)
+        {
+            HandleInspectionContextFailure("troca de Local", ex);
+        }
     }
 
-    private void SectionsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async void SectionsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_loadingInspections) return;
-        DiscardCaptureDraft();
-        StopAndReleaseCurrentMedia();
-        _currentSection = SectionsList.SelectedItem as InspectionSection;
-        _currentVideo = null;
-        _loadingInspections = true;
-        RefreshVideos();
-        RefreshCaptures();
-        RefreshOccurrences();
-        _loadingInspections = false;
+        var section = SectionsList.SelectedItem as InspectionSection;
+        try
+        {
+            await ChangeInspectionContextAsync(_currentLocation, section, false);
+        }
+        catch (Exception ex)
+        {
+            HandleInspectionContextFailure("troca de trecho", ex);
+        }
+    }
+
+    private async Task ChangeInspectionContextAsync(Location? location, InspectionSection? section,
+        bool locationChanged)
+    {
+        var generation = Interlocked.Increment(ref _inspectionLoadGeneration);
+        var cancellation = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _inspectionLoadCts, cancellation);
+        previous?.Cancel();
+        var token = cancellation.Token;
+        var timings = new Dictionary<string, long>(StringComparer.Ordinal);
+        var total = Stopwatch.StartNew();
+        var locationName = location?.Name ?? "<nenhum>";
+        var locationId = location?.Id.ToString() ?? "<nenhum>";
+        _logger.Info($"Troca de contexto iniciada. Geracao={generation}; LocalId='{locationId}'; Local='{locationName}'; " +
+                     $"Trechos={location?.Sections.Count ?? 0}; MemoriaGerenciada={GC.GetTotalMemory(false)}; WorkingSet={Environment.WorkingSet}.");
+
+        try
+        {
+            DiscardCaptureDraft();
+            await MeasureInspectionStageAsync("StopAndReleaseCurrentMedia", generation, timings,
+                () => StopAndReleaseCurrentMediaAsync(token));
+            token.ThrowIfCancellationRequested();
+            if (generation != Volatile.Read(ref _inspectionLoadGeneration)) return;
+
+            _loadingInspections = true;
+            try
+            {
+                _currentLocation = location;
+                _currentSection = locationChanged ? null : section;
+                _currentVideo = null;
+                await MeasureInspectionStageAsync("RefreshSections", generation, timings, () =>
+                {
+                    RefreshSectionSelector();
+                    return Task.CompletedTask;
+                });
+            }
+            finally
+            {
+                _loadingInspections = false;
+            }
+
+            await MeasureInspectionStageAsync("RefreshVideos", generation, timings, () =>
+            {
+                _loadingInspections = true;
+                try { RefreshVideos(); }
+                finally { _loadingInspections = false; }
+                return Task.CompletedTask;
+            });
+            await MeasureInspectionStageAsync("RefreshCaptures", generation, timings, () =>
+            {
+                RefreshCaptures();
+                return Task.CompletedTask;
+            });
+            await MeasureInspectionStageAsync("RefreshOccurrences", generation, timings,
+                () => RefreshOccurrencesAsync(token, generation));
+            await MeasureInspectionStageAsync("RefreshOverviewCounters", generation, timings, () =>
+            {
+                RefreshOverviewCounters();
+                ScheduleOverviewRefresh();
+                return Task.CompletedTask;
+            });
+
+            token.ThrowIfCancellationRequested();
+            if (generation != Volatile.Read(ref _inspectionLoadGeneration)) return;
+            UpdateInspectionWriteState();
+            var videos = _currentSection?.VideoReferences.Count ?? 0;
+            var occurrences = _currentSection?.Occurrences.Count ?? 0;
+            var evidence = _currentSection?.Occurrences.Sum(x => x.Evidence.Count) ?? 0;
+            var captures = _currentProject?.Captures.Count(x => x.SectionId == _currentSection?.Id &&
+                                                                 x.Status == CaptureStatus.Pending) ?? 0;
+            var summary = string.Join("; ", timings.Select(x => $"{x.Key}={x.Value}ms"));
+            _logger.Info($"Troca de contexto concluida. Geracao={generation}; LocalId='{locationId}'; Local='{locationName}'; " +
+                         $"TrechoId='{_currentSection?.Id}'; Videos={videos}; Ocorrencias={occurrences}; Evidencias={evidence}; " +
+                         $"CapturasPendentes={captures}; Total={total.ElapsedMilliseconds}ms; {summary}; " +
+                         $"MemoriaGerenciada={GC.GetTotalMemory(false)}; WorkingSet={Environment.WorkingSet}.");
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            _logger.Info($"Troca de contexto cancelada. Geracao={generation}; LocalId='{locationId}'; Etapa='{_inspectionLoadStage}'.");
+        }
+        catch (OutOfMemoryException ex)
+        {
+            _logger.Error($"Falta de memoria durante troca de contexto. Geracao={generation}; LocalId='{locationId}'; " +
+                          $"Etapa='{_inspectionLoadStage}'; MemoriaGerenciada={GC.GetTotalMemory(false)}; WorkingSet={Environment.WorkingSet}.", ex);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"Falha durante troca de contexto. Geracao={generation}; LocalId='{locationId}'; " +
+                          $"Etapa='{_inspectionLoadStage}'; MemoriaGerenciada={GC.GetTotalMemory(false)}; WorkingSet={Environment.WorkingSet}.", ex);
+            throw;
+        }
+        finally
+        {
+            if (!ReferenceEquals(Volatile.Read(ref _inspectionLoadCts), cancellation)) cancellation.Dispose();
+            previous?.Dispose();
+            if (generation == Volatile.Read(ref _inspectionLoadGeneration))
+            {
+                _inspectionLoadStage = "idle";
+                _loadingInspections = false;
+                UpdateInspectionWriteState();
+            }
+        }
+    }
+
+    private async Task MeasureInspectionStageAsync(string stage, long generation,
+        IDictionary<string, long> timings, Func<Task> action)
+    {
+        _inspectionLoadStage = stage;
+        _logger.Info($"Troca de contexto: etapa iniciada. Geracao={generation}; Etapa='{stage}'.");
+        var watch = Stopwatch.StartNew();
+        await action();
+        timings[stage] = watch.ElapsedMilliseconds;
+        await Dispatcher.Yield(DispatcherPriority.Background);
+    }
+
+    private void HandleInspectionContextFailure(string operation, Exception ex)
+    {
+        ShowVideoState("Parte dos dados não pôde ser carregada. Selecione outro Local ou tente novamente.", false,
+            VideoSurfaceState.Error);
+        UpdateInspectionWriteState();
+        MessageBox.Show($"Não foi possível concluir a {operation}. O projeto continua aberto e você pode tentar novamente.",
+            "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     private async void AddVideo_Click(object sender, RoutedEventArgs e)
@@ -1945,7 +4166,7 @@ public partial class MainWindow : Window
         _loadingInspections = true;
         RefreshVideos();
         _loadingInspections = false;
-        await LoadVideoAsync(_currentVideo);
+        await LoadVideoAsync(_currentVideo, MediaLoadIntent.NewlyAddedVideo);
     }
 
     private async void VideosList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1953,89 +4174,186 @@ public partial class MainWindow : Window
         if (_loadingInspections) return;
         _currentVideo = (VideosList.SelectedItem as VideoListItem)?.Video;
         UpdateInspectionWriteState();
-        if (_currentVideo is null) { StopAndReleaseCurrentMedia(); return; }
-        await LoadVideoAsync(_currentVideo);
-    }
-
-    private async void ReportEditorTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (!ReferenceEquals(e.Source, ReportEditorTabs) || ReportEditorTabs.SelectedItem != InspectionsTab ||
-            _loadingInspections || _currentVideo is null ||
-            _currentMedia is not null || !File.Exists(_currentVideo.FilePath)) return;
-        await LoadVideoAsync(_currentVideo);
-    }
-
-    private async Task LoadVideoAsync(VideoReference video, TimeSpan? seekTo = null)
-    {
-        _currentVideo = video;
-        _playerErrorNotified = false;
-        if (!File.Exists(video.FilePath))
-        {
-            ShowVideoState("O arquivo foi movido, renomeado ou está indisponível.", false,
-                VideoSurfaceState.Missing);
-            RefreshVideos();
-            return;
-        }
-        await _videoLoadLock.WaitAsync();
-        Media? pendingMedia = null;
         try
         {
-            if (_currentVideo?.Id != video.Id) return;
+            if (_currentVideo is null) { await StopAndReleaseCurrentMediaAsync(); return; }
+            await LoadVideoAsync(_currentVideo, MediaLoadIntent.ExplicitVideoSelection);
+        }
+        catch (Exception ex) { ShowError("Não foi possível selecionar o vídeo.", ex); }
+    }
+
+    private void ReportEditorTabs_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        UpdateSidebarNavigation();
+
+    private async Task LoadVideoAsync(VideoReference video, MediaLoadIntent intent, TimeSpan? seekTo = null)
+    {
+        if (!MediaLoadPolicy.CanOpen(intent))
+            throw new InvalidOperationException("A seleção de Local ou trecho não pode abrir mídia automaticamente.");
+        var generation = Interlocked.Increment(ref _mediaGeneration);
+        var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            _inspectionLoadCts?.Token ?? CancellationToken.None);
+        var previousCancellation = Interlocked.Exchange(ref _mediaLoadCts, cancellation);
+        previousCancellation?.Cancel();
+        var token = cancellation.Token;
+        _currentVideo = video;
+        _playerErrorNotified = false;
+        _playerTelemetryErrorNotified = false;
+        Media? pendingMedia = null;
+        var lockTaken = false;
+        try
+        {
+            var preflightWatch = Stopwatch.StartNew();
+            MediaPreflightResult preflight;
+            using (var preflightCancellation = CancellationTokenSource.CreateLinkedTokenSource(token))
+            {
+                preflightCancellation.CancelAfter(TimeSpan.FromSeconds(15));
+                try
+                {
+                    preflight = await MediaPlaybackSafety.InspectAsync(video.FilePath, preflightCancellation.Token);
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested)
+                {
+                    ShowVideoState("O arquivo demorou para responder. Aguarde o Dropbox concluir a sincronização e tente novamente.",
+                        false, VideoSurfaceState.Error);
+                    _logger.Error(
+                        $"Timeout na pré-validação do vídeo. Caminho='{video.FilePath}'; Tempo={preflightWatch.ElapsedMilliseconds}ms.",
+                        new TimeoutException("O cabeçalho do arquivo não ficou disponível em 15 segundos."));
+                    return;
+                }
+            }
+
+            if (!preflight.CanOpen)
+            {
+                var state = preflight.FailureKind == MediaPreflightFailureKind.Missing
+                    ? VideoSurfaceState.Missing : VideoSurfaceState.Error;
+                if (generation == Volatile.Read(ref _mediaGeneration))
+                    ShowVideoState(preflight.FailureReason ?? "O arquivo de vídeo não pôde ser validado.", false, state);
+                _logger.Error(
+                    $"Vídeo rejeitado antes do LibVLC. Caminho='{video.FilePath}'; Extensao='{Path.GetExtension(video.FilePath)}'; " +
+                    $"Tamanho={preflight.FileLength}; Motivo='{preflight.FailureReason}'; Tempo={preflightWatch.ElapsedMilliseconds}ms.",
+                    new InvalidDataException(preflight.FailureReason));
+                return;
+            }
+
+            _logger.Info(
+                $"Pré-validação de vídeo concluída. Caminho='{video.FilePath}'; Extensao='{Path.GetExtension(video.FilePath)}'; " +
+                $"Tamanho={preflight.FileLength}; Tempo={preflightWatch.ElapsedMilliseconds}ms; Geracao={generation}.");
+
+            await _playerLifecycleGate.WaitAsync(token);
+            lockTaken = true;
+            token.ThrowIfCancellationRequested();
+            if (_currentVideo?.Id != video.Id || generation != Volatile.Read(ref _mediaGeneration)) return;
             _videoLoadInProgress = true;
             UpdateInspectionWriteState();
             ShowVideoState("Preparando reprodução e controles de navegação.", false,
                 VideoSurfaceState.Loading);
             pendingMedia = new Media(_libVlc, video.FilePath, FromType.FromPath);
-            if (!_mediaPlayer.Play(pendingMedia)) throw new InvalidOperationException("O player não conseguiu iniciar o vídeo.");
+            token.ThrowIfCancellationRequested();
+
+            Interlocked.Exchange(ref _activeMediaGeneration, 0);
             var previousMedia = _currentMedia;
+            try { _mediaPlayer.Stop(); }
+            catch (Exception ex) { _logger.Error("Falha ao interromper a mídia anterior antes da troca.", ex); }
+            _currentMedia = null;
+            previousMedia?.Dispose();
+
             _currentMedia = pendingMedia;
+            Interlocked.Exchange(ref _activeMediaGeneration, generation);
+            if (!_mediaPlayer.Play(pendingMedia))
+            {
+                Interlocked.Exchange(ref _activeMediaGeneration, 0);
+                _currentMedia = null;
+                throw new InvalidOperationException("O player não conseguiu iniciar o vídeo.");
+            }
+
             pendingMedia = null;
             _lastKnownPlayerTime = 0;
-            previousMedia?.Dispose();
-            _logger.Info($"Vídeo aberto: {video.FilePath}");
+            _logger.Info(
+                $"Vídeo entregue ao LibVLC. Caminho='{video.FilePath}'; Extensao='{Path.GetExtension(video.FilePath)}'; " +
+                $"DecodificacaoHardware=False; Geracao={generation}.");
             if (seekTo is not null)
             {
                 SetPlayerOperationState(true);
                 try
                 {
-                    await WaitForMediaReadyAsync();
-                    await SeekToDisplayedFrameAsync((long)seekTo.Value.TotalMilliseconds);
+                    await WaitForMediaReadyAsync(token);
+                    await SeekToDisplayedFrameAsync((long)seekTo.Value.TotalMilliseconds, token);
                 }
                 finally { SetPlayerOperationState(false); }
             }
         }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            _logger.Info($"Abertura de vídeo cancelada. Geracao={generation}; Caminho='{video.FilePath}'.");
+        }
         catch (Exception ex)
         {
             pendingMedia?.Dispose();
-            ShowVideoState("Verifique o arquivo, codec ou acesso ao local de armazenamento.", false,
-                VideoSurfaceState.Error);
-            _logger.Error($"Falha ao abrir vídeo. Caminho='{video.FilePath}', extensão='{Path.GetExtension(video.FilePath)}', backend='LibVLC'.", ex);
+            if (generation == Volatile.Read(ref _mediaGeneration))
+                ShowVideoState("Verifique o arquivo, codec ou acesso ao local de armazenamento.", false,
+                    VideoSurfaceState.Error);
+            _logger.Error(
+                $"Falha ao abrir vídeo. Caminho='{video.FilePath}', extensão='{Path.GetExtension(video.FilePath)}', " +
+                $"backend='LibVLC', decodificaçãoHardware=False, geracao={generation}.", ex);
         }
         finally
         {
-            _videoLoadInProgress = false;
-            _videoLoadLock.Release();
-            UpdateInspectionWriteState();
+            pendingMedia?.Dispose();
+            if (lockTaken) _playerLifecycleGate.Release();
+            Interlocked.CompareExchange(ref _mediaLoadCts, null, cancellation);
+            cancellation.Dispose();
+            if (generation == Volatile.Read(ref _mediaGeneration))
+            {
+                _videoLoadInProgress = false;
+                UpdateInspectionWriteState();
+            }
         }
     }
 
     private async void RetryVideo_Click(object sender, RoutedEventArgs e)
     {
-        if (_currentVideo is not null && !_playerOperationInProgress) await LoadVideoAsync(_currentVideo);
+        try
+        {
+            if (_currentVideo is not null && !_playerOperationInProgress)
+                await LoadVideoAsync(_currentVideo, MediaLoadIntent.Reload);
+        }
+        catch (Exception ex) { ShowError("Não foi possível recarregar o vídeo.", ex); }
     }
 
-    private async Task WaitForMediaReadyAsync()
+    private async Task WaitForMediaReadyAsync(CancellationToken cancellationToken = default)
     {
-        for (var attempt = 0; attempt < 100 && _mediaPlayer.Length <= 0; attempt++) await Task.Delay(50);
+        for (var attempt = 0; attempt < 100 && _mediaPlayer.Length <= 0; attempt++)
+            await Task.Delay(50, cancellationToken);
         if (_mediaPlayer.Length <= 0) throw new InvalidOperationException("Não foi possível obter a duração do vídeo.");
     }
 
-    private void PlayPause_Click(object sender, RoutedEventArgs e)
+    private async void PlayPause_Click(object sender, RoutedEventArgs e)
     {
         if (_currentVideo is null) return;
-        if (_currentMedia is null) { _ = LoadVideoAsync(_currentVideo); return; }
-        if (_mediaPlayer.IsPlaying) _mediaPlayer.SetPause(true);
-        else _mediaPlayer.Play();
+        try
+        {
+            if (_currentMedia is null)
+            {
+                await LoadVideoAsync(_currentVideo, MediaLoadIntent.Reload);
+                return;
+            }
+
+            await _playerLifecycleGate.WaitAsync();
+            try
+            {
+                if (_playerDisposed || _currentMedia is null) return;
+                if (_mediaPlayer.IsPlaying) _mediaPlayer.SetPause(true);
+                else if (!_mediaPlayer.Play())
+                    throw new InvalidOperationException("O LibVLC não conseguiu retomar a reprodução.");
+            }
+            finally { _playerLifecycleGate.Release(); }
+        }
+        catch (Exception ex)
+        {
+            ShowVideoState("Não foi possível alterar o estado da reprodução. Tente recarregar o vídeo.",
+                false, VideoSurfaceState.Error);
+            ShowError("Falha ao reproduzir ou pausar o vídeo.", ex);
+        }
     }
 
     private async void Back5_Click(object sender, RoutedEventArgs e) => await SeekRelativeAsync(-5, false);
@@ -2046,6 +4364,12 @@ public partial class MainWindow : Window
     private async Task SeekRelativeAsync(int seconds, bool restorePlayback)
     {
         if (_currentMedia is null || _playerOperationInProgress) return;
+        await _playerLifecycleGate.WaitAsync();
+        if (_currentMedia is null)
+        {
+            _playerLifecycleGate.Release();
+            return;
+        }
         var media = _currentMedia;
         var wasPlaying = _mediaPlayer.IsPlaying;
         SetPlayerOperationState(true);
@@ -2073,6 +4397,7 @@ public partial class MainWindow : Window
         {
             if (ReferenceEquals(_currentMedia, media) && wasPlaying && restorePlayback) _mediaPlayer.Play();
             SetPlayerOperationState(false);
+            _playerLifecycleGate.Release();
         }
     }
 
@@ -2087,7 +4412,7 @@ public partial class MainWindow : Window
         finally { _seeking = false; }
     }
 
-    private void SpeedCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async void SpeedCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_updatingSpeedSelection) return;
         if (SpeedCombo.SelectedItem is not ComboBoxItem { Tag: string value } ||
@@ -2098,14 +4423,36 @@ public partial class MainWindow : Window
             _selectedPlaybackRate = rate;
             return;
         }
-        if (TryApplyPlaybackRate(rate))
+
+        try
         {
-            _selectedPlaybackRate = rate;
-            return;
+            await _playerLifecycleGate.WaitAsync();
+            try
+            {
+                if (_playerDisposed || _currentMedia is null)
+                {
+                    _selectedPlaybackRate = rate;
+                    return;
+                }
+                if (TryApplyPlaybackRate(rate))
+                {
+                    _selectedPlaybackRate = rate;
+                    return;
+                }
+            }
+            finally { _playerLifecycleGate.Release(); }
+
+            SelectSpeed(previousRate);
+            MessageBox.Show($"O formato deste vídeo não aceita {rate:0.##}x. A velocidade anterior foi mantida.",
+                "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
-        SelectSpeed(previousRate);
-        MessageBox.Show($"O formato deste vídeo não aceita {rate:0.##}x. A velocidade anterior foi mantida.",
-            "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Warning);
+        catch (Exception ex)
+        {
+            SelectSpeed(previousRate);
+            LogPlayerControlFailure("alteração de velocidade", ex);
+            MessageBox.Show("Não foi possível alterar a velocidade deste vídeo.",
+                "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private bool TryApplyPlaybackRate(float rate) =>
@@ -2126,6 +4473,12 @@ public partial class MainWindow : Window
     private async Task SeekAbsoluteAsync(long requestedMilliseconds)
     {
         if (_currentMedia is null || _playerOperationInProgress) return;
+        await _playerLifecycleGate.WaitAsync();
+        if (_currentMedia is null)
+        {
+            _playerLifecycleGate.Release();
+            return;
+        }
         var media = _currentMedia;
         var resumePlayback = _mediaPlayer.IsPlaying;
         SetPlayerOperationState(true);
@@ -2146,10 +4499,12 @@ public partial class MainWindow : Window
         {
             if (ReferenceEquals(_currentMedia, media) && resumePlayback) _mediaPlayer.Play();
             SetPlayerOperationState(false);
+            _playerLifecycleGate.Release();
         }
     }
 
-    private async Task<long> SeekToDisplayedFrameAsync(long requestedMilliseconds)
+    private async Task<long> SeekToDisplayedFrameAsync(long requestedMilliseconds,
+        CancellationToken cancellationToken = default)
     {
         if (!_mediaPlayer.IsSeekable)
             throw new InvalidOperationException("Este formato de vídeo não permite navegação precisa.");
@@ -2161,19 +4516,20 @@ public partial class MainWindow : Window
             if (restartDecoder)
             {
                 _mediaPlayer.Stop();
-                await Task.Delay(80);
+                await Task.Delay(80, cancellationToken);
             }
             else
             {
                 _mediaPlayer.SetPause(true);
-                await Task.Delay(45);
+                await Task.Delay(45, cancellationToken);
             }
             var started = restartDecoder && _currentMedia is not null
                 ? _mediaPlayer.Play(_currentMedia)
                 : _mediaPlayer.Play();
             if (!started)
                 throw new InvalidOperationException("O LibVLC não conseguiu ativar o decodificador para navegar no vídeo.");
-            for (var attempt = 0; attempt < 200 && !_mediaPlayer.IsPlaying; attempt++) await Task.Delay(25);
+            for (var attempt = 0; attempt < 200 && !_mediaPlayer.IsPlaying; attempt++)
+                await Task.Delay(25, cancellationToken);
             if (!_mediaPlayer.IsPlaying)
                 throw new InvalidOperationException("O decodificador do vídeo não iniciou para realizar o seek.");
             _mediaPlayer.SetRate(1f);
@@ -2182,11 +4538,11 @@ public partial class MainWindow : Window
             for (var attempt = 0; attempt < 60; attempt++)
             {
                 if (Math.Abs(_mediaPlayer.Time - target) <= 120) { reachedTarget = true; break; }
-                await Task.Delay(25);
+                await Task.Delay(25, cancellationToken);
             }
             if (!reachedTarget)
                 throw new InvalidOperationException("O player não alcançou o timestamp solicitado.");
-            await Task.Delay(35);
+            await Task.Delay(35, cancellationToken);
             _mediaPlayer.SetPause(true);
             await PauseOnDisplayedFrameAsync();
             var decoded = Math.Max(0, _mediaPlayer.Time);
@@ -2194,11 +4550,11 @@ public partial class MainWindow : Window
                 throw new InvalidOperationException("O LibVLC não apresentou o quadro correspondente ao timestamp solicitado.");
 
             _mediaPlayer.Time = target;
-            await Task.Delay(30);
+            await Task.Delay(30, cancellationToken);
             var reached = Math.Max(0, _mediaPlayer.Time);
             if (Math.Abs(reached - target) > 80)
                 throw new InvalidOperationException("O timestamp final não corresponde ao destino solicitado.");
-            RefreshPlayerPosition();
+            RefreshPlayerPositionUnsafe();
             return reached;
         }
         finally { _mediaPlayer.SetRate(_selectedPlaybackRate); }
@@ -2225,8 +4581,12 @@ public partial class MainWindow : Window
         _captureInProgress = true;
         CaptureFrameOverlayText.Text = "Capturando...";
         UpdateInspectionWriteState();
+        var lockTaken = false;
         try
         {
+            await _playerLifecycleGate.WaitAsync();
+            lockTaken = true;
+            if (_currentMedia is null) throw new InvalidOperationException("Nenhum vídeo está carregado para captura.");
             SetPlayerOperationState(true);
             await PauseOnDisplayedFrameAsync();
             await WaitForDisplayedFrameAsync(TimeSpan.FromMilliseconds(Math.Max(0, _mediaPlayer.Time)));
@@ -2237,6 +4597,7 @@ public partial class MainWindow : Window
         catch (Exception ex) { ShowError("Não foi possível capturar o frame diretamente do vídeo.", ex); }
         finally
         {
+            if (lockTaken) _playerLifecycleGate.Release();
             _captureInProgress = false;
             SetPlayerOperationState(false);
             CaptureFrameOverlayText.Text = "Capturar evidência";
@@ -2282,29 +4643,115 @@ public partial class MainWindow : Window
     {
         if (_currentProject is null || _currentSection is null || IsReadOnly || IsSectionReviewLocked) return;
         Capture? automaticCapture = null;
+        var captureGateTaken = false;
         try
         {
-            if (_currentVideo is not null && _currentMedia is not null && File.Exists(_currentVideo.FilePath))
+            if (_currentVideo is not null && _currentMedia is not null &&
+                !_videoLoadInProgress && !_playerOperationInProgress)
             {
-                await PauseOnDisplayedFrameAsync();
-                var draft = await _frameCaptureService.CaptureCurrentFrameAsync(
-                    _currentProject, _currentSection, _currentVideo, _mediaPlayer, IsReadOnly);
-                automaticCapture = _frameCaptureService.Accept(_currentProject, draft, IsReadOnly);
+                captureGateTaken = _playerLifecycleGate.Wait(0);
+                if (captureGateTaken && _currentMedia is not null)
+                {
+                    using var captureTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    await PauseOnDisplayedFrameAsync();
+                    var draft = await _frameCaptureService.CaptureCurrentFrameAsync(
+                        _currentProject, _currentSection, _currentVideo, _mediaPlayer, IsReadOnly,
+                        captureTimeout.Token);
+                    automaticCapture = _frameCaptureService.Accept(_currentProject, draft, IsReadOnly);
+                }
+                else if (!captureGateTaken)
+                {
+                    _logger.Info("Captura automática ignorada porque o player estava ocupado; " +
+                                 "o cadastro da anomalia será aberto sem imagem inicial.");
+                }
             }
-            await OpenOccurrenceEditorAsync(null, automaticCapture, automaticCapture);
         }
         catch (Exception ex)
         {
             if (automaticCapture is not null && automaticCapture.Status == CaptureStatus.Pending)
                 _frameCaptureService.DeletePending(_currentProject, automaticCapture, IsReadOnly);
-            ShowError("Não foi possível iniciar o cadastro no frame atual do vídeo.", ex);
+            automaticCapture = null;
+            _logger.Error("Falha na captura automática; o cadastro da anomalia continuará sem imagem inicial.", ex);
         }
+        finally
+        {
+            if (captureGateTaken) _playerLifecycleGate.Release();
+        }
+
+        await OpenOccurrenceEditorAsync(null, automaticCapture, automaticCapture);
     }
 
-    private async void CreateOccurrenceFromPending_Click(object sender, RoutedEventArgs e)
+    private async void OpenPendingCaptures_Click(object sender, RoutedEventArgs e) =>
+        await OpenPendingCapturesAsync();
+
+    private async Task OpenPendingCapturesAsync(Guid? highlightedCaptureId = null)
     {
-        if (_currentProject is null || ((Button)sender).Tag is not Guid id || IsReadOnly || IsSectionReviewLocked) return;
-        await OpenOccurrenceEditorAsync(null, _currentProject.Captures.SingleOrDefault(x => x.Id == id));
+        if (_currentProject is null || _currentSection is null) return;
+        var sectionId = _currentSection.Id;
+        var items = _currentProject.Captures
+            .Where(x => x.SectionId == sectionId && x.Status == CaptureStatus.Pending)
+            .OrderBy(x => x.Order)
+            .Select(x => new PendingCaptureListItem(
+                x.Id,
+                x.FilePath,
+                FormatTime(x.VideoTimestamp),
+                FindVideo(x.VideoReferenceId)?.DisplayName ?? Path.GetFileName(x.VideoFilePath),
+                !IsReadOnly && !IsSectionReviewLocked,
+                !IsReadOnly))
+            .ToList();
+        if (items.Count == 0)
+        {
+            RefreshCaptures();
+            if (highlightedCaptureId is not null)
+                MessageBox.Show("A captura indicada pela revisão não está mais pendente.",
+                    "Revisão do relatório", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (highlightedCaptureId is Guid expectedId && items.All(x => x.Id != expectedId))
+        {
+            MessageBox.Show("A captura indicada pela revisão não foi encontrada neste trecho.",
+                "Revisão do relatório", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        PendingCaptureAction action;
+        Guid? captureId;
+        HideVideoSurfaceForOverlay();
+        try
+        {
+            await Dispatcher.Yield(DispatcherPriority.Render);
+            var window = new PendingCapturesWindow(
+                items, LoadThumbnailOnDemandAsync, highlightedCaptureId) { Owner = this };
+            window.ShowDialog();
+            action = window.SelectedAction;
+            captureId = window.SelectedCaptureId;
+        }
+        catch (Exception ex)
+        {
+            _logger.Error("Falha ao abrir a janela de capturas pendentes.", ex);
+            ShowError("Não foi possível abrir as capturas pendentes.", ex);
+            return;
+        }
+        finally
+        {
+            RestoreVideoSurfaceAfterOverlay();
+        }
+
+        if (captureId is not Guid id || _currentProject is null) return;
+        switch (action)
+        {
+            case PendingCaptureAction.Register:
+                if (!IsReadOnly && !IsSectionReviewLocked)
+                    await OpenOccurrenceEditorAsync(null, _currentProject.Captures.SingleOrDefault(x => x.Id == id));
+                break;
+            case PendingCaptureAction.Navigate:
+                await NavigateToCaptureAsync(id);
+                break;
+            case PendingCaptureAction.Delete:
+                await DeletePendingCaptureAsync(id);
+                break;
+        }
     }
 
     private async void EditOccurrence_Click(object sender, RoutedEventArgs e)
@@ -2381,7 +4828,7 @@ public partial class MainWindow : Window
             RefreshCaptures();
             RefreshOccurrences();
             await SaveInspectionChangesAsync();
-            if (editor.ResumeVideoAfterSave && _currentMedia is not null) _mediaPlayer.Play();
+            if (editor.ResumeVideoAfterSave && _currentMedia is not null) await ResumePlaybackAsync();
         }
         catch (Exception ex)
         {
@@ -2393,22 +4840,28 @@ public partial class MainWindow : Window
     private async Task<Capture?> RecaptureOccurrenceFrameAsync(Capture currentCapture, TimeSpan timestamp)
     {
         if (_currentProject is null || _currentSection is null || _currentVideo is null || IsReadOnly) return null;
-        var duration = TimeSpan.FromMilliseconds(Math.Max(0, _mediaPlayer.Length));
-        if (duration > TimeSpan.Zero && timestamp > duration) timestamp = duration;
-        if (timestamp < TimeSpan.Zero) timestamp = TimeSpan.Zero;
-        _mediaPlayer.Time = (long)timestamp.TotalMilliseconds;
-        await WaitForDisplayedFrameAsync(timestamp);
-        var draft = await _frameCaptureService.CaptureCurrentFrameAsync(
-            _currentProject, _currentSection, _currentVideo, _mediaPlayer, IsReadOnly);
-        if (Math.Abs((draft.VideoTimestamp - timestamp).TotalMilliseconds) > 100)
+        await _playerLifecycleGate.WaitAsync();
+        try
         {
-            _frameCaptureService.Discard(draft);
-            throw new InvalidOperationException("O player não estabilizou no timestamp solicitado para refazer o frame.");
+            if (_currentMedia is null) return null;
+            var duration = TimeSpan.FromMilliseconds(Math.Max(0, _mediaPlayer.Length));
+            if (duration > TimeSpan.Zero && timestamp > duration) timestamp = duration;
+            if (timestamp < TimeSpan.Zero) timestamp = TimeSpan.Zero;
+            _mediaPlayer.Time = (long)timestamp.TotalMilliseconds;
+            await WaitForDisplayedFrameAsync(timestamp);
+            var draft = await _frameCaptureService.CaptureCurrentFrameAsync(
+                _currentProject, _currentSection, _currentVideo, _mediaPlayer, IsReadOnly);
+            if (Math.Abs((draft.VideoTimestamp - timestamp).TotalMilliseconds) > 100)
+            {
+                _frameCaptureService.Discard(draft);
+                throw new InvalidOperationException("O player não estabilizou no timestamp solicitado para refazer o frame.");
+            }
+            var replacement = _frameCaptureService.Accept(_currentProject, draft, IsReadOnly);
+            if (currentCapture.Status == CaptureStatus.Pending && _currentProject.Captures.Contains(currentCapture))
+                _frameCaptureService.DeletePending(_currentProject, currentCapture, IsReadOnly);
+            return replacement;
         }
-        var replacement = _frameCaptureService.Accept(_currentProject, draft, IsReadOnly);
-        if (currentCapture.Status == CaptureStatus.Pending && _currentProject.Captures.Contains(currentCapture))
-            _frameCaptureService.DeletePending(_currentProject, currentCapture, IsReadOnly);
-        return replacement;
+        finally { _playerLifecycleGate.Release(); }
     }
 
     private async Task PauseOnDisplayedFrameAsync()
@@ -2427,23 +4880,66 @@ public partial class MainWindow : Window
 
     private void HideVideoSurfaceForOverlay()
     {
-        if (_currentMedia is not null) _mediaPlayer.SetPause(true);
+        var generation = Interlocked.Increment(ref _videoSurfaceGeneration);
         VideoOverlayLayer.Visibility = Visibility.Collapsed;
         PlayerControlsLayer.Visibility = Visibility.Collapsed;
-        VideoOverlayLayer.UpdateLayout();
         VideoView.Visibility = Visibility.Collapsed;
-        VideoView.MediaPlayer = null;
         VideoView.UpdateLayout();
+        _ = PauseAndDetachVideoSurfaceAsync(generation);
+    }
+
+    private async Task PauseAndDetachVideoSurfaceAsync(long generation)
+    {
+        try
+        {
+            await _playerLifecycleGate.WaitAsync();
+            try
+            {
+                if (_playerDisposed || generation != Volatile.Read(ref _videoSurfaceGeneration)) return;
+                if (_currentMedia is not null) _mediaPlayer.SetPause(true);
+                VideoView.MediaPlayer = null;
+                VideoView.UpdateLayout();
+            }
+            finally { _playerLifecycleGate.Release(); }
+        }
+        catch (Exception ex) { LogPlayerControlFailure("ocultação da superfície de vídeo", ex); }
     }
 
     private void RestoreVideoSurfaceAfterOverlay()
     {
-        if (_playerDisposed) return;
-        VideoView.MediaPlayer = _mediaPlayer;
+        var generation = Interlocked.Increment(ref _videoSurfaceGeneration);
         VideoView.Visibility = Visibility.Visible;
         VideoOverlayLayer.Visibility = Visibility.Visible;
         PlayerControlsLayer.Visibility = Visibility.Visible;
         VideoView.UpdateLayout();
+        _ = AttachVideoSurfaceAsync(generation);
+    }
+
+    private async Task AttachVideoSurfaceAsync(long generation)
+    {
+        try
+        {
+            await _playerLifecycleGate.WaitAsync();
+            try
+            {
+                if (_playerDisposed || generation != Volatile.Read(ref _videoSurfaceGeneration)) return;
+                VideoView.MediaPlayer = _mediaPlayer;
+                VideoView.UpdateLayout();
+            }
+            finally { _playerLifecycleGate.Release(); }
+        }
+        catch (Exception ex) { LogPlayerControlFailure("restauração da superfície de vídeo", ex); }
+    }
+
+    private async Task ResumePlaybackAsync()
+    {
+        await _playerLifecycleGate.WaitAsync();
+        try
+        {
+            if (!_playerDisposed && _currentMedia is not null && !_mediaPlayer.Play())
+                throw new InvalidOperationException("O LibVLC não conseguiu retomar a reprodução.");
+        }
+        finally { _playerLifecycleGate.Release(); }
     }
 
     private async Task<long> WaitForDisplayedFrameAsync(TimeSpan target)
@@ -2504,25 +5000,38 @@ public partial class MainWindow : Window
         RefreshVideos();
         VideosList.SelectedItem = ((IEnumerable<VideoListItem>)VideosList.ItemsSource).FirstOrDefault(x => x.Id == video.Id);
         _loadingInspections = false;
-        await LoadVideoAsync(video, timestamp);
+        await LoadVideoAsync(video, MediaLoadIntent.NavigateToEvidence, timestamp);
     }
 
-    private async void DeleteCapture_Click(object sender, RoutedEventArgs e)
+    private async Task DeletePendingCaptureAsync(Guid id)
     {
-        if (_currentProject is null || ((Button)sender).Tag is not Guid id || IsReadOnly) return;
+        if (_currentProject is null || IsReadOnly) return;
         var capture = _currentProject.Captures.SingleOrDefault(x => x.Id == id);
-        if (capture is null || MessageBox.Show("Excluir esta captura pendente e seu arquivo PNG?", "Confirmar exclusão",
+        if (capture is null)
+        {
+            MessageBox.Show("A captura pendente não foi encontrada.", "GeoAutoDocs",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            RefreshCaptures();
+            return;
+        }
+        if (MessageBox.Show("Excluir esta captura pendente e seu arquivo PNG?", "Confirmar exclusão",
                 MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         _frameCaptureService.DeletePending(_currentProject, capture, IsReadOnly);
         RefreshCaptures();
         await SaveInspectionChangesAsync();
     }
 
-    private async void GoToCapture_Click(object sender, RoutedEventArgs e)
+    private async Task NavigateToCaptureAsync(Guid id)
     {
-        if (_currentProject is null || ((Button)sender).Tag is not Guid id) return;
+        if (_currentProject is null) return;
         var capture = _currentProject.Captures.SingleOrDefault(x => x.Id == id);
-        if (capture is null) return;
+        if (capture is null)
+        {
+            MessageBox.Show("A captura pendente não foi encontrada.", "GeoAutoDocs",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            RefreshCaptures();
+            return;
+        }
         var section = FindSection(capture.SectionId);
         var location = _currentProject.Locations.FirstOrDefault(x => x.Sections.Any(y => y.Id == capture.SectionId));
         var video = FindVideo(capture.VideoReferenceId);
@@ -2536,7 +5045,7 @@ public partial class MainWindow : Window
         VideosList.SelectedItem = ((IEnumerable<VideoListItem>)VideosList.ItemsSource).FirstOrDefault(x => x.Id == video.Id);
         RefreshCaptures();
         _loadingInspections = false;
-        await LoadVideoAsync(video, capture.VideoTimestamp);
+        await LoadVideoAsync(video, MediaLoadIntent.NavigateToEvidence, capture.VideoTimestamp);
     }
 
     private async void RelocateVideo_Click(object sender, RoutedEventArgs e)
@@ -2554,7 +5063,7 @@ public partial class MainWindow : Window
         if (_currentVideo.Id != id) throw new InvalidOperationException("A relocalização alterou indevidamente a identidade do vídeo.");
         RefreshVideos();
         await SaveInspectionChangesAsync();
-        await LoadVideoAsync(_currentVideo);
+        await LoadVideoAsync(_currentVideo, MediaLoadIntent.RelocatedVideo);
     }
 
     private async void RemoveVideo_Click(object sender, RoutedEventArgs e)
@@ -2568,17 +5077,54 @@ public partial class MainWindow : Window
         }
         if (MessageBox.Show("Remover somente a referência deste vídeo? O arquivo original não será alterado.",
                 "GeoAutoDocs", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-        StopAndReleaseCurrentMedia();
+        await StopAndReleaseCurrentMediaAsync();
         _currentSection.VideoReferences.Remove(_currentVideo);
         _currentVideo = null;
         RefreshVideos();
         await SaveInspectionChangesAsync();
     }
 
+    private async Task SaveSectionMetadataAsync(InspectionSection section)
+    {
+        if (_currentProject is null || IsReadOnly) return;
+        await _persistenceGate.WaitAsync();
+        try
+        {
+            SaveStatus.Text = "Salvando...";
+            await _store.SaveSectionAsync(section);
+            _currentProject.UpdatedAt = DateTime.UtcNow;
+            if (_sharedSession is not null) _sharedDirty = true;
+            _saveErrorNotified = false;
+            SaveStatus.Text = "✓ Salvo";
+            RefreshHomeStatus();
+            UpdateSectionReviewState();
+        }
+        catch (Exception ex)
+        {
+            MarkPendingChanges();
+            _saveTimer.Stop();
+            _saveTimer.Start();
+            SaveStatus.Text = "Falha ao salvar — nova tentativa pendente";
+            UpdateSectionReviewState();
+            _logger.Error("Não foi possível salvar os metadados do trecho.", ex);
+            if (!_saveErrorNotified)
+            {
+                _saveErrorNotified = true;
+                RefreshHomeStatus();
+                MessageBox.Show("Não foi possível salvar o trecho. Uma nova tentativa será feita automaticamente.",
+                    "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+        finally
+        {
+            _persistenceGate.Release();
+        }
+    }
+
     private async Task SaveInspectionChangesAsync()
     {
         if (_currentProject is null || IsReadOnly) return;
-        _hasPendingChanges = true;
+        MarkPendingChanges();
         UpdateSectionReviewState();
         await SavePendingAsync();
         if (_sharedSession is not null) _sharedDirty = true;
@@ -2586,7 +5132,19 @@ public partial class MainWindow : Window
 
     private void RefreshPlayerPosition()
     {
-        if (_playerDisposed) return;
+        if (_playerDisposed || !_playerLifecycleGate.Wait(0)) return;
+        try { RefreshPlayerPositionUnsafe(); }
+        catch (Exception ex)
+        {
+            if (_playerTelemetryErrorNotified) return;
+            _playerTelemetryErrorNotified = true;
+            LogPlayerControlFailure("leitura da posição", ex);
+        }
+        finally { _playerLifecycleGate.Release(); }
+    }
+
+    private void RefreshPlayerPositionUnsafe()
+    {
         var duration = Math.Max(0, _mediaPlayer.Length);
         var current = _mediaPlayer.State == VLCState.Ended && duration > 0
             ? duration : Math.Max(0, _mediaPlayer.Time);
@@ -2601,28 +5159,44 @@ public partial class MainWindow : Window
 
     private void HandlePlayerError()
     {
-        if (_playerErrorNotified) return;
+        if (_playerErrorNotified || _playerDisposed || _currentMedia is null) return;
         _playerErrorNotified = true;
         ShowVideoState("Verifique o arquivo, codec ou acesso ao local de armazenamento.", false,
             VideoSurfaceState.Error);
-        _logger.Error($"Erro de codec, rede ou leitura. Caminho='{_currentVideo?.FilePath}', extensão='{Path.GetExtension(_currentVideo?.FilePath)}', backend='LibVLC'.",
+        _logger.Error(
+            $"Erro de codec, rede ou leitura. Caminho='{_currentVideo?.FilePath}', " +
+            $"extensão='{Path.GetExtension(_currentVideo?.FilePath)}', backend='LibVLC', " +
+            $"geracao={Volatile.Read(ref _activeMediaGeneration)}.",
             new IOException("O LibVLC informou falha durante a reprodução."));
     }
 
-    private void StopAndReleaseCurrentMedia()
+    private async Task StopAndReleaseCurrentMediaAsync(CancellationToken cancellationToken = default)
     {
         if (_playerDisposed) return;
-        try { _mediaPlayer.Stop(); } catch (Exception ex) { _logger.Error("Falha ao interromper o player.", ex); }
-        _currentMedia?.Dispose();
-        _currentMedia = null;
-        _lastKnownPlayerTime = 0;
-        if (_currentSection is null)
-            ShowVideoState("Escolha um local e um trecho para continuar.", false);
-        else if (_currentSection.VideoReferences.Count == 0)
-            ShowVideoState("Este trecho ainda não possui vídeos vinculados.", !IsReadOnly);
-        else
-            ShowVideoState("Escolha um dos vídeos vinculados ao trecho.", false);
-        PlayPauseButton.Content = "▶";
+        Interlocked.Increment(ref _mediaGeneration);
+        _mediaLoadCts?.Cancel();
+        await _playerLifecycleGate.WaitAsync(cancellationToken);
+        try
+        {
+            Interlocked.Exchange(ref _activeMediaGeneration, 0);
+            try { _mediaPlayer.Stop(); }
+            catch (Exception ex) { _logger.Error("Falha ao interromper o player.", ex); }
+            var media = _currentMedia;
+            _currentMedia = null;
+            try { media?.Dispose(); }
+            catch (Exception ex) { _logger.Error("Falha ao descartar a mídia atual.", ex); }
+            _lastKnownPlayerTime = 0;
+            _videoLoadInProgress = false;
+            _playerTelemetryErrorNotified = false;
+            if (_currentSection is null)
+                ShowVideoState("Escolha um local e um trecho para continuar.", false);
+            else if (_currentSection.VideoReferences.Count == 0)
+                ShowVideoState("Este trecho ainda não possui vídeos vinculados.", !IsReadOnly);
+            else
+                ShowVideoState("Escolha um dos vídeos vinculados ao trecho.", false);
+            PlayPauseButton.Content = "▶";
+        }
+        finally { _playerLifecycleGate.Release(); }
     }
 
     private void ShowVideoState(string message, bool showAddVideo,
@@ -2655,23 +5229,49 @@ public partial class MainWindow : Window
         EmptyVideoButton.Visibility = showAddVideo ? Visibility.Visible : Visibility.Collapsed;
         EmptyRelocateVideoButton.Visibility = state == VideoSurfaceState.Missing && !IsReadOnly
             ? Visibility.Visible : Visibility.Collapsed;
-        var canReload = _currentVideo is not null && File.Exists(_currentVideo.FilePath) &&
-                        state != VideoSurfaceState.Loading;
+        var canReload = _currentVideo is not null && state is not VideoSurfaceState.Loading and not VideoSurfaceState.Missing;
         RetryVideoButton.Content = state == VideoSurfaceState.Error ? "Tentar novamente" : "Recarregar vídeo";
         RetryVideoButton.Visibility = state == VideoSurfaceState.Error || canReload
             ? Visibility.Visible : Visibility.Collapsed;
         VideoEmptyState.Visibility = Visibility.Visible;
     }
 
-    private void DisposePlayer()
+    private async Task DisposePlayerAsync()
     {
-        if (_playerDisposed) return;
-        _playerDisposed = true;
+        if (_playerDisposed || _playerDisposeInProgress) return;
+        _playerDisposeInProgress = true;
+        _inspectionLoadCts?.Cancel();
+        _mediaLoadCts?.Cancel();
         _playerTimer.Stop();
-        try { _mediaPlayer.Stop(); } catch { }
-        _currentMedia?.Dispose();
-        _mediaPlayer.Dispose();
-        _libVlc.Dispose();
+        _overviewRefreshTimer.Stop();
+        try
+        {
+            await _playerLifecycleGate.WaitAsync();
+            try
+            {
+                _playerDisposed = true;
+                Interlocked.Increment(ref _mediaGeneration);
+                Interlocked.Exchange(ref _activeMediaGeneration, 0);
+                VideoView.MediaPlayer = null;
+                try { _mediaPlayer.Stop(); }
+                catch (Exception ex) { _logger.Error("Falha ao interromper o player durante o fechamento.", ex); }
+                try { _currentMedia?.Dispose(); }
+                catch (Exception ex) { _logger.Error("Falha ao descartar a mídia durante o fechamento.", ex); }
+                _currentMedia = null;
+                _libVlc.Log -= OnLibVlcLog;
+                try { _mediaPlayer.Dispose(); }
+                catch (Exception ex) { _logger.Error("Falha ao descartar o MediaPlayer.", ex); }
+                try { _libVlc.Dispose(); }
+                catch (Exception ex) { _logger.Error("Falha ao descartar o LibVLC.", ex); }
+            }
+            finally { _playerLifecycleGate.Release(); }
+
+            _inspectionLoadCts?.Dispose();
+            _inspectionLoadCts = null;
+            _mediaLoadCts?.Dispose();
+            _mediaLoadCts = null;
+        }
+        finally { _playerDisposeInProgress = false; }
     }
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -2767,29 +5367,117 @@ public partial class MainWindow : Window
     private static BitmapImage? LoadThumbnail(string? path)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return null;
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad;
-        image.DecodePixelWidth = 220; image.StreamSource = stream; image.EndInit(); image.Freeze(); return image;
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            var image = new BitmapImage();
+            image.BeginInit();
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            image.DecodePixelWidth = 220;
+            image.StreamSource = stream;
+            image.EndInit();
+            image.Freeze();
+            return image;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Thumbnail ignorada para '{path}': {ex.Message}");
+            return null;
+        }
     }
 
-    private sealed class VideoListItem
+    private async Task<BitmapImage?> LoadThumbnailOnDemandAsync(string? path, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        if (_thumbnailFailures.TryGetValue(path, out var failedAt) &&
+            DateTimeOffset.UtcNow - failedAt < TimeSpan.FromSeconds(30)) return null;
+        _thumbnailFailures.TryRemove(path, out _);
+        lock (_thumbnailCacheSync)
+            if (_thumbnailCache.TryGetValue(path, out var cached)) return cached;
+
+        try
+        {
+            return await _thumbnailLoadExecutor.RunAsync(async token =>
+            {
+                lock (_thumbnailCacheSync)
+                    if (_thumbnailCache.TryGetValue(path, out var cached)) return cached;
+                var image = await Task.Run(() => DecodeThumbnail(path), token);
+                token.ThrowIfCancellationRequested();
+                RememberThumbnail(path, image);
+                _thumbnailFailures.TryRemove(path, out _);
+                return image;
+            }, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            if (_thumbnailFailures.Count > 256) _thumbnailFailures.Clear();
+            if (_thumbnailFailures.TryAdd(path, DateTimeOffset.UtcNow))
+                _logger.Error($"Falha de miniatura. Caminho='{path}'. O item continuará sem imagem.", ex);
+            return null;
+        }
+    }
+
+    private static BitmapImage DecodeThumbnail(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete, 64 * 1024, FileOptions.SequentialScan);
+        var image = new BitmapImage();
+        image.BeginInit();
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.DecodePixelWidth = 220;
+        image.StreamSource = stream;
+        image.EndInit();
+        image.Freeze();
+        return image;
+    }
+
+    private void RememberThumbnail(string path, BitmapImage image)
+    {
+        const int maximumCachedThumbnails = 64;
+        lock (_thumbnailCacheSync)
+        {
+            if (_thumbnailCache.ContainsKey(path)) return;
+            _thumbnailCache[path] = image;
+            _thumbnailCacheOrder.AddLast(path);
+            while (_thumbnailCacheOrder.Count > maximumCachedThumbnails)
+            {
+                var oldest = _thumbnailCacheOrder.First!.Value;
+                _thumbnailCacheOrder.RemoveFirst();
+                _thumbnailCache.Remove(oldest);
+            }
+        }
+    }
+
+    private sealed class VideoListItem : INotifyPropertyChanged
     {
         private readonly VideoReference _video;
+        private bool? _isAvailable;
         public VideoListItem(VideoReference video) => _video = video;
         public VideoReference Video => _video;
         public Guid Id => _video.Id;
         public string DisplayName => string.IsNullOrWhiteSpace(_video.DisplayName) ? Path.GetFileName(_video.FilePath) : _video.DisplayName;
-        public string Availability => File.Exists(_video.FilePath) ? "Disponível" : "Vídeo não encontrado";
-        public string StatusColor => File.Exists(_video.FilePath) ? "#39D17E" : "#EC6670";
+        public string Availability => _isAvailable switch
+        {
+            true => "Disponível",
+            false => "Vídeo não encontrado",
+            null => "Verificando disponibilidade..."
+        };
+        public string StatusColor => _isAvailable switch { true => "#39D17E", false => "#EC6670", null => "#8295A7" };
+        public bool? IsAvailable => _isAvailable;
         public string PathKind => _video.Status == MediaReferenceStatus.SharedUnc ? "Arquivo em rede (UNC)" : "Arquivo local";
-    }
+        public event PropertyChangedEventHandler? PropertyChanged;
 
-    private sealed class CaptureListItem(Capture capture, string? videoName)
-    {
-        public Guid Id => capture.Id;
-        public BitmapImage? Thumbnail { get; } = LoadThumbnail(capture.FilePath);
-        public string Timestamp => FormatTime(capture.VideoTimestamp);
-        public string VideoName => string.IsNullOrWhiteSpace(videoName) ? "Vídeo de origem" : videoName;
+        public void SetAvailability(bool available)
+        {
+            if (_isAvailable == available) return;
+            _isAvailable = available;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Availability)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusColor)));
+        }
     }
 
     private sealed class DevelopmentImagePreviewItem(string filePath)
@@ -2801,7 +5489,6 @@ public partial class MainWindow : Window
     private sealed class OccurrenceListItem
     {
         public Guid Id { get; }
-        public BitmapImage? Thumbnail { get; }
         public string Location { get; }
         public string Anomalies { get; }
         public string EvidenceSummary { get; }
@@ -2839,9 +5526,6 @@ public partial class MainWindow : Window
                 if (x.EstimatedPercentage is not null) values.Add($"{x.EstimatedPercentage:N2}%");
                 return values.Count == 0 ? "" : $"{x.DisplayName}: {string.Join(", ", values)}";
             }).Where(x => x.Length > 0));
-            var first = occurrence.Evidence.OrderByDescending(x => x.IsPrimary).ThenBy(x => x.Order)
-                .FirstOrDefault(x => File.Exists(x.FilePath));
-            Thumbnail = LoadThumbnail(first?.FilePath);
             CanGoToVideo = occurrence.Evidence.Any(x => x.VideoReferenceId is not null && x.VideoTimestamp is not null);
             IsComplete = OccurrenceRules.IsComplete(occurrence);
             var pending = OccurrenceRules.GetPendingReasons(occurrence);
@@ -2850,7 +5534,28 @@ public partial class MainWindow : Window
         }
     }
 
-    private sealed record ReportSectionSelectionItem(Guid SectionId, string DisplayName, bool IsSelected);
+    private sealed class ReportSectionSelectionItem(
+        Guid sectionId,
+        string displayName,
+        bool isSelected) : INotifyPropertyChanged
+    {
+        private bool _isSelected = isSelected;
+
+        public Guid SectionId { get; } = sectionId;
+        public string DisplayName { get; } = displayName;
+        public bool IsSelected
+        {
+            get => _isSelected;
+            set
+            {
+                if (_isSelected == value) return;
+                _isSelected = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
+            }
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+    }
 
     private sealed record OverviewReportItem(Guid Id, string Title, string Detail, string Status, string StatusColor);
 
@@ -2866,10 +5571,24 @@ public partial class MainWindow : Window
         public string When { get; } = timestamp.ToString("dd/MM/yyyy HH:mm");
     }
 
+    private void MarkPendingChanges()
+    {
+        _hasPendingChanges = true;
+        _pendingSaveRevision++;
+        _reportReviewRevision++;
+        RefreshReportReview();
+    }
+
+    private void MarkOperationalPendingChanges()
+    {
+        _hasPendingChanges = true;
+        _pendingSaveRevision++;
+    }
+
     private void ScheduleSave()
     {
         if (_loadingFields || _currentProject is null || _sharedSession?.IsReadOnly == true) return;
-        _hasPendingChanges = true; SaveStatus.Text = "Salvando..."; UpdateSectionReviewState();
+        MarkPendingChanges(); SaveStatus.Text = "Salvando..."; UpdateSectionReviewState();
         _saveTimer.Stop(); _saveTimer.Start();
     }
 
@@ -2878,5 +5597,9 @@ public partial class MainWindow : Window
         _logger.Error(message, ex); MessageBox.Show(message, "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
     }
 
+    private static int NextOrder(IEnumerable<int> orders) => orders.DefaultIfEmpty(-1).Max() + 1;
+
     private static string? EmptyToNull(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private sealed record TrayPreferences(bool CloseToTray, bool NoticeShown);
 }

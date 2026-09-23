@@ -82,6 +82,7 @@ public sealed class OccurrenceService(AppDataPaths paths, LocalLogger logger)
 
         if (existingIndex >= 0) section.Occurrences[existingIndex] = draft;
         else section.Occurrences.Add(draft);
+        OccurrenceRules.SynchronizeInvestigatedMeters(section);
         RefreshCaptureStatuses(project);
         logger.Info($"Anomalia {draft.Id} salva no trecho {section.Id} com {draft.Anomalies.Count} tipo(s) e {draft.Evidence.Count} evidência(s).");
         return draft;
@@ -91,6 +92,7 @@ public sealed class OccurrenceService(AppDataPaths paths, LocalLogger logger)
     {
         EnsureWritable(isReadOnly);
         if (!section.Occurrences.Remove(occurrence)) return;
+        OccurrenceRules.SynchronizeInvestigatedMeters(section);
         RefreshCaptureStatuses(project);
         logger.Info($"Anomalia {occurrence.Id} excluída do trecho {section.Id}.");
     }

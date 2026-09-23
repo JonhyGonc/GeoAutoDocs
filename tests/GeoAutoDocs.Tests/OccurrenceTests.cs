@@ -190,11 +190,11 @@ public sealed class OccurrenceTests : IAsyncLifetime
         var (project, section) = await CreateProjectAsync();
         var occurrence = NewOccurrence(OccurrenceLocationMode.Point, 18m, "Trinca", "Infiltração");
         occurrence.Anomalies[0].Position = AnomalyPosition.RightSide;
-        occurrence.Anomalies[1].Position = AnomalyPosition.UpperGenerator;
+        occurrence.Anomalies[1].Position = AnomalyPosition.UpperAndLowerGenerators;
         await _service.SaveAsync(project, section, occurrence, false);
         await _store.SaveAsync(project);
         var saved = (await _store.GetAsync(project.Id))!.Locations[0].Sections[0].Occurrences.Single();
-        Assert.Equal([AnomalyPosition.RightSide, AnomalyPosition.UpperGenerator],
+        Assert.Equal([AnomalyPosition.RightSide, AnomalyPosition.UpperAndLowerGenerators],
             saved.Anomalies.OrderBy(x => x.Order).Select(x => x.Position).ToArray());
     }
 
@@ -277,6 +277,19 @@ public sealed class OccurrenceTests : IAsyncLifetime
         occurrence.Anomalies.ForEach(x => x.Position = AnomalyPosition.UpperGenerator);
 
         Assert.Equal("Trinca e infiltração na geratriz superior a 18 metros do início da filmagem.",
+            OccurrenceRules.GenerateDescription(occurrence));
+    }
+
+    [Fact]
+    public void FormatterSupportsUpperAndLowerGenerators()
+    {
+        var occurrence = NewOccurrence(OccurrenceLocationMode.Point, 18m, "Trinca");
+        occurrence.Anomalies[0].Position = AnomalyPosition.UpperAndLowerGenerators;
+
+        Assert.Contains(AnomalyPosition.UpperAndLowerGenerators, OccurrenceRules.SelectablePositions);
+        Assert.Equal("Geratriz superior e inferior",
+            OccurrenceRules.FormatPosition(AnomalyPosition.UpperAndLowerGenerators));
+        Assert.Equal("Trinca nas geratrizes superior e inferior a 18 metros do início da filmagem.",
             OccurrenceRules.GenerateDescription(occurrence));
     }
 
@@ -533,6 +546,7 @@ public sealed class OccurrenceTests : IAsyncLifetime
         }, primaryNames);
         Assert.Equal([
             AnomalyPosition.NotApplicable, AnomalyPosition.UpperGenerator, AnomalyPosition.LowerGenerator,
+            AnomalyPosition.UpperAndLowerGenerators,
             AnomalyPosition.LeftSide, AnomalyPosition.RightSide, AnomalyPosition.Circumferential
         ], OccurrenceRules.SelectablePositions);
     }

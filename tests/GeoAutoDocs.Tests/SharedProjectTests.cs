@@ -143,4 +143,112 @@ public sealed class SharedProjectTests : IAsyncLifetime
         Assert.StartsWith(secondPaths.CacheDirectory, reader.Project.Captures[0].FilePath, StringComparison.OrdinalIgnoreCase);
         await reader.CloseAsync();
     }
+    [Fact]
+    public async Task ConcurrentCheckpointsAreSerializedWithinSession()
+    {
+        var directory = Path.Combine(_root, "concurrent-checkpoints");
+        var session = await new SharedProjectService(_paths).OpenAsync(_project, directory);
+
+        await Task.WhenAll(session.CheckpointAsync(), session.CheckpointAsync(), session.CheckpointAsync());
+
+        Assert.Equal(4, session.Project.ProjectDataVersion);
+        Assert.False(session.IsClosed);
+        await session.CloseAsync();
+    }
+
+    [Fact]
+    public async Task FailedFinalCheckpointKeepsSessionAndLockOpen()
+    {
+        var directory = Path.Combine(_root, "failed-close");
+        var session = await new SharedProjectService(_paths).OpenAsync(_project, directory);
+        var officialPath = Path.Combine(directory, "project.geoadocs.json");
+        var official = JsonNode.Parse(await File.ReadAllTextAsync(officialPath))!.AsObject();
+        official["ProjectDataVersion"] = 99;
+        await File.WriteAllTextAsync(officialPath, official.ToJsonString());
+
+        await Assert.ThrowsAsync<ProjectVersionConflictException>(() => session.CloseAsync());
+
+        Assert.False(session.IsClosed);
+        Assert.True(File.Exists(Path.Combine(directory, "lock.json")));
+    }
+
+    [Fact]
+    public async Task ManagedMediaIsCopiedOnlyWhenMissingOrChanged()
+    {
+        var directory = Path.Combine(_root, "incremental-media");
+        var capturePath = Path.Combine(_root, "capture-source.png");
+        var evidencePath = Path.Combine(_root, "evidence-source.jpg");
+        var captureInitial = new byte[] { 1, 2, 3, 4 };
+        var evidenceInitial = new byte[] { 5, 6, 7, 8 };
+        await File.WriteAllBytesAsync(capturePath, captureInitial);
+        await File.WriteAllBytesAsync(evidencePath, evidenceInitial);
+        var initialWriteTime = DateTime.UtcNow.AddMinutes(-10);
+        File.SetLastWriteTimeUtc(capturePath, initialWriteTime);
+        File.SetLastWriteTimeUtc(evidencePath, initialWriteTime);
+
+        var location = new Location { ProjectId = _project.Id, Name = "Local" };
+        var section = new InspectionSection { LocationId = location.Id, Name = "Trecho" };
+        var video = new VideoReference
+        {
+            InspectionSectionId = section.Id,
+            FilePath = @"C:\video.mp4",
+            DisplayName = "Vídeo"
+        };
+        var occurrence = new Occurrence
+        {
+            InspectionSectionId = section.Id,
+            VideoReferenceId = video.Id,
+            Meterage = 1m
+        };
+        occurrence.Evidence.Add(new Evidence
+        {
+            OccurrenceId = occurrence.Id,
+            FilePath = evidencePath,
+            SourceType = EvidenceSourceType.ExternalImage,
+            ManagedByGeoAutoDocs = true
+        });
+        section.VideoReferences.Add(video);
+        section.Occurrences.Add(occurrence);
+        location.Sections.Add(section);
+        _project.Locations.Add(location);
+        _project.Captures.Add(new Capture
+        {
+            ProjectId = _project.Id,
+            SectionId = section.Id,
+            VideoReferenceId = video.Id,
+            FilePath = capturePath,
+            Status = CaptureStatus.Pending,
+            ManagedByGeoAutoDocs = true
+        });
+
+        var session = await new SharedProjectService(_paths).OpenAsync(_project, directory);
+        await session.CheckpointAsync();
+        var captureTarget = Assert.Single(session.Project.Captures).SharedFilePath!;
+        var evidenceTarget = Assert.Single(Assert.Single(
+            Assert.Single(Assert.Single(session.Project.Locations).Sections).Occurrences).Evidence).SharedFilePath!;
+        var captureFirstWrite = File.GetLastWriteTimeUtc(captureTarget);
+        var evidenceFirstWrite = File.GetLastWriteTimeUtc(evidenceTarget);
+
+        await session.CheckpointAsync();
+
+        Assert.Equal(captureFirstWrite, File.GetLastWriteTimeUtc(captureTarget));
+        Assert.Equal(evidenceFirstWrite, File.GetLastWriteTimeUtc(evidenceTarget));
+
+        var changedWriteTime = initialWriteTime.AddMinutes(5);
+        var captureChanged = new byte[] { 9, 2, 3, 4 };
+        var evidenceChanged = new byte[] { 5, 6, 7, 0 };
+        await File.WriteAllBytesAsync(capturePath, captureChanged);
+        await File.WriteAllBytesAsync(evidencePath, evidenceChanged);
+        File.SetLastWriteTimeUtc(capturePath, changedWriteTime);
+        File.SetLastWriteTimeUtc(evidencePath, changedWriteTime);
+
+        await session.CheckpointAsync();
+
+        Assert.Equal(captureChanged, await File.ReadAllBytesAsync(captureTarget));
+        Assert.Equal(evidenceChanged, await File.ReadAllBytesAsync(evidenceTarget));
+        Assert.Equal(changedWriteTime, File.GetLastWriteTimeUtc(captureTarget));
+        Assert.Equal(changedWriteTime, File.GetLastWriteTimeUtc(evidenceTarget));
+        await session.CloseAsync();
+    }
+
 }

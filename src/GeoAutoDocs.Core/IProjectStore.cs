@@ -8,5 +8,6 @@ public interface IProjectStore
     Task<Project> CreateAsync(string name, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<AnomalyDefinition>> ListAnomalyDefinitionsAsync(CancellationToken cancellationToken = default);
     Task SaveAsync(Project project, CancellationToken cancellationToken = default);
+    Task SaveSectionAsync(InspectionSection section, CancellationToken cancellationToken = default);
     Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 }

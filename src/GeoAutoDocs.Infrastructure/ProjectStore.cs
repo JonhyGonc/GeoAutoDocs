@@ -10,6 +10,7 @@ public sealed class ProjectStore : IProjectStore
     private readonly string _projectsDirectory;
     private readonly string _cacheDirectory;
     private readonly string _databasePath;
+    private readonly SemaphoreSlim _saveGate = new(1, 1);
 
     public ProjectStore(AppDataPaths paths)
     {
@@ -94,38 +95,83 @@ public sealed class ProjectStore : IProjectStore
 
     public async Task SaveAsync(Project project, CancellationToken cancellationToken = default)
     {
-        project.Name = project.Name.Trim();
-        if (project.Name.Length == 0) throw new InvalidOperationException("O nome do projeto é obrigatório.");
-        project.UpdatedAt = DateTime.UtcNow;
-        NormalizeAggregate(project);
-
-        await using var lookup = CreateContext();
-        await using var db = CreateContext();
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var removedManagedFiles = await RemoveMissingAggregateContentAsync(db, project, cancellationToken);
-        db.ChangeTracker.Clear();
-        db.ChangeTracker.TrackGraph(project, node =>
+        await _saveGate.WaitAsync(cancellationToken);
+        try
         {
-            if (node.Entry.Metadata.ClrType == typeof(AnomalyDefinition))
-            {
-                node.Entry.State = EntityState.Unchanged;
-                return;
-            }
-            var key = node.Entry.Metadata.FindPrimaryKey();
-            if (key is null)
-            {
-                node.Entry.State = EntityState.Added;
-                return;
-            }
+            project.Name = project.Name.Trim();
+            if (project.Name.Length == 0) throw new InvalidOperationException("O nome do projeto é obrigatório.");
+            project.UpdatedAt = DateTime.UtcNow;
+            NormalizeAggregate(project);
 
-            var values = key.Properties.Select(property => node.Entry.Property(property.Name).CurrentValue).ToArray();
-            node.Entry.State = lookup.Find(node.Entry.Metadata.ClrType, values) is null
-                ? EntityState.Added
-                : EntityState.Modified;
-        });
-        await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        DeleteManagedFiles(project, removedManagedFiles);
+            await using var lookup = CreateContext();
+            await using var db = CreateContext();
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            var removedManagedFiles = await RemoveMissingAggregateContentAsync(db, project, cancellationToken);
+            db.ChangeTracker.Clear();
+            db.ChangeTracker.TrackGraph(project, node =>
+            {
+                if (node.Entry.Metadata.ClrType == typeof(AnomalyDefinition))
+                {
+                    node.Entry.State = EntityState.Unchanged;
+                    return;
+                }
+                var key = node.Entry.Metadata.FindPrimaryKey();
+                if (key is null)
+                {
+                    node.Entry.State = EntityState.Added;
+                    return;
+                }
+
+                var values = key.Properties.Select(property => node.Entry.Property(property.Name).CurrentValue).ToArray();
+                node.Entry.State = lookup.Find(node.Entry.Metadata.ClrType, values) is null
+                    ? EntityState.Added
+                    : EntityState.Modified;
+            });
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            DeleteManagedFiles(project, removedManagedFiles);
+        }
+        finally
+        {
+            _saveGate.Release();
+        }
+    }
+
+    public async Task SaveSectionAsync(InspectionSection section, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(section);
+        OccurrenceRules.SynchronizeInvestigatedMeters(section);
+        var name = section.Name.Trim();
+        if (name.Length == 0) throw new InvalidOperationException("O nome do trecho é obrigatório.");
+
+        await _saveGate.WaitAsync(cancellationToken);
+        try
+        {
+            await using var db = CreateContext();
+            var stored = await db.Set<InspectionSection>()
+                .SingleOrDefaultAsync(x => x.Id == section.Id, cancellationToken)
+                ?? throw new InvalidOperationException("O trecho não foi encontrado para atualização.");
+            var projectId = await db.Set<Location>()
+                .Where(x => x.Id == stored.LocationId)
+                .Select(x => x.ProjectId)
+                .SingleOrDefaultAsync(cancellationToken);
+            var project = await db.Projects.SingleOrDefaultAsync(x => x.Id == projectId, cancellationToken)
+                ?? throw new InvalidOperationException("O projeto do trecho não foi encontrado.");
+
+            stored.Name = name;
+            stored.Description = section.Description;
+            stored.Diameter = section.Diameter;
+            stored.StartPoint = section.StartPoint;
+            stored.EndPoint = section.EndPoint;
+            stored.Reference = section.Reference;
+            stored.InvestigatedMeters = section.InvestigatedMeters;
+            project.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        finally
+        {
+            _saveGate.Release();
+        }
     }
 
     public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -192,6 +238,7 @@ public sealed class ProjectStore : IProjectStore
                     }
                     foreach (var evidence in occurrence.Evidence) evidence.OccurrenceId = occurrence.Id;
                 }
+                OccurrenceRules.SynchronizeInvestigatedMeters(section);
             }
         }
 

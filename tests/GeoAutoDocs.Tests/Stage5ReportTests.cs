@@ -60,6 +60,22 @@ public sealed class Stage5ReportTests : IDisposable
     }
 
     [Fact]
+    public async Task GenerationRetainsDefensiveValidationInsideWordReportService()
+    {
+        var project = NewProject();
+        var report = project.CreateReport();
+        var service = new WordReportService(_paths);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.GenerateAsync(project, report));
+
+        Assert.Contains("Corrija os erros antes de gerar", exception.Message);
+        Assert.Empty(Directory.Exists(Path.Combine(project.ProjectPath!, "reports"))
+            ? Directory.GetFiles(Path.Combine(project.ProjectPath!, "reports"), "*.docx")
+            : []);
+    }
+
+    [Fact]
     public async Task PartialSelectionGroupsLocationsAndUsesContinuousFiguresForMultiRangeEntireAndOverride()
     {
         var project = NewProject();

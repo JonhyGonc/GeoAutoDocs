@@ -10,7 +10,9 @@ public enum InspectionPipeMessageType : ushort
     HelloAck = 2,
     InspectionPush = 3,
     InspectionAck = 4,
-    Error = 5
+    Error = 5,
+    CorrectionPush = 6,
+    CorrectionAck = 7
 }
 
 public sealed record InspectionPipeFrame(

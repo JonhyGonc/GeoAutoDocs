@@ -1,0 +1,67 @@
+<Window x:Class="GeoAutoDocs.App.PendingCapturesWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Capturas pendentes" Width="1040" Height="700" MinWidth="820" MinHeight="520"
+        WindowStartupLocation="CenterOwner" Background="{StaticResource WindowBackgroundBrush}"
+        Closed="Window_Closed">
+    <Grid Margin="24">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <DockPanel Margin="0,0,0,16">
+            <Button Content="Fechar" DockPanel.Dock="Right" Click="Close_Click"/>
+            <StackPanel>
+                <TextBlock Text="Capturas pendentes" Style="{StaticResource PageTitleTextStyle}"/>
+                <TextBlock x:Name="SummaryText" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0"/>
+            </StackPanel>
+        </DockPanel>
+
+        <Grid Grid.Row="1">
+            <ListBox x:Name="CapturesList" Background="Transparent" BorderThickness="0"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     ScrollViewer.CanContentScroll="True"
+                     VirtualizingPanel.IsVirtualizing="True"
+                     VirtualizingPanel.VirtualizationMode="Recycling">
+                <ListBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Border Style="{StaticResource CardStyle}" Padding="12" Margin="0,0,0,10">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="150"/>
+                                    <ColumnDefinition Width="110"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Width="138" Height="82" Background="{StaticResource SurfaceMutedBrush}"
+                                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="6">
+                                    <Image Source="{Binding Thumbnail}" Stretch="Uniform" Loaded="ThumbnailImage_Loaded"/>
+                                </Border>
+                                <TextBlock Grid.Column="1" Text="{Binding Timestamp}" FontFamily="Consolas"
+                                           FontWeight="SemiBold" VerticalAlignment="Center" Margin="14,0"/>
+                                <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="4,0,18,0">
+                                    <TextBlock Text="{Binding VideoName}" FontWeight="SemiBold"
+                                               TextTrimming="CharacterEllipsis" ToolTip="{Binding VideoName}"/>
+                                    <TextBlock Text="Aguardando cadastro de anomalia"
+                                               Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,4,0,0"/>
+                                </StackPanel>
+                                <WrapPanel Grid.Column="3" VerticalAlignment="Center">
+                                    <Button Content="Cadastrar" Style="{StaticResource PrimaryButtonStyle}"
+                                            Tag="{Binding Id}" IsEnabled="{Binding CanRegister}" Click="Register_Click"/>
+                                    <Button Content="Ir ao vídeo" Tag="{Binding Id}" Click="Navigate_Click" Margin="8,0,0,0"/>
+                                    <Button Content="Excluir" Style="{StaticResource DangerButtonStyle}"
+                                            Tag="{Binding Id}" IsEnabled="{Binding CanDelete}" Click="Delete_Click" Margin="8,0,0,0"/>
+                                </WrapPanel>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+            <StackPanel x:Name="EmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed">
+                <TextBlock Text="Nenhuma captura pendente" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                <TextBlock Text="As novas capturas aparecerão aqui." Foreground="{StaticResource TextMutedBrush}" Margin="0,6,0,0"/>
+            </StackPanel>
+        </Grid>
+        <TextBlock Grid.Row="2" Text="Cadastrar abre a anomalia com esta imagem. Ir ao vídeo retorna ao momento exato da captura."
+                   Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,10,0,0"/>
+    </Grid>
+</Window>

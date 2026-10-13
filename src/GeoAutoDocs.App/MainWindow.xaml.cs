@@ -1746,6 +1746,24 @@ public partial class MainWindow : Window
         finally { RestoreVideoSurfaceAfterOverlay(); }
         if (draft is null) return;
 
+        var renames = SectionNumbering.PlanInsertion(_currentLocation.Sections, draft.Name);
+        var insertOrder = _currentLocation.Sections.Count;
+        if (renames.Count > 0)
+        {
+            var preview = string.Join(Environment.NewLine, renames.Select(x => $"• {x.OldName} → {x.NewName}"));
+            var answer = MessageBox.Show(this,
+                $"Ao inserir '{draft.Name}', os trechos seguintes serão renumerados:{Environment.NewLine}{Environment.NewLine}" +
+                $"{preview}{Environment.NewLine}{Environment.NewLine}As associações no GeoAutoEngine continuam válidas. " +
+                "Os textos no CAD só mudam depois da sincronização. Aplicar?",
+                "Renumerar trechos", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (answer != MessageBoxResult.Yes) return;
+
+            var byId = _currentLocation.Sections.ToDictionary(x => x.Id);
+            foreach (var rename in renames) byId[rename.SectionId].Name = rename.NewName;
+            insertOrder = renames.Select(x => byId[x.SectionId].Order).Min();
+            foreach (var existing in _currentLocation.Sections.Where(x => x.Order >= insertOrder)) existing.Order++;
+        }
+
         var section = new InspectionSection
         {
             LocationId = _currentLocation.Id,
@@ -1756,7 +1774,7 @@ public partial class MainWindow : Window
             EndPoint = draft.EndPoint,
             Reference = draft.Reference,
             InvestigatedMeters = draft.InvestigatedMeters,
-            Order = _currentLocation.Sections.Count
+            Order = insertOrder
         };
         _currentLocation.Sections.Add(section);
         _currentSection = section;

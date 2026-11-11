@@ -261,4 +261,114 @@ public sealed class ProjectStoreTests : IAsyncLifetime
         Assert.Equal(2, recovered!.Reports.Count);
         Assert.Equal("Cliente preservado", recovered.Reports.Single(x => x.Id == second.Id).Client);
     }
+    [Fact]
+    public async Task FocusedSectionSavePersistsMetadataWithoutTouchingRelatedAggregate()
+    {
+        var project = await _store.CreateAsync("Persistência focada");
+        var location = new Location { ProjectId = project.Id, Name = "Local" };
+        var section = new InspectionSection { LocationId = location.Id, Name = "Trecho original" };
+        var video = new VideoReference
+        {
+            InspectionSectionId = section.Id,
+            FilePath = @"C:\videos\inspecao.mp4",
+            DisplayName = "Inspeção"
+        };
+        var occurrence = new Occurrence
+        {
+            InspectionSectionId = section.Id,
+            VideoReferenceId = video.Id,
+            Meterage = 4.25m
+        };
+        occurrence.Evidence.Add(new Evidence
+        {
+            OccurrenceId = occurrence.Id,
+            FilePath = @"C:\evidencias\frame.png",
+            SourceType = EvidenceSourceType.ExternalImage
+        });
+        section.VideoReferences.Add(video);
+        section.Occurrences.Add(occurrence);
+        location.Sections.Add(section);
+        project.Locations.Add(location);
+        project.CreateReport().SelectSection(section);
+        await _store.SaveAsync(project);
+
+        section.Name = "Trecho editado";
+        section.Description = "Descrição focada";
+        section.StartPoint = "PV 01";
+        section.EndPoint = "PV 02";
+        section.Diameter = 600m;
+        section.Reference = "REF-01";
+        section.InvestigatedMeters = 18.75m;
+        await _store.SaveSectionAsync(section);
+
+        var recovered = await _store.GetAsync(project.Id);
+        var savedSection = Assert.Single(Assert.Single(recovered!.Locations).Sections);
+        Assert.Equal("Trecho editado", savedSection.Name);
+        Assert.Equal("Descrição focada", savedSection.Description);
+        Assert.Equal(("PV 01", "PV 02", 600m, "REF-01", 4.25m),
+            (savedSection.StartPoint, savedSection.EndPoint, savedSection.Diameter,
+                savedSection.Reference, savedSection.InvestigatedMeters));
+        Assert.Single(savedSection.VideoReferences);
+        Assert.Single(Assert.Single(savedSection.Occurrences).Evidence);
+        Assert.Equal(section.Id, Assert.Single(Assert.Single(recovered.Reports).SectionLinks).SectionId);
+    }
+
+    [Fact]
+    public async Task ConcurrentAggregateAndFocusedSectionSavesPreserveBothChanges()
+    {
+        var project = await _store.CreateAsync("Serialização");
+        var location = new Location { ProjectId = project.Id, Name = "Local" };
+        var section = new InspectionSection { LocationId = location.Id, Name = "Nome original" };
+        location.Sections.Add(section);
+        project.Locations.Add(location);
+        project.CreateReport();
+        await _store.SaveAsync(project);
+
+        var aggregateSnapshot = (await _store.GetAsync(project.Id))!;
+        var focusedSnapshot = (await _store.GetAsync(project.Id))!;
+        aggregateSnapshot.Reports.Single().Client = "Cliente atualizado";
+        focusedSnapshot.Locations.Single().Sections.Single().Name = "Nome atualizado";
+
+        var aggregateSave = _store.SaveAsync(aggregateSnapshot);
+        var focusedSave = _store.SaveSectionAsync(focusedSnapshot.Locations.Single().Sections.Single());
+        await Task.WhenAll(aggregateSave, focusedSave);
+
+        var recovered = await _store.GetAsync(project.Id);
+        Assert.Equal("Cliente atualizado", Assert.Single(recovered!.Reports).Client);
+        Assert.Equal("Nome atualizado", Assert.Single(Assert.Single(recovered.Locations).Sections).Name);
+    }
+
+    [Fact]
+    public async Task DeletingReportPersistsAndPreservesOtherReportsAndGeneratedFile()
+    {
+        var project = await _store.CreateAsync("Exclusão de relatório");
+        var location = new Location { ProjectId = project.Id, Name = "PV 7" };
+        var section = new InspectionSection { LocationId = location.Id, Name = "Trecho 01" };
+        location.Sections.Add(section);
+        project.Locations.Add(location);
+
+        var first = project.CreateReport();
+        var removed = project.CreateReport();
+        var last = project.CreateReport();
+        first.ReportCode = "REL-001";
+        removed.ReportCode = "REL-002";
+        last.ReportCode = "REL-003";
+        removed.SelectSection(section);
+
+        var generatedPath = Path.Combine(_root, "REL-002.docx");
+        await File.WriteAllTextAsync(generatedPath, "arquivo gerado preservado");
+        removed.GeneratedReportPath = generatedPath;
+        await _store.SaveAsync(project);
+
+        project.Reports.Remove(removed);
+        await _store.SaveAsync(project);
+
+        var recovered = await _store.GetAsync(project.Id);
+        Assert.Equal(new[] { first.Id, last.Id },
+            recovered!.Reports.OrderBy(x => x.Order).Select(x => x.Id));
+        Assert.DoesNotContain(recovered.Reports, x => x.Id == removed.Id);
+        Assert.Single(Assert.Single(recovered.Locations).Sections);
+        Assert.True(File.Exists(generatedPath));
+    }
+
 }

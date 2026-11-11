@@ -49,9 +49,55 @@
         </Style>
     </Window.Resources>
     <Grid Background="{StaticResource WindowBackgroundBrush}">
-        <Grid x:Name="HomeShell">
-            <Grid.RowDefinitions><RowDefinition Height="46"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <Border Background="#071522" BorderBrush="#1B3042" BorderThickness="0,0,0,1">
+        <Grid.RowDefinitions><RowDefinition Height="36"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <Grid.ColumnDefinitions><ColumnDefinition Width="56"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+
+        <!-- Shared application chrome: always visible in Projects and project workspaces. -->
+        <Border Grid.ColumnSpan="2" Background="{StaticResource SurfaceBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Panel.ZIndex="5">
+            <StackPanel Orientation="Horizontal" Margin="14,0" VerticalAlignment="Center">
+                <Border Width="16" Height="16" CornerRadius="4" Background="{StaticResource AccentGlowBrush}"
+                        BorderBrush="#4D00B4D8" BorderThickness="1" Margin="0,0,8,0">
+                    <TextBlock Text="&#xE774;" FontFamily="Segoe MDL2 Assets" FontSize="9"
+                               Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <TextBlock Text="GeoAutoDocs" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <TextBlock Text="v2.0" FontFamily="{StaticResource MonoFont}" FontSize="10"
+                           Foreground="{StaticResource TextMutedBrush}" Margin="10,0,0,0" VerticalAlignment="Center"/>
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="1" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,0,1,0" Panel.ZIndex="4">
+            <StackPanel Margin="0,8,0,0">
+                <Border Width="34" Height="34" CornerRadius="8" Background="{StaticResource AccentGlowBrush}"
+                        BorderBrush="#4D00B4D8" BorderThickness="1" HorizontalAlignment="Center" Margin="0,0,0,8">
+                    <TextBlock Text="&#xE774;" FontFamily="Segoe MDL2 Assets" FontSize="17"
+                               Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <Button x:Name="SidebarProjectsButton" Style="{StaticResource SidebarItemActiveStyle}" Click="SidebarProjects_Click" ToolTip="Projetos">
+                    <StackPanel><TextBlock Text="&#xE8B7;" FontFamily="Segoe MDL2 Assets" FontSize="15" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Projetos" FontSize="9" Margin="0,4,0,0" HorizontalAlignment="Center"/></StackPanel>
+                </Button>
+                <Button x:Name="SidebarInspectionButton" Style="{StaticResource SidebarItemStyle}" Click="SidebarInspection_Click" IsEnabled="False" ToolTip="Inspeção">
+                    <StackPanel><TextBlock Text="&#xE714;" FontFamily="Segoe MDL2 Assets" FontSize="15" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Inspeção" FontSize="9" Margin="0,4,0,0" HorizontalAlignment="Center"/></StackPanel>
+                </Button>
+                <Button x:Name="SidebarReportsButton" Style="{StaticResource SidebarItemStyle}" Click="SidebarReports_Click" IsEnabled="False" ToolTip="Relatórios">
+                    <StackPanel><TextBlock Text="&#xE8A5;" FontFamily="Segoe MDL2 Assets" FontSize="15" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Relatórios" FontSize="9" Margin="0,4,0,0" HorizontalAlignment="Center"/></StackPanel>
+                </Button>
+                <Button x:Name="SidebarReviewButton" Style="{StaticResource SidebarItemStyle}" Click="OpenReportReview_Click"
+                        IsEnabled="False" ToolTip="Revisão do relatório">
+                    <StackPanel><TextBlock Text="&#xE9D5;" FontFamily="Segoe MDL2 Assets" FontSize="15" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Revisão" FontSize="9" Margin="0,4,0,0" HorizontalAlignment="Center"/></StackPanel>
+                </Button>
+            </StackPanel>
+        </Border>
+
+        <Grid x:Name="HomeShell" Grid.Row="1" Grid.Column="1">
+            <Grid.RowDefinitions><RowDefinition Height="0"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+            <Border Visibility="Collapsed" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
                 <StackPanel Orientation="Horizontal" Margin="18,0" VerticalAlignment="Center">
                     <Border Width="25" Height="25" CornerRadius="13" Background="#123C66" Margin="0,0,9,0"><TextBlock Text="&#xE774;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="#55B9FF" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                     <TextBlock Text="GeoAutoDocs" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
@@ -59,48 +105,48 @@
             </Border>
 
             <Grid Grid.Row="1" ClipToBounds="True">
-                <Grid x:Name="ProjectsView" Margin="38,28,38,28" MaxWidth="1680" HorizontalAlignment="Stretch">
+                <Grid x:Name="ProjectsView" Margin="28,20,26,12" MaxWidth="1920" HorizontalAlignment="Stretch">
                     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 
                     <Grid x:Name="ProjectsHeaderGrid">
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="0"/></Grid.RowDefinitions>
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition x:Name="ProjectsSearchColumn" Width="390"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                         <StackPanel x:Name="ProjectsHeaderTitlePanel">
-                            <TextBlock Text="Projetos" Style="{StaticResource PageTitleTextStyle}" FontSize="30"/>
-                            <TextBlock Text="Gerencie seus projetos de vídeo inspeção" Foreground="{StaticResource TextSecondaryBrush}" FontSize="14" Margin="0,6,0,0"/>
+                            <TextBlock Text="Projetos" Style="{StaticResource PageTitleTextStyle}"/>
+                            <TextBlock Text="Gerencie seus projetos de vídeo inspeção" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0"/>
                         </StackPanel>
                         <Grid x:Name="ProjectsHeaderSearchPanel" Grid.Column="1" Margin="18,0,18,0" VerticalAlignment="Center">
                             <TextBlock Text="&#xE721;" FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="15,0,0,0" Panel.ZIndex="1" IsHitTestVisible="False"/>
                             <TextBox x:Name="ProjectsSearchBox" Style="{StaticResource SearchBoxStyle}" ToolTip="Pesquisar projetos por nome ou cliente" TextChanged="ProjectsSearchBox_TextChanged" Margin="0"/>
                             <TextBlock x:Name="ProjectsSearchHint" Text="Pesquisar projetos..." Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" Margin="42,0,0,0" IsHitTestVisible="False"/>
                         </Grid>
-                        <Button x:Name="NewProjectTopButton" Grid.Column="2" Style="{StaticResource PrimaryButtonStyle}" MinWidth="154" Height="46" Margin="0" Click="NewProject_Click">
+                        <Button x:Name="NewProjectTopButton" Grid.Column="2" Style="{StaticResource PrimaryButtonStyle}" MinWidth="130" Height="34" Margin="0" Click="NewProject_Click">
                             <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" FontFamily="Segoe MDL2 Assets" Margin="0,0,9,0"/><TextBlock Text="Novo projeto"/></StackPanel>
                         </Button>
                     </Grid>
 
-                    <UniformGrid Grid.Row="1" Columns="4" Margin="0,42,0,28">
+                    <UniformGrid Grid.Row="1" Columns="4" Margin="0,20,0,20">
                         <Border x:Name="TotalProjectsCard" Style="{StaticResource StatCardStyle}" Margin="0,0,12,0">
                             <Grid><Grid.ColumnDefinitions><ColumnDefinition x:Name="TotalProjectsIconColumn" Width="54"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                <Border Width="44" Height="44" CornerRadius="22" Background="#102F4C" BorderBrush="#235B89" BorderThickness="1"><Path Data="{StaticResource FolderIconGeometry}" Stroke="#55B9FF" StrokeThickness="2" Width="23" Height="19" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                <Border Width="34" Height="34" CornerRadius="8" Background="{StaticResource AccentGlowBrush}"><Path Data="{StaticResource FolderIconGeometry}" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="2" Width="17" Height="14" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                                 <StackPanel Grid.Column="1"><TextBlock x:Name="TotalProjectsLabel" Text="Total de projetos" Foreground="{StaticResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="TotalProjectsMetric" Text="0" FontSize="25" FontWeight="Bold" Margin="0,3,0,0"/><TextBlock x:Name="TotalProjectsDetail" Text="Nenhum projeto cadastrado" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/></StackPanel>
                             </Grid>
                         </Border>
                         <Border x:Name="TotalReportsCard" Style="{StaticResource StatCardStyle}" Margin="0,0,12,0">
                             <Grid><Grid.ColumnDefinitions><ColumnDefinition x:Name="TotalReportsIconColumn" Width="54"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                <Border Width="44" Height="44" CornerRadius="22" Background="#122F2B" BorderBrush="#235E4A" BorderThickness="1"><TextBlock Text="&#xE8A5;" FontFamily="Segoe MDL2 Assets" FontSize="19" Foreground="{StaticResource SuccessBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                <Border Width="34" Height="34" CornerRadius="8" Background="{StaticResource SuccessDimBrush}"><TextBlock Text="&#xE8A5;" FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="{StaticResource SuccessBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                                 <StackPanel Grid.Column="1"><TextBlock x:Name="TotalReportsLabel" Text="Relatórios" Foreground="{StaticResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="TotalReportsMetric" Text="0" FontSize="25" FontWeight="Bold" Margin="0,3,0,0"/><TextBlock x:Name="TotalReportsDetail" Text="Nenhum relatório" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/></StackPanel>
                             </Grid>
                         </Border>
                         <Border x:Name="InProgressReportsCard" Style="{StaticResource StatCardStyle}" Margin="0,0,12,0">
                             <Grid><Grid.ColumnDefinitions><ColumnDefinition x:Name="InProgressReportsIconColumn" Width="54"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                <Border Width="44" Height="44" CornerRadius="22" Background="#302B19" BorderBrush="#705D22" BorderThickness="1"><TextBlock Text="&#xE823;" FontFamily="Segoe MDL2 Assets" FontSize="19" Foreground="{StaticResource WarningBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                <Border Width="34" Height="34" CornerRadius="8" Background="{StaticResource WarningDimBrush}"><TextBlock Text="&#xE823;" FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="{StaticResource WarningBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                                 <StackPanel Grid.Column="1"><TextBlock x:Name="InProgressReportsLabel" Text="Em andamento" Foreground="{StaticResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="InProgressReportsMetric" Text="0" FontSize="25" FontWeight="Bold" Margin="0,3,0,0"/><TextBlock x:Name="InProgressReportsDetail" Text="Nenhum em andamento" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/></StackPanel>
                             </Grid>
                         </Border>
                         <Border x:Name="SharedProjectsCard" Style="{StaticResource StatCardStyle}">
                             <Grid><Grid.ColumnDefinitions><ColumnDefinition x:Name="SharedProjectsIconColumn" Width="54"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                <Border Width="44" Height="44" CornerRadius="22" Background="#25213C" BorderBrush="#514886" BorderThickness="1"><TextBlock Text="&#xE72D;" FontFamily="Segoe MDL2 Assets" FontSize="19" Foreground="#9A8BFF" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                <Border Width="34" Height="34" CornerRadius="8" Background="{StaticResource PurpleDimBrush}"><TextBlock Text="&#xE72D;" FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="{StaticResource PurpleBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                                 <StackPanel Grid.Column="1"><TextBlock x:Name="SharedProjectsLabel" Text="Compartilhados" Foreground="{StaticResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="SharedProjectsMetric" Text="0" FontSize="25" FontWeight="Bold" Margin="0,3,0,0"/><TextBlock x:Name="SharedProjectsDetail" Text="Somente projetos locais" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/></StackPanel>
                             </Grid>
                         </Border>
@@ -115,25 +161,27 @@
                                 <ListView.ItemTemplate><DataTemplate>
                                     <Border Style="{StaticResource ProjectCardStyle}" Tag="{Binding Id}" MouseLeftButtonUp="ProjectCard_MouseLeftButtonUp">
                                         <Grid>
-                                            <Grid.ColumnDefinitions><ColumnDefinition Width="68"/><ColumnDefinition Width="*"/><ColumnDefinition Width="205"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                            <Border Width="52" Height="52" CornerRadius="9" Background="#123A53" HorizontalAlignment="Left"><Path Data="{StaticResource FolderIconGeometry}" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="2" Width="27" Height="22" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="*"/><ColumnDefinition Width="190"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <Border Width="38" Height="38" CornerRadius="7" Background="{StaticResource AccentGlowBrush}" HorizontalAlignment="Left"><Path Data="{StaticResource FolderIconGeometry}" Stroke="{StaticResource PrimaryBrush}" StrokeThickness="2" Width="18" Height="15" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,18,0">
-                                                <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
-                                                <TextBlock Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                                                    <Border HorizontalAlignment="Left" Margin="8,0,0,0">
+                                                        <Border.Style><Style TargetType="Border" BasedOn="{StaticResource StatusBadgeStyle}"><Style.Triggers><DataTrigger Binding="{Binding StorageKind}" Value="Shared"><Setter Property="Background" Value="{StaticResource PurpleDimBrush}"/><Setter Property="BorderBrush" Value="#40A855F7"/></DataTrigger></Style.Triggers></Style></Border.Style>
+                                                        <TextBlock x:Name="ProjectStorageBadge" Text="Local" Foreground="{StaticResource PrimaryBrush}" FontSize="10" FontWeight="SemiBold"/>
+                                                    </Border>
+                                                </StackPanel>
+                                                <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis">
                                                     <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Text" Value="{Binding DefaultClient}"/><Style.Triggers><DataTrigger Binding="{Binding DefaultClient}" Value=""><Setter Property="Text" Value="Cliente não informado"/><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/></DataTrigger><DataTrigger Binding="{Binding DefaultClient}" Value="{x:Null}"><Setter Property="Text" Value="Cliente não informado"/><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
                                                 </TextBlock>
-                                                <Border HorizontalAlignment="Left" Margin="0,8,0,0">
-                                                    <Border.Style><Style TargetType="Border" BasedOn="{StaticResource StatusBadgeStyle}"><Style.Triggers><DataTrigger Binding="{Binding StorageKind}" Value="Shared"><Setter Property="Background" Value="#202B49"/></DataTrigger></Style.Triggers></Style></Border.Style>
-                                                    <TextBlock x:Name="ProjectStorageBadge" Text="Local" Foreground="{StaticResource SuccessBrush}" FontSize="10" FontWeight="SemiBold"/>
-                                                </Border>
                                             </StackPanel>
                                             <StackPanel Grid.Column="2" VerticalAlignment="Center">
                                                 <TextBlock Text="Última alteração" Foreground="{StaticResource TextMutedBrush}" FontSize="11"/>
-                                                <TextBlock Text="{Binding UpdatedAt, StringFormat={}{0:dd/MM/yyyy HH:mm}}" Foreground="{StaticResource TextSecondaryBrush}" FontWeight="SemiBold" Margin="0,3,0,0"/>
+                                                <TextBlock Text="{Binding UpdatedAt, StringFormat={}{0:dd/MM/yyyy HH:mm}}" FontFamily="{StaticResource MonoFont}" FontSize="12" Foreground="{StaticResource TextPrimaryBrush}" FontWeight="SemiBold" Margin="0,3,0,0"/>
                                                 <TextBlock Text="{Binding Reports.Count, StringFormat={}{0} relatório(s)}" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,3,0,0"/>
                                             </StackPanel>
                                             <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
-                                                <Button Content="Abrir" Style="{StaticResource PrimaryButtonStyle}" Tag="{Binding Id}" Click="OpenProject_Click" MinWidth="82" Margin="0,0,7,0"/>
+                                                <Button Content="Abrir" Style="{StaticResource PrimaryButtonStyle}" Tag="{Binding Id}" Click="OpenProject_Click" MinWidth="58" Margin="0,0,7,0"/>
                                                 <Button Content="&#xE712;" Style="{StaticResource IconButtonStyle}" Tag="{Binding Id}" Click="ProjectActions_Click" ToolTip="Ações do projeto" Margin="0">
                                                     <Button.ContextMenu>
                                                         <ContextMenu Style="{StaticResource CleanContextMenuStyle}" DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
@@ -149,7 +197,7 @@
                                     <DataTemplate.Triggers>
                                         <DataTrigger Binding="{Binding StorageKind}" Value="Shared">
                                             <Setter TargetName="ProjectStorageBadge" Property="Text" Value="Compartilhado"/>
-                                            <Setter TargetName="ProjectStorageBadge" Property="Foreground" Value="#A99DFF"/>
+                                            <Setter TargetName="ProjectStorageBadge" Property="Foreground" Value="{StaticResource PurpleBrush}"/>
                                         </DataTrigger>
                                     </DataTemplate.Triggers>
                                 </DataTemplate></ListView.ItemTemplate>
@@ -182,44 +230,59 @@
                     </Border>
                 </Grid>
 
-                <Grid x:Name="NewProjectView" Visibility="Collapsed" Margin="40,30,46,28" MaxWidth="1240" HorizontalAlignment="Stretch">
-                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                    <StackPanel>
-                        <Button Style="{StaticResource SecondaryButtonStyle}" HorizontalAlignment="Left" Margin="0,0,0,18" Click="CancelNewProject_Click">
-                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72B;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/><TextBlock Text="Projetos"/></StackPanel>
-                        </Button>
-                        <TextBlock Text="Novo projeto" Style="{StaticResource PageTitleTextStyle}"/>
-                        <TextBlock Text="Defina os dados principais do projeto." Foreground="{StaticResource TextSecondaryBrush}" FontSize="14" Margin="0,6,0,0"/>
-                    </StackPanel>
-                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
-                        <Border Style="{StaticResource CardStyle}" Margin="0,24,0,0" Padding="28,24" MaxWidth="1160" HorizontalAlignment="Stretch">
-                            <Grid>
-                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                <StackPanel Grid.ColumnSpan="3"><TextBlock Style="{StaticResource FieldLabelTextStyle}"><Run Text="Nome do projeto "/><Run Text="*" Foreground="{StaticResource DangerBrush}"/></TextBlock><TextBox x:Name="NewProjectNameBox" MaxLength="180"/></StackPanel>
-                                <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Text="Dados do projeto" Style="{StaticResource SectionTitleTextStyle}" Margin="0,14,0,16"/>
-                                <StackPanel Grid.Row="2"><TextBlock Text="Cliente" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectClientBox"/><TextBlock Text="Área / localização" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectAreaBox"/><TextBlock Text="Pedido de compra" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectPurchaseOrderBox"/></StackPanel>
-                                <StackPanel Grid.Row="2" Grid.Column="2"><TextBlock Text="CNPJ" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectCnpjBox"/><TextBlock Text="Contrato" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectContractBox"/><TextBlock Text="Logo do cliente" Style="{StaticResource FieldLabelTextStyle}"/><Border Background="{StaticResource SurfaceMutedBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="7" Padding="10"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="66"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Image x:Name="NewProjectLogoPreview" Width="56" Height="46" Stretch="Uniform"/><TextBlock x:Name="NewProjectLogoStatus" Grid.Column="1" Text="Nenhuma imagem selecionada" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" Margin="8,0" TextTrimming="CharacterEllipsis"/><Button Grid.Column="2" Content="Selecionar" Click="SelectNewProjectLogo_Click"/><TextBox x:Name="NewProjectLogoBox" Visibility="Collapsed"/></Grid></Border></StackPanel>
-                                <Grid Grid.Row="3" Grid.ColumnSpan="3" Margin="0,22,0,0"><TextBlock Text="Somente o nome é obrigatório." Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button Content="Cancelar" Style="{StaticResource SecondaryButtonStyle}" Click="CancelNewProject_Click" MinWidth="110"/><Button Content="Criar projeto" Style="{StaticResource PrimaryButtonStyle}" MinWidth="160" Click="CreateProject_Click"/></StackPanel></Grid>
-                            </Grid>
-                        </Border>
-                    </ScrollViewer>
+                <Grid x:Name="NewProjectView" Visibility="Collapsed" Background="#B3000000" Panel.ZIndex="10">
+                    <Border Style="{StaticResource DialogStyle}" Width="560" MaxHeight="730" Margin="24"
+                            HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Grid>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <DockPanel Margin="0,0,0,14">
+                                <Button DockPanel.Dock="Right" Content="×" Style="{StaticResource GhostButtonStyle}"
+                                        FontSize="18" Width="32" Height="28" Margin="0" Click="CancelNewProject_Click"/>
+                                <StackPanel><TextBlock Text="Novo projeto" FontSize="15" FontWeight="SemiBold"/>
+                                    <TextBlock Text="Defina os dados principais do projeto." Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,3,0,0"/></StackPanel>
+                            </DockPanel>
+                            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+                                <StackPanel>
+                                    <DockPanel Margin="0,0,0,9"><TextBlock Text="IDENTIFICAÇÃO" Foreground="{StaticResource TextMutedBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,10,0"/><Border Height="1" Background="{StaticResource BorderBrush}" VerticalAlignment="Center"/></DockPanel>
+                                    <TextBlock Style="{StaticResource FieldLabelTextStyle}"><Run Text="NOME DO PROJETO "/><Run Text="*" Foreground="{StaticResource DangerBrush}"/></TextBlock>
+                                    <TextBox x:Name="NewProjectNameBox" MaxLength="180"/>
+
+                                    <DockPanel Margin="0,8,0,9"><TextBlock Text="CLIENTE" Foreground="{StaticResource TextMutedBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,10,0"/><Border Height="1" Background="{StaticResource BorderBrush}" VerticalAlignment="Center"/></DockPanel>
+                                    <TextBlock Text="CLIENTE" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectClientBox"/>
+                                    <TextBlock Text="CNPJ" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectCnpjBox" FontFamily="{StaticResource MonoFont}" FontSize="12"/>
+                                    <TextBlock Text="ÁREA / LOCALIZAÇÃO" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectAreaBox"/>
+                                    <TextBlock Text="LOGO DO CLIENTE" Style="{StaticResource FieldLabelTextStyle}"/>
+                                    <Border Background="{StaticResource SurfaceMutedBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="5" Padding="8" Margin="0,0,0,10"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="58"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Image x:Name="NewProjectLogoPreview" Width="50" Height="38" Stretch="Uniform"/><TextBlock x:Name="NewProjectLogoStatus" Grid.Column="1" Text="Nenhuma imagem selecionada" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" Margin="8,0" TextTrimming="CharacterEllipsis"/><Button Grid.Column="2" Content="Selecionar" Style="{StaticResource GhostButtonStyle}" Click="SelectNewProjectLogo_Click"/><TextBox x:Name="NewProjectLogoBox" Visibility="Collapsed"/></Grid></Border>
+
+                                    <DockPanel Margin="0,8,0,9"><TextBlock Text="CONTRATO" Foreground="{StaticResource TextMutedBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,10,0"/><Border Height="1" Background="{StaticResource BorderBrush}" VerticalAlignment="Center"/></DockPanel>
+                                    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="CONTRATO" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectContractBox" FontFamily="{StaticResource MonoFont}" FontSize="12"/></StackPanel>
+                                        <StackPanel Grid.Column="2"><TextBlock Text="PEDIDO DE COMPRA" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="NewProjectPurchaseOrderBox" FontFamily="{StaticResource MonoFont}" FontSize="12"/></StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </ScrollViewer>
+                            <Grid Grid.Row="2" Margin="0,14,0,0"><TextBlock Text="Somente o nome é obrigatório." Foreground="{StaticResource TextMutedBrush}" FontSize="11" VerticalAlignment="Center"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button Content="Cancelar" Style="{StaticResource GhostButtonStyle}" Click="CancelNewProject_Click" MinWidth="90"/><Button Content="Criar projeto" Style="{StaticResource PrimaryButtonStyle}" MinWidth="120" Click="CreateProject_Click"/></StackPanel></Grid>
+                        </Grid>
+                    </Border>
                 </Grid>
             </Grid>
         </Grid>
 
-        <Grid x:Name="EditorView" Visibility="Collapsed" Margin="16,14,18,10" MaxWidth="1760" HorizontalAlignment="Stretch">
+        <Grid x:Name="EditorView" Grid.Row="1" Grid.Column="1" Visibility="Collapsed"
+              Margin="22,12,20,10" MaxWidth="4096" HorizontalAlignment="Stretch">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-            <Grid x:Name="EditorHeaderGrid" Margin="0,0,0,12">
+            <Grid x:Name="EditorHeaderGrid" Margin="0,0,0,10">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <Button Margin="0,0,16,0" VerticalAlignment="Center" Click="Back_Click"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72B;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/><TextBlock x:Name="BackToProjectsText" Text="Voltar para projetos"/></StackPanel></Button>
-                <StackPanel Grid.Column="1"><TextBlock x:Name="ProjectTitle" Style="{StaticResource PageTitleTextStyle}" FontSize="23" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="ProjectClientSummary" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" Margin="0,2,0,0"/></StackPanel>
-                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center"><TextBlock x:Name="StorageStatus" Foreground="{StaticResource TextSecondaryBrush}" FontWeight="SemiBold" Margin="0,0,12,0"/><Button x:Name="AnomalyCatalogButton" Content="Catálogo de anomalias" Click="AnomalyCatalog_Click"/><Button x:Name="ShareProjectButton" Click="ShareProject_Click" ToolTip="Compartilhar projeto"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72D;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/><TextBlock x:Name="ShareProjectText" Text="Compartilhar"/></StackPanel></Button><Button x:Name="HeaderNewReportButton" Style="{StaticResource PrimaryButtonStyle}" Click="NewReport_Click"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/><TextBlock Text="Novo relatório"/></StackPanel></Button></StackPanel>
+                <Button Style="{StaticResource GhostButtonStyle}" Margin="0,0,16,0" VerticalAlignment="Center" Click="Back_Click"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72B;" FontFamily="Segoe MDL2 Assets" Margin="0,0,6,0"/><TextBlock x:Name="BackToProjectsText" Text="Voltar"/></StackPanel></Button>
+                <StackPanel Grid.Column="1"><TextBlock x:Name="ProjectTitle" Style="{StaticResource PageTitleTextStyle}" FontSize="18" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="ProjectClientSummary" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,2,0,0"/></StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center"><TextBlock x:Name="StorageStatus" Foreground="{StaticResource TextSecondaryBrush}" FontWeight="SemiBold" Margin="0,0,12,0"/><Button x:Name="SaveProjectButton" Click="SaveProject_Click" ToolTip="Salvar projeto agora"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74E;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/><TextBlock x:Name="SaveProjectText" Text="Salvar projeto"/></StackPanel></Button><Button x:Name="AnomalyCatalogButton" Content="Catálogo de anomalias" Click="AnomalyCatalog_Click"/><Button x:Name="ShareProjectButton" Click="ShareProject_Click" ToolTip="Compartilhar projeto"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72D;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/><TextBlock x:Name="ShareProjectText" Text="Compartilhar"/></StackPanel></Button><Button x:Name="HeaderNewReportButton" Style="{StaticResource PrimaryButtonStyle}" Click="NewReport_Click"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" FontFamily="Segoe MDL2 Assets" Margin="0,0,8,0"/><TextBlock Text="Novo relatório"/></StackPanel></Button></StackPanel>
             </Grid>
 
-            <TabControl x:Name="ReportEditorTabs" Grid.Row="1" Margin="0" SelectionChanged="ReportEditorTabs_SelectionChanged">
+            <TabControl x:Name="ReportEditorTabs" Grid.Row="1" Margin="0"
+                        Style="{StaticResource WorkspaceTabControlStyle}"
+                        SelectionChanged="ReportEditorTabs_SelectionChanged">
                 <TabItem x:Name="OverviewTab" Header="Visão geral">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,14,8,0">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,8,8,0">
                         <Grid x:Name="OverviewWorkspace">
                             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 
@@ -227,13 +290,13 @@
                                 <Grid>
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="300"/></Grid.ColumnDefinitions>
                                     <StackPanel>
-                                        <TextBlock x:Name="OverviewProjectName" Style="{StaticResource SectionTitleTextStyle}" FontSize="19" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock x:Name="OverviewProjectName" Style="{StaticResource SectionTitleTextStyle}" FontSize="17" TextTrimming="CharacterEllipsis"/>
                                         <TextBlock x:Name="OverviewClientName" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,3,0,18" TextTrimming="CharacterEllipsis"/>
                                         <UniformGrid Columns="4">
-                                            <StackPanel Margin="0,0,12,0"><TextBlock x:Name="OverviewReportsCount" FontSize="22" FontWeight="Bold"/><TextBlock Text="Relatórios" Foreground="{StaticResource TextMutedBrush}"/></StackPanel>
-                                            <StackPanel Margin="0,0,12,0"><TextBlock x:Name="OverviewSectionsCount" FontSize="22" FontWeight="Bold"/><TextBlock Text="Trechos" Foreground="{StaticResource TextMutedBrush}"/></StackPanel>
-                                            <StackPanel Margin="0,0,12,0"><TextBlock x:Name="OverviewOccurrencesCount" FontSize="22" FontWeight="Bold"/><TextBlock Text="Anomalias" Foreground="{StaticResource TextMutedBrush}"/></StackPanel>
-                                            <StackPanel><TextBlock Text="&#xE787;" FontFamily="Segoe MDL2 Assets" Foreground="{StaticResource PrimaryBrush}" FontSize="19"/><TextBlock x:Name="OverviewUpdatedAt" FontWeight="SemiBold" Margin="0,5,0,2"/><TextBlock Text="Última alteração" Foreground="{StaticResource TextMutedBrush}"/></StackPanel>
+                                            <StackPanel Margin="0,0,12,0"><TextBlock x:Name="OverviewReportsCount" FontSize="28" FontWeight="Bold"/><TextBlock Text="Relatórios" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}"/></StackPanel>
+                                            <StackPanel Margin="0,0,12,0"><TextBlock x:Name="OverviewSectionsCount" FontSize="28" FontWeight="Bold"/><TextBlock Text="Trechos" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}"/></StackPanel>
+                                            <StackPanel Margin="0,0,12,0"><TextBlock x:Name="OverviewOccurrencesCount" FontSize="28" FontWeight="Bold"/><TextBlock Text="Anomalias" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}"/></StackPanel>
+                                            <StackPanel><TextBlock Text="Última alteração" Foreground="{StaticResource TextMutedBrush}" FontSize="11"/><TextBlock x:Name="OverviewUpdatedAt" FontFamily="{StaticResource MonoFont}" FontSize="13" FontWeight="SemiBold" Margin="0,5,0,2"/></StackPanel>
                                         </UniformGrid>
                                     </StackPanel>
                                     <Border Grid.Column="2" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1,0,0,0" Padding="20,0,0,0">
@@ -250,19 +313,19 @@
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="1.08*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                 <Border Style="{StaticResource CardStyle}" Padding="18">
                                     <StackPanel>
-                                        <TextBlock Text="Resumo do projeto" Style="{StaticResource SectionTitleTextStyle}" Margin="0,0,0,13"/>
-                                        <TextBlock Text="Cliente" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultClientBox" TextChanged="FieldChanged"/>
-                                        <TextBlock Text="CNPJ" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultCnpjBox" TextChanged="FieldChanged"/>
-                                        <TextBlock Text="Área / localização" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultAreaBox" TextChanged="FieldChanged"/>
-                                        <TextBlock Text="Contrato" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultContractBox" TextChanged="FieldChanged"/>
-                                        <TextBlock Text="Pedido de compra" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultPurchaseOrderBox" TextChanged="FieldChanged"/>
+                                        <TextBlock Text="RESUMO DO PROJETO" Style="{StaticResource SectionTitleTextStyle}" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,13"/>
+                                        <TextBlock Text="CLIENTE" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultClientBox" Background="{StaticResource SurfaceRaisedBrush}" TextChanged="FieldChanged"/>
+                                        <TextBlock Text="CNPJ" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultCnpjBox" Background="{StaticResource SurfaceRaisedBrush}" FontFamily="{StaticResource MonoFont}" FontSize="12" TextChanged="FieldChanged"/>
+                                        <TextBlock Text="ÁREA / LOCALIZAÇÃO" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultAreaBox" Background="{StaticResource SurfaceRaisedBrush}" TextChanged="FieldChanged"/>
+                                        <TextBlock Text="CONTRATO" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultContractBox" Background="{StaticResource SurfaceRaisedBrush}" FontFamily="{StaticResource MonoFont}" FontSize="12" TextChanged="FieldChanged"/>
+                                        <TextBlock Text="PEDIDO DE COMPRA" Style="{StaticResource FieldLabelTextStyle}"/><TextBox x:Name="DefaultPurchaseOrderBox" Background="{StaticResource SurfaceRaisedBrush}" FontFamily="{StaticResource MonoFont}" FontSize="12" TextChanged="FieldChanged"/>
                                         <TextBlock Text="As alterações são salvas automaticamente e herdadas por novos relatórios." Foreground="{StaticResource TextMutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
                                     </StackPanel>
                                 </Border>
 
                                 <Border Grid.Column="2" Style="{StaticResource CardStyle}" Padding="18" MinHeight="390">
                                     <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                                        <TextBlock Text="Atividade recente" Style="{StaticResource SectionTitleTextStyle}"/>
+                                        <TextBlock Text="ATIVIDADE RECENTE" Style="{StaticResource SectionTitleTextStyle}" Foreground="{StaticResource TextMutedBrush}"/>
                                         <Grid Grid.Row="1" Margin="0,12,0,0">
                                             <StackPanel x:Name="OverviewActivityEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center"><TextBlock Text="&#xE9D5;" FontFamily="Segoe MDL2 Assets" FontSize="44" Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Center"/><TextBlock Text="Nenhuma atividade recente" FontWeight="SemiBold" FontSize="15" HorizontalAlignment="Center" Margin="0,14,0,0"/><TextBlock Text="As atualizações do projeto aparecerão aqui." Foreground="{StaticResource TextSecondaryBrush}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel>
                                             <ItemsControl x:Name="OverviewActivityList"><ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="7" Padding="12" Margin="0,0,0,8"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="{Binding Icon}" FontFamily="Segoe MDL2 Assets" Foreground="{StaticResource PrimaryBrush}" FontSize="17" VerticalAlignment="Center"/><StackPanel Grid.Column="1"><TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Detail}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding When}" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,3,0,0"/></StackPanel></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
@@ -272,7 +335,7 @@
 
                                 <Border Grid.Column="4" Style="{StaticResource CardStyle}" Padding="18" MinHeight="390">
                                     <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                                        <TextBlock Text="Últimos relatórios" Style="{StaticResource SectionTitleTextStyle}"/>
+                                        <TextBlock Text="ÚLTIMOS RELATÓRIOS" Style="{StaticResource SectionTitleTextStyle}" Foreground="{StaticResource TextMutedBrush}"/>
                                         <Grid Grid.Row="1" Margin="0,12,0,0">
                                             <StackPanel x:Name="OverviewLatestReportsEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center"><TextBlock Text="&#xE8A5;" FontFamily="Segoe MDL2 Assets" FontSize="44" Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Center"/><TextBlock Text="Nenhum relatório criado" FontWeight="SemiBold" FontSize="15" HorizontalAlignment="Center" Margin="0,14,0,0"/><TextBlock Text="Clique em “Novo relatório” para começar." Foreground="{StaticResource TextSecondaryBrush}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel>
                                             <ItemsControl x:Name="OverviewLatestReportsList"><ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="7" Padding="12" Margin="0,0,0,8"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Detail}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Status}" Foreground="{Binding StatusColor}" FontSize="10" Margin="0,3,0,0"/></StackPanel><Button Grid.Column="1" Content="Abrir" Tag="{Binding Id}" Click="OpenOverviewReport_Click" VerticalAlignment="Center" Margin="10,0,0,0"/></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
@@ -282,7 +345,7 @@
                             </Grid>
 
                             <Border Grid.Row="2" Style="{StaticResource CardStyle}" Padding="18" Margin="0,14,0,8">
-                                <StackPanel><TextBlock Text="Logo do cliente" Style="{StaticResource SectionTitleTextStyle}" Margin="0,0,0,10"/><Border Background="{StaticResource SurfaceMutedBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="7" Padding="12"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="88"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Image x:Name="DefaultLogoPreview" Width="78" Height="58" Stretch="Uniform"/><StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="10,0"><TextBlock x:Name="DefaultLogoStatus" Text="Nenhuma imagem selecionada" Foreground="{StaticResource TextSecondaryBrush}"/><TextBlock Text="PNG ou JPG" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,3,0,0"/></StackPanel><Button x:Name="DefaultLogoButton" Grid.Column="2" Content="Selecionar imagem" VerticalAlignment="Center" Click="SelectDefaultLogo_Click"/><TextBox x:Name="DefaultLogoBox" Visibility="Collapsed"/></Grid></Border></StackPanel>
+                                <StackPanel><TextBlock Text="LOGO DO CLIENTE" Style="{StaticResource SectionTitleTextStyle}" Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,10"/><Border Background="{StaticResource SurfaceMutedBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="5" Padding="12"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="88"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Image x:Name="DefaultLogoPreview" Width="78" Height="50" Stretch="Uniform"/><StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="10,0"><TextBlock x:Name="DefaultLogoStatus" Text="Nenhuma imagem selecionada" Foreground="{StaticResource TextPrimaryBrush}" FontWeight="SemiBold"/><TextBlock Text="PNG ou JPG" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,3,0,0"/></StackPanel><Button x:Name="DefaultLogoButton" Grid.Column="2" Content="Alterar imagem" Style="{StaticResource GhostButtonStyle}" VerticalAlignment="Center" Click="SelectDefaultLogo_Click"/><TextBox x:Name="DefaultLogoBox" Visibility="Collapsed"/></Grid></Border></StackPanel>
                             </Border>
                         </Grid>
                     </ScrollViewer>
@@ -310,8 +373,8 @@
                             <Setter Property="Foreground" Value="#38AFFF"/>
                         </Style>
                     </TabItem.Resources>
-                    <Grid x:Name="InspectionLayoutRoot" Margin="0,10,8,0">
-                            <Grid.ColumnDefinitions><ColumnDefinition x:Name="PlayerColumn" Width="*"/><ColumnDefinition x:Name="InspectionSplitterColumn" Width="6"/><ColumnDefinition x:Name="InspectionSideColumn" Width="360"/></Grid.ColumnDefinitions>
+                    <Grid x:Name="InspectionLayoutRoot" Margin="0,6,0,0">
+                            <Grid.ColumnDefinitions><ColumnDefinition x:Name="PlayerColumn" Width="*"/><ColumnDefinition x:Name="InspectionSplitterColumn" Width="4"/><ColumnDefinition x:Name="InspectionSideColumn" Width="320"/></Grid.ColumnDefinitions>
                             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
 
                             <Expander x:Name="InspectionContextExpander" Grid.ColumnSpan="3" Header="Local / Trecho / Vídeo" IsExpanded="True" Expanded="InspectionLayoutPreferenceChanged" Collapsed="InspectionLayoutPreferenceChanged" Margin="0,0,0,8">
@@ -320,20 +383,32 @@
                                 <Border Grid.Column="0" Style="{StaticResource SubtleCardStyle}" Padding="12" Margin="0,0,6,0">
                                     <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                         <DockPanel Margin="0,0,0,8"><Button x:Name="AddLocationButton" DockPanel.Dock="Right" Style="{StaticResource IconButtonStyle}" Content="&#xE710;" Margin="4,0,0,0" Click="AddLocation_Click" ToolTip="Criar local"/><StackPanel Orientation="Horizontal" VerticalAlignment="Center"><Border Width="24" Height="24" CornerRadius="12" Background="#173F70" Margin="0,0,8,0"><TextBlock Text="1" FontWeight="Bold" Foreground="#55B9FF" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Local" FontWeight="SemiBold" VerticalAlignment="Center"/></StackPanel></DockPanel>
-                                        <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                             <ComboBox x:Name="LocationsList" DisplayMemberPath="Name" SelectionChanged="LocationsList_SelectionChanged" Margin="0,0,6,0" MinWidth="80" ToolTip="Selecione o local da inspeção"/>
-                                            <Button x:Name="RenameLocationButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Content="&#xE70F;" Margin="0,0,4,0" Click="RenameLocation_Click" ToolTip="Renomear local"/>
-                                            <Button x:Name="DeleteLocationButton" Grid.Column="2" Style="{StaticResource IconButtonStyle}" Content="&#xE74D;" Foreground="{StaticResource DangerBrush}" Click="DeleteLocation_Click" ToolTip="Excluir local"/>
+                                            <Button x:Name="ReorderLocationsButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Content="Ordenar" FontFamily="{StaticResource AppFont}" FontSize="12" Foreground="{StaticResource PrimaryBrush}" Padding="9,0" Margin="0,0,4,0" Click="ReorderLocations_Click" ToolTip="Ordenar locais arrastando para cima ou para baixo" ToolTipService.ShowOnDisabled="True"/>
+                                            <Button x:Name="RenameLocationButton" Grid.Column="2" Style="{StaticResource IconButtonStyle}" Content="&#xE70F;" Margin="0,0,4,0" Click="RenameLocation_Click" ToolTip="Renomear local"/>
+                                            <Button x:Name="DeleteLocationButton" Grid.Column="3" Style="{StaticResource IconButtonStyle}" Content="&#xE74D;" Foreground="{StaticResource DangerBrush}" Click="DeleteLocation_Click" ToolTip="Excluir local"/>
                                         </Grid>
                                     </Grid>
                                 </Border>
                                 <Border Grid.Column="1" Style="{StaticResource SubtleCardStyle}" Padding="12" Margin="6,0">
                                     <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                         <DockPanel Margin="0,0,0,8"><Button x:Name="AddSectionButton" DockPanel.Dock="Right" Style="{StaticResource IconButtonStyle}" Content="&#xE710;" Margin="4,0,0,0" Click="AddSection_Click" ToolTip="Criar trecho"/><StackPanel Orientation="Horizontal" VerticalAlignment="Center"><Border Width="24" Height="24" CornerRadius="12" Background="#173F70" Margin="0,0,8,0"><TextBlock Text="2" FontWeight="Bold" Foreground="#55B9FF" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Trecho" FontWeight="SemiBold" VerticalAlignment="Center"/></StackPanel></DockPanel>
-                                        <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                            <ComboBox x:Name="SectionsList" SelectionChanged="SectionsList_SelectionChanged" Margin="0,0,6,0" MinWidth="80" TextSearch.TextPath="Name" ToolTip="Selecione o trecho a inspecionar"><ComboBox.ItemTemplate><DataTemplate><StackPanel><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/><TextBlock FontSize="10" Foreground="{StaticResource TextMutedBrush}" TextTrimming="CharacterEllipsis"><Run Text="{Binding StartPoint}"/><Run Text=" → "/><Run Text="{Binding EndPoint}"/></TextBlock></StackPanel></DataTemplate></ComboBox.ItemTemplate></ComboBox>
-                                            <Button x:Name="EditSectionButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Content="&#xE70F;" Margin="0,0,4,0" Click="EditSection_Click" ToolTip="Editar trecho" ToolTipService.ShowOnDisabled="True"/>
-                                            <Button x:Name="DeleteSectionButton" Grid.Column="2" Style="{StaticResource IconButtonStyle}" Content="&#xE74D;" Foreground="{StaticResource DangerBrush}" Click="DeleteSection_Click" ToolTip="Excluir trecho"/>
+                                        <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <ComboBox x:Name="SectionsList" SelectionChanged="SectionsList_SelectionChanged" Margin="0,0,6,0" MinWidth="80" TextSearch.TextPath="Name" ToolTip="Selecione o trecho a inspecionar">
+                                                <ComboBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel>
+                                                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                                                            <TextBlock FontSize="10" Foreground="{StaticResource TextMutedBrush}" TextTrimming="CharacterEllipsis"><Run Text="{Binding StartPoint}"/><Run Text=" → "/><Run Text="{Binding EndPoint}"/></TextBlock>
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ComboBox.ItemTemplate>
+                                            </ComboBox>
+                                            <Button x:Name="ReorderSectionsButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Content="Ordenar" FontFamily="{StaticResource AppFont}" FontSize="12" Foreground="{StaticResource PrimaryBrush}" Padding="9,0" Margin="0,0,4,0" Click="ReorderSections_Click" ToolTip="Ordenar trechos arrastando para cima ou para baixo" ToolTipService.ShowOnDisabled="True"/>
+                                            <Button x:Name="RenameSectionsButton" Grid.Column="2" Style="{StaticResource IconButtonStyle}" Content="Renomear" FontFamily="{StaticResource AppFont}" FontSize="12" Foreground="{StaticResource PrimaryBrush}" Padding="9,0" Margin="0,0,4,0" Click="RenameSectionsAutomatically_Click" ToolTip="Renomear todos os trechos em sequência" ToolTipService.ShowOnDisabled="True"/>
+                                            <Button x:Name="EditSectionButton" Grid.Column="3" Style="{StaticResource IconButtonStyle}" Content="&#xE70F;" Margin="0,0,4,0" Click="EditSection_Click" ToolTip="Editar trecho" ToolTipService.ShowOnDisabled="True"/>
+                                            <Button x:Name="DeleteSectionButton" Grid.Column="4" Style="{StaticResource IconButtonStyle}" Content="&#xE74D;" Foreground="{StaticResource DangerBrush}" Click="DeleteSection_Click" ToolTip="Excluir trecho"/>
                                         </Grid>
                                     </Grid>
                                 </Border>
@@ -387,7 +462,7 @@
 
                             <GridSplitter x:Name="InspectionSideSplitter" Grid.Row="1" Grid.Column="1" Width="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Transparent" DragCompleted="InspectionSideSplitter_DragCompleted"/>
                             <Grid x:Name="InspectionSidePanel" Grid.Row="1" Grid.Column="2" Margin="8,0,0,0" MinWidth="380">
-                            <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <Grid.RowDefinitions><RowDefinition Height="*"/></Grid.RowDefinitions>
                             <Border Grid.Row="0" Style="{StaticResource CardStyle}" Padding="12">
                                 <Grid>
                                     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -401,9 +476,24 @@
                                                     <TextBlock x:Name="AnomalySummaryText" Foreground="{StaticResource TextMutedBrush}" FontSize="12" TextWrapping="Wrap" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
                                                 </StackPanel>
                                             </StackPanel>
-                                            <Border Grid.Column="1" Width="38" Height="38" CornerRadius="8" Background="#102231" BorderBrush="#263E50" BorderThickness="1">
-                                                <TextBlock Text="&#xE9D2;" FontFamily="Segoe MDL2 Assets" Foreground="#7E93A6" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                            </Border>
+                                            <Button x:Name="PendingCapturesButton" Grid.Column="1" MinWidth="112" Height="38"
+                                                    Padding="10,0" Margin="10,0,0,0" Click="OpenPendingCaptures_Click"
+                                                    ToolTip="Nenhuma captura pendente neste trecho"
+                                                    ToolTipService.ShowOnDisabled="True"
+                                                    AutomationProperties.Name="Abrir capturas pendentes">
+                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                                    <TextBlock Text="&#xE91B;" FontFamily="Segoe MDL2 Assets"
+                                                               Foreground="{StaticResource PrimaryBrush}" FontSize="15"
+                                                               VerticalAlignment="Center" Margin="0,0,7,0"/>
+                                                    <TextBlock Text="Capturas" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                                    <Border MinWidth="20" Height="20" CornerRadius="10" Margin="8,0,0,0"
+                                                            Padding="5,0" Background="{StaticResource PrimaryBrush}">
+                                                        <TextBlock x:Name="PendingCapturesCountText" Text="0" Foreground="White"
+                                                                   FontSize="10" FontWeight="Bold"
+                                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                    </Border>
+                                                </StackPanel>
+                                            </Button>
                                         </Grid>
                                         <Button x:Name="NewOccurrenceButton" Style="{StaticResource PrimaryButtonStyle}" Click="NewOccurrence_Click" Height="46" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,14,0,0">
                                             <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" FontFamily="Segoe MDL2 Assets" FontSize="16" Margin="0,0,8,0"/><TextBlock Text="Cadastrar anomalia" FontSize="14" FontWeight="SemiBold"/></StackPanel>
@@ -413,9 +503,8 @@
                                             <TextBlock Text="&#xE721;" FontFamily="Segoe MDL2 Assets" Foreground="#8295A7" FontSize="15" VerticalAlignment="Center" Margin="13,0,0,0" IsHitTestVisible="False"/>
                                             <TextBlock x:Name="AnomalySearchPlaceholder" Text="Pesquisar anomalias..." Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" Margin="39,0,10,0" IsHitTestVisible="False"/>
                                         </Grid>
-                                        <ComboBox x:Name="AnomalyStatusFilter" MinHeight="40" HorizontalAlignment="Stretch" Margin="0,9,0,0" SelectionChanged="AnomalyListFilterChanged"><ComboBoxItem Content="Todas as anomalias" Tag="All" IsSelected="True"/><ComboBoxItem Content="Anomalias completas" Tag="Complete"/><ComboBoxItem Content="Anomalias incompletas" Tag="Incomplete"/></ComboBox>
                                     </StackPanel>
-                                    <Grid Grid.Row="1"><ListBox x:Name="OccurrencesList" AllowDrop="True" Background="Transparent" BorderThickness="0" Padding="0,0,4,0" PreviewMouseMove="OccurrencesList_PreviewMouseMove" Drop="OccurrencesList_Drop" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto"><ListBox.ItemTemplate><DataTemplate>
+                                    <Grid Grid.Row="1"><ListBox x:Name="OccurrencesList" AllowDrop="True" Background="Transparent" BorderThickness="0" Padding="0,0,4,0" PreviewMouseMove="OccurrencesList_PreviewMouseMove" Drop="OccurrencesList_Drop" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"><ListBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel/></ItemsPanelTemplate></ListBox.ItemsPanel><ListBox.ItemTemplate><DataTemplate>
                                         <Border Style="{StaticResource AnomalyDashboardCardStyle}">
                                             <Grid>
                                                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -476,23 +565,72 @@
                                 </Grid>
                             </Border>
 
-                            <Expander Grid.Row="1" Margin="0,10,0,0" Padding="10,6" Background="{StaticResource SurfaceMutedBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" IsExpanded="False"><Expander.Header><StackPanel Orientation="Horizontal"><TextBlock Text="Capturas pendentes" FontWeight="SemiBold"/><TextBlock x:Name="PendingCapturesSummary" Foreground="{StaticResource TextMutedBrush}" Margin="8,0,0,0"/></StackPanel></Expander.Header>
-                                <ListBox x:Name="CapturesList" MaxHeight="160" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel><ListBox.ItemTemplate><DataTemplate><Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="6" Padding="6" Margin="4" Width="180"><StackPanel><Image Source="{Binding Thumbnail}" Height="80" Stretch="Uniform"/><TextBlock Text="{Binding Timestamp}" FontFamily="Consolas" FontWeight="SemiBold"/><TextBlock Text="{Binding VideoName}" TextTrimming="CharacterEllipsis" Foreground="{StaticResource TextSecondaryBrush}"/><WrapPanel><Button Content="Cadastrar" Tag="{Binding Id}" Click="CreateOccurrenceFromPending_Click"/><Button Content="Ir ao vídeo" Tag="{Binding Id}" Click="GoToCapture_Click"/><Button Content="Excluir" Style="{StaticResource DangerButtonStyle}" Tag="{Binding Id}" Click="DeleteCapture_Click"/></WrapPanel></StackPanel></Border></DataTemplate></ListBox.ItemTemplate></ListBox>
-                            </Expander>
                             </Grid>
                         </Grid>
                 </TabItem>
 
                 <TabItem x:Name="WordConfigTab" Header="Relatórios">
-                    <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="300"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                        <StackPanel Margin="0,0,18,0"><DockPanel Margin="0,0,0,10"><Button x:Name="NewReportButton" DockPanel.Dock="Right" Content="+  Novo relatório" Style="{StaticResource PrimaryButtonStyle}" Click="NewReport_Click"/><TextBlock Text="Relatórios" Style="{StaticResource SectionTitleTextStyle}" VerticalAlignment="Center"/></DockPanel>
+                    <Grid Margin="0,6,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="260"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <StackPanel Margin="0,0,14,0"><DockPanel Margin="0,0,0,10"><Button x:Name="NewReportButton" DockPanel.Dock="Right" Content="+  Novo relatório" Style="{StaticResource PrimaryButtonStyle}" Click="NewReport_Click"/><TextBlock Text="Relatórios" Style="{StaticResource SectionTitleTextStyle}" FontSize="13" VerticalAlignment="Center"/></DockPanel>
                             <ComboBox x:Name="ReportsCombo" Visibility="Collapsed" DisplayMemberPath="DisplayCode" SelectionChanged="ReportsCombo_SelectionChanged"/>
-                            <Grid><ListBox x:Name="ReportsList" SelectionChanged="ReportsList_SelectionChanged" BorderThickness="0"><ListBox.ItemTemplate><DataTemplate><Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="7" Padding="13" Margin="0,0,0,8"><StackPanel><TextBlock Text="{Binding DisplayCode}" FontSize="16" FontWeight="SemiBold"/><TextBlock Text="{Binding ReportDate, StringFormat={}{0:dd/MM/yyyy}, TargetNullValue='Data não informada'}" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0"/><TextBlock Text="{Binding SectionLinks.Count, StringFormat={}{0} trecho(s)}" Foreground="{StaticResource TextMutedBrush}"/><TextBlock Margin="0,5,0,0"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Text" Value="Finalizado"/><Setter Property="Foreground" Value="{StaticResource SuccessBrush}"/><Style.Triggers><DataTrigger Binding="{Binding GeneratedReportPath}" Value="{x:Null}"><Setter Property="Text" Value="Em andamento"/><Setter Property="Foreground" Value="{StaticResource WarningBrush}"/></DataTrigger><DataTrigger Binding="{Binding GeneratedReportPath}" Value=""><Setter Property="Text" Value="Em andamento"/><Setter Property="Foreground" Value="{StaticResource WarningBrush}"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock><TextBlock Text="Abrir preparação" Foreground="{StaticResource PrimaryBrush}" Margin="0,7,0,0"/></StackPanel></Border></DataTemplate></ListBox.ItemTemplate></ListBox>
+                            <Grid>
+                                <ListBox x:Name="ReportsList" SelectionChanged="ReportsList_SelectionChanged" BorderThickness="0">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="7" Padding="13" Margin="0,0,0,8">
+                                                <Grid>
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                    </Grid.RowDefinitions>
+                                                    <TextBlock Text="{Binding DisplayCode}" FontSize="16" FontWeight="SemiBold"/>
+                                                    <TextBlock Grid.Row="1" Text="{Binding ReportDate, StringFormat={}{0:dd/MM/yyyy}, TargetNullValue='Data não informada'}"
+                                                               Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0"/>
+                                                    <TextBlock Grid.Row="2" Text="{Binding SectionLinks.Count, StringFormat={}{0} trecho(s)}"
+                                                               Foreground="{StaticResource TextMutedBrush}"/>
+                                                    <TextBlock Grid.Row="3" Margin="0,5,0,0">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Text" Value="Finalizado"/>
+                                                                <Setter Property="Foreground" Value="{StaticResource SuccessBrush}"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding GeneratedReportPath}" Value="{x:Null}">
+                                                                        <Setter Property="Text" Value="Em andamento"/>
+                                                                        <Setter Property="Foreground" Value="{StaticResource WarningBrush}"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding GeneratedReportPath}" Value="">
+                                                                        <Setter Property="Text" Value="Em andamento"/>
+                                                                        <Setter Property="Foreground" Value="{StaticResource WarningBrush}"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                    <Grid Grid.Row="4" Margin="0,7,0,0">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="Abrir preparação" Foreground="{StaticResource PrimaryBrush}"
+                                                                   VerticalAlignment="Center"/>
+                                                        <Button Grid.Column="1" Content="Excluir" Style="{StaticResource DangerButtonStyle}"
+                                                                Tag="{Binding Id}" Click="DeleteReportCard_Click"
+                                                                MinWidth="68" Height="26" Padding="8,2" Margin="8,0,0,0"
+                                                                ToolTip="Excluir este relatório"/>
+                                                    </Grid>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
                                 <StackPanel x:Name="ReportsEmptyState" VerticalAlignment="Center" Visibility="Collapsed"><TextBlock Text="Nenhum relatório criado" FontWeight="SemiBold" HorizontalAlignment="Center"/><TextBlock Text="Crie o primeiro relatório para preparar o documento." Foreground="{StaticResource TextMutedBrush}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,4,0,0"/><Button Content="Novo relatório" HorizontalAlignment="Center" Margin="0,10,0,0" Click="NewReport_Click"/></StackPanel>
                             </Grid>
                         </StackPanel>
                         <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="0,0,8,0">
-                            <StackPanel MaxWidth="940" HorizontalAlignment="Center">
+                            <StackPanel MaxWidth="4096" HorizontalAlignment="Stretch">
                                 <DockPanel Margin="0,0,0,16"><Button x:Name="DeleteReportButton" DockPanel.Dock="Right" Content="Excluir relatório" Style="{StaticResource DangerButtonStyle}" Click="DeleteReport_Click"/><Border x:Name="ReadOnlyReportBanner" DockPanel.Dock="Right" Visibility="Collapsed" Background="#321C23" BorderBrush="#67323C" BorderThickness="1" CornerRadius="5" Padding="10,6" Margin="0,0,8,0"><TextBlock Text="Somente leitura" Foreground="{StaticResource DangerBrush}" FontWeight="SemiBold"/></Border><StackPanel><TextBlock x:Name="ActiveReportTitle" Text="Selecione um relatório" Style="{StaticResource PageTitleTextStyle}" FontSize="22"/><TextBlock Text="Preparação do documento" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,3,0,0"/></StackPanel></DockPanel>
                                 <Grid x:Name="ReportHeaderTab" Visibility="Collapsed"><TextBox x:Name="ClientBox"/><TextBox x:Name="CnpjBox"/><TextBox x:Name="AreaBox"/><TextBox x:Name="ContractBox"/><TextBox x:Name="PurchaseOrderBox"/><TextBox x:Name="TemplateBox"/><TextBox x:Name="LogoBox"/></Grid>
                                 <TextBlock Text="Dados da emissão" Style="{StaticResource SectionTitleTextStyle}"/>
@@ -522,13 +660,25 @@
                                     <StackPanel x:Name="GprImagesPanel" Margin="0,3"><DockPanel><Button Content="Alterar" Tag="Gpr" DockPanel.Dock="Right" Click="SelectDevelopmentImages_Click"/><TextBlock Text="GPR / Georadar" FontWeight="SemiBold" VerticalAlignment="Center"/></DockPanel><ItemsControl x:Name="GprImagesList" Margin="0,6,0,0"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource SubtleCardStyle}" Width="104" Padding="5" Margin="0,0,7,7"><StackPanel><Image Source="{Binding Thumbnail}" Height="64" Stretch="Uniform"/><TextBlock Text="{Binding DisplayName}" FontSize="10" Foreground="{StaticResource TextMutedBrush}" TextTrimming="CharacterEllipsis" ToolTip="{Binding DisplayName}"/></StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl><TextBlock x:Name="GprImagesText" Foreground="{StaticResource TextMutedBrush}"/></StackPanel>
                                 </StackPanel>
 
-                                <DockPanel Margin="0,0,0,8"><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button Content="Selecionar todos" Click="SelectAllReportSections_Click"/><Button Content="Limpar" Click="ClearReportSections_Click"/></StackPanel><TextBlock Text="Trechos do relatório" Style="{StaticResource SectionTitleTextStyle}" VerticalAlignment="Center"/></DockPanel>
-                                <Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="7" Padding="10" MaxHeight="190"><ScrollViewer VerticalScrollBarVisibility="Auto"><ItemsControl x:Name="ReportSectionsList"><ItemsControl.ItemTemplate><DataTemplate><CheckBox Content="{Binding DisplayName}" Tag="{Binding SectionId}" IsChecked="{Binding IsSelected}" Margin="4" Checked="ReportSectionSelectionChanged" Unchecked="ReportSectionSelectionChanged"/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer></Border>
+                                <DockPanel Margin="0,0,0,8"><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="SelectAllReportSectionsButton" Content="Selecionar todos" Click="SelectAllReportSections_Click"/><Button x:Name="ClearReportSectionsButton" Content="Limpar" Click="ClearReportSections_Click"/></StackPanel><TextBlock Text="Trechos do relatório" Style="{StaticResource SectionTitleTextStyle}" VerticalAlignment="Center"/></DockPanel>
+                                <Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="7" Padding="10" MaxHeight="190"><ScrollViewer VerticalScrollBarVisibility="Auto"><ItemsControl x:Name="ReportSectionsList"><ItemsControl.ItemTemplate><DataTemplate><CheckBox Content="{Binding DisplayName}" Tag="{Binding SectionId}" IsChecked="{Binding IsSelected, Mode=TwoWay}" Margin="4" Checked="ReportSectionSelectionChanged" Unchecked="ReportSectionSelectionChanged"/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer></Border>
 
 
                                 <DockPanel Margin="0,18,0,8"><Button Content="+  Adicionar seção" DockPanel.Dock="Right" Click="AddCustomSection_Click"/><TextBlock Text="Etapas adicionais" Style="{StaticResource SectionTitleTextStyle}" VerticalAlignment="Center"/></DockPanel>
                                 <ItemsControl x:Name="CustomSectionsList"><ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource SurfaceMutedBrush}" CornerRadius="6" Padding="10" Margin="0,4"><DockPanel><Button Content="Remover" Style="{StaticResource DangerButtonStyle}" DockPanel.Dock="Right" Tag="{Binding Id}" Click="RemoveCustomSection_Click"/><StackPanel><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Text}" TextTrimming="CharacterEllipsis" MaxWidth="650" Foreground="{StaticResource TextSecondaryBrush}"/><TextBlock Text="{Binding Images.Count, StringFormat={}{0} imagem(ns)}" Foreground="{StaticResource TextMutedBrush}"/></StackPanel></DockPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
-                                <Border Style="{StaticResource SubtleCardStyle}" Margin="0,18,0,0"><StackPanel><TextBlock x:Name="ReportReviewTitle" Text="Revisão do relatório" FontWeight="SemiBold"/><TextBlock x:Name="ReportReviewSummary" Margin="0,7,0,0" TextWrapping="Wrap"/><TextBlock x:Name="ReportReviewIssues" Margin="0,7,0,0" Foreground="{StaticResource WarningBrush}" TextWrapping="Wrap"/></StackPanel></Border>
+                                <Border Style="{StaticResource SubtleCardStyle}" Margin="0,18,0,0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock x:Name="ReportReviewTitle" Text="Revisão do relatório" FontWeight="SemiBold"/>
+                                            <TextBlock x:Name="ReportReviewSummary" Margin="0,7,0,0" TextWrapping="Wrap"/>
+                                            <TextBlock x:Name="ReportReviewIssues" Margin="0,7,0,0" Foreground="{StaticResource WarningBrush}" TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                        <Button x:Name="OpenReportReviewButton" Grid.Column="1" Content="Revisar relatório"
+                                                Style="{StaticResource PrimaryButtonStyle}" Margin="18,0,0,0"
+                                                VerticalAlignment="Center" Click="OpenReportReview_Click"/>
+                                    </Grid>
+                                </Border>
                                 <WrapPanel HorizontalAlignment="Right" Margin="0,22,0,8"><Button x:Name="OpenReportButton" Content="Abrir arquivo" IsEnabled="False" Click="OpenReport_Click"/><Button x:Name="OpenReportFolderButton" Content="Abrir pasta" IsEnabled="False" Click="OpenReportFolder_Click"/><Button x:Name="ContinueReportButton" Content="Continuar relatório existente" Click="ContinueReport_Click" ToolTipService.ShowOnDisabled="True"/><Button x:Name="ExportInspectionButton" Content="Exportar .geoadocs.json" Click="ExportInspection_Click"/><Button x:Name="SendToGeoAutoEngineButton" Content="Enviar ao GeoAutoEngine" Click="SendToGeoAutoEngine_Click" MinWidth="175"/><Button x:Name="GenerateReportButton" Content="Gerar relatório" Style="{StaticResource PrimaryButtonStyle}" Click="GenerateReport_Click" MinWidth="170"/></WrapPanel>
                                 <TextBlock x:Name="GeoAutoEngineStatusText" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6" HorizontalAlignment="Right"/>
                                 <TextBlock x:Name="GeneratedReportText" TextWrapping="Wrap" Foreground="{StaticResource SuccessBrush}"/>
@@ -541,7 +691,7 @@
             <TextBlock Grid.Row="2" x:Name="SaveStatus" Text="✓ Salvo" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="2,6,0,0"/>
         </Grid>
 
-        <Grid x:Name="InspectionFormOverlay" Visibility="Collapsed" Background="#FF08111B" Panel.ZIndex="20">
+        <Grid x:Name="InspectionFormOverlay" Grid.RowSpan="2" Grid.ColumnSpan="2" Visibility="Collapsed" Background="#B3000000" Panel.ZIndex="20">
             <Border Width="620" MaxWidth="620" MaxHeight="680" Margin="24" Padding="26,22" CornerRadius="10" Background="{StaticResource WindowBackgroundBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center">
                 <Grid>
                     <Grid x:Name="NewLocationPanel" Visibility="Collapsed">
@@ -565,13 +715,13 @@
             </Border>
         </Grid>
 
-        <Grid x:Name="OccurrenceEditorOverlay" Visibility="Collapsed" Background="#FF08111B" Panel.ZIndex="30">
+        <Grid x:Name="OccurrenceEditorOverlay" Grid.RowSpan="2" Grid.ColumnSpan="2" Visibility="Collapsed" Background="#B3000000" Panel.ZIndex="30">
             <Border Margin="18" MaxWidth="1540" MaxHeight="940" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{StaticResource WindowBackgroundBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" ClipToBounds="True">
                 <ContentControl x:Name="OccurrenceEditorHost"/>
             </Border>
         </Grid>
 
-        <Grid x:Name="ProjectDialogOverlay" Visibility="Collapsed" Background="#C2000000" Panel.ZIndex="40">
+        <Grid x:Name="ProjectDialogOverlay" Grid.RowSpan="2" Grid.ColumnSpan="2" Visibility="Collapsed" Background="#B3000000" Panel.ZIndex="40">
             <Border Style="{StaticResource DialogStyle}" Width="500" MaxWidth="500" Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center">
                 <Grid>
                     <Grid x:Name="RenameProjectDialogPanel" Visibility="Collapsed">

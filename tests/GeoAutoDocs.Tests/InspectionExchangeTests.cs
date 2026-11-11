@@ -44,10 +44,70 @@ public sealed class InspectionExchangeTests : IDisposable
         Assert.Equal("MultiPoint", exported.LocationMode);
         Assert.Equal([12m, 13m], exported.MeteragePoints);
         Assert.Equal(occurrence.EffectiveDescription, exported.EffectiveDescription);
-        Assert.Equal("LowerGenerator", Assert.Single(exported.Anomalies).Position);
+        Assert.Equal("UpperAndLowerGenerators", Assert.Single(exported.Anomalies).Position);
         Assert.Single(exported.Evidence);
         Assert.DoesNotContain(Path.GetFullPath(_root), json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("iVBOR", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ExportGroupsSectionsByLocationAndPreservesCreationOrder()
+    {
+        var project = new Project { Id = Guid.NewGuid(), Name = "Ordem de criação" };
+        var report = project.CreateReport("Relatório ordenado");
+
+        var firstLocation = new Location
+        {
+            ProjectId = project.Id,
+            Name = "PVAP09",
+            Order = 0
+        };
+        var secondLocation = new Location
+        {
+            ProjectId = project.Id,
+            Name = "PVAP01",
+            Order = 1
+        };
+        var firstSection = new InspectionSection
+        {
+            LocationId = firstLocation.Id,
+            Name = "Trecho criado primeiro",
+            Order = 0
+        };
+        var secondSection = new InspectionSection
+        {
+            LocationId = firstLocation.Id,
+            Name = "Trecho criado depois",
+            Order = 1
+        };
+        var thirdSection = new InspectionSection
+        {
+            LocationId = secondLocation.Id,
+            Name = "Trecho do segundo local",
+            Order = 0
+        };
+
+        firstLocation.Sections.Add(secondSection);
+        firstLocation.Sections.Add(firstSection);
+        secondLocation.Sections.Add(thirdSection);
+        project.Locations.Add(secondLocation);
+        project.Locations.Add(firstLocation);
+
+        report.SelectSection(thirdSection);
+        report.SelectSection(secondSection);
+        report.SelectSection(firstSection);
+
+        var document = new InspectionExchangeService().Build(project, report);
+
+        Assert.Equal(
+            new[] { firstLocation.Id, secondLocation.Id },
+            document.Locations.Select(x => x.LocationId));
+        Assert.Equal(
+            new[] { firstSection.Id, secondSection.Id, thirdSection.Id },
+            document.Sections.Select(x => x.SectionId));
+        Assert.Equal(
+            new[] { firstLocation.Id, firstLocation.Id, secondLocation.Id },
+            document.Sections.Select(x => x.LocationId));
     }
 
     [Fact]
@@ -66,7 +126,7 @@ public sealed class InspectionExchangeTests : IDisposable
         using (var docx = WordprocessingDocument.Open(output, false))
         {
             var body = string.Concat(docx.MainDocumentPart!.Document.Body!.Descendants<Text>().Select(x => x.Text));
-            Assert.Contains("Infiltração na geratriz inferior a 12 e 13 metros do início da filmagem", body);
+            Assert.Contains("Infiltração nas geratrizes superior e inferior a 12 e 13 metros do início da filmagem", body);
         }
         var sidecar = serializer.Deserialize(await File.ReadAllTextAsync(sidecarPath));
         Assert.True(exchange.TryReadInspectionManifest(output, out var manifest, out var error), error);
@@ -161,7 +221,7 @@ public sealed class InspectionExchangeTests : IDisposable
         occurrence.Anomalies.Add(new OccurrenceAnomaly
         {
             OccurrenceId = occurrence.Id, AnomalyTypeId = anomaly.Id, AnomalyType = anomaly,
-            AnomalyName = anomaly.Name, Position = AnomalyPosition.LowerGenerator, Order = 0
+            AnomalyName = anomaly.Name, Position = AnomalyPosition.UpperAndLowerGenerators, Order = 0
         });
         var evidencePath = Path.Combine(_root, "evidence-do-not-export.png");
         File.WriteAllBytes(evidencePath, Convert.FromBase64String(

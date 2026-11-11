@@ -20,5 +20,6 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\MODELO DE RELATORIO.docx" Link="Templates\MODELO DE RELATORIO.docx" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

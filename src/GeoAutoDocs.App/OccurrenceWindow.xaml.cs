@@ -686,6 +686,7 @@ public sealed record PositionChoice(AnomalyPosition Value, string Label)
     private static readonly HashSet<AnomalyPosition> OperationalPositions =
     [
         AnomalyPosition.NotApplicable, AnomalyPosition.UpperGenerator, AnomalyPosition.LowerGenerator,
+        AnomalyPosition.UpperAndLowerGenerators,
         AnomalyPosition.LeftSide, AnomalyPosition.RightSide, AnomalyPosition.Circumferential
     ];
     public static IReadOnlyList<PositionChoice> All { get; } = OccurrenceRules.SelectablePositions

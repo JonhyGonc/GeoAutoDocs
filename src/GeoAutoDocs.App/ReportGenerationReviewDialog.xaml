@@ -1,0 +1,40 @@
+<Window x:Class="GeoAutoDocs.App.ReportGenerationReviewDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Revisão do relatório" Width="590" SizeToContent="Height"
+        MinWidth="500" MaxHeight="620" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource WindowBackgroundBrush}">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel>
+            <TextBlock x:Name="DialogTitleText" Style="{StaticResource PageTitleTextStyle}"
+                       FontSize="22" TextWrapping="Wrap"/>
+            <TextBlock x:Name="DialogDescriptionText" Margin="0,10,0,0"
+                       Foreground="{StaticResource TextSecondaryBrush}"
+                       TextWrapping="Wrap" LineHeight="21"/>
+        </StackPanel>
+
+        <Border x:Name="DetailPanel" Grid.Row="1" Style="{StaticResource SubtleCardStyle}"
+                Margin="0,18,0,0">
+            <TextBlock x:Name="DialogDetailText" TextWrapping="Wrap"
+                       Foreground="{StaticResource TextSecondaryBrush}"/>
+        </Border>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right"
+                    Margin="0,22,0,0">
+            <Button Content="Cancelar" IsCancel="True" Click="Cancel_Click"/>
+            <Button x:Name="SecondaryActionButton" Margin="8,0,0,0"
+                    Style="{StaticResource SecondaryButtonStyle}"
+                    Click="SecondaryAction_Click"/>
+            <Button x:Name="PrimaryActionButton" Margin="8,0,0,0"
+                    Style="{StaticResource PrimaryButtonStyle}" IsDefault="True"
+                    Click="PrimaryAction_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

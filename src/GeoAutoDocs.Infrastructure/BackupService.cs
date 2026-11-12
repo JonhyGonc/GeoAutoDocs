@@ -19,6 +19,14 @@ public sealed class BackupService(AppDataPaths paths, LocalLogger logger, int re
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
+    // Pastas de dados gerenciados incluídas no backup, com o nome usado dentro do arquivo .zip.
+    // "Cache" guarda capturas, evidências e a cópia local dos projetos compartilhados.
+    private IEnumerable<(string ArchiveFolder, string Directory)> ManagedDirectories()
+    {
+        yield return ("projects", paths.ProjectsDirectory);
+        yield return ("Cache", paths.CacheDirectory);
+    }
+
     public BackupStatus GetStatus()
     {
         try
@@ -45,8 +53,8 @@ public sealed class BackupService(AppDataPaths paths, LocalLogger logger, int re
     private bool HasChangesSince(DateTime lastBackupUtc)
     {
         if (!File.Exists(paths.DatabasePath) || File.GetLastWriteTimeUtc(paths.DatabasePath) > lastBackupUtc) return true;
-        return Directory.Exists(paths.ProjectsDirectory) && Directory.EnumerateFiles(
-            paths.ProjectsDirectory, "*", SearchOption.AllDirectories).Any(x => File.GetLastWriteTimeUtc(x) > lastBackupUtc);
+        return ManagedDirectories().Any(managed => EnumerateManagedFiles(managed.Directory)
+            .Any(x => File.GetLastWriteTimeUtc(x) > lastBackupUtc));
     }
 
     public async Task<BackupStatus> CreateAsync(CancellationToken cancellationToken = default)
@@ -117,13 +125,16 @@ public sealed class BackupService(AppDataPaths paths, LocalLogger logger, int re
 
             Directory.CreateDirectory(paths.DatabaseDirectory);
             await CopyAtomicallyAsync(stagedDatabase, paths.DatabasePath, cancellationToken);
-            var stagedProjects = Path.Combine(stagingDirectory, "projects");
-            if (Directory.Exists(stagedProjects))
-                foreach (var source in Directory.EnumerateFiles(stagedProjects, "*", SearchOption.AllDirectories))
+            foreach (var (archiveFolder, directory) in ManagedDirectories())
+            {
+                var stagedFolder = Path.Combine(stagingDirectory, archiveFolder);
+                if (!Directory.Exists(stagedFolder)) continue; // backups antigos não têm "Cache"
+                foreach (var source in Directory.EnumerateFiles(stagedFolder, "*", SearchOption.AllDirectories))
                 {
-                    var relative = Path.GetRelativePath(stagedProjects, source);
-                    await CopyAtomicallyAsync(source, Path.Combine(paths.ProjectsDirectory, relative), cancellationToken);
+                    var relative = Path.GetRelativePath(stagedFolder, source);
+                    await CopyAtomicallyAsync(source, Path.Combine(directory, relative), cancellationToken);
                 }
+            }
             logger.Info($"Backup restaurado: {archivePath}");
         }
         catch (Exception ex)
@@ -196,21 +207,39 @@ public sealed class BackupService(AppDataPaths paths, LocalLogger logger, int re
 
     private async Task CopyManagedFilesAsync(string stagingDirectory, CancellationToken cancellationToken)
     {
-        if (!Directory.Exists(paths.ProjectsDirectory)) return;
-        foreach (var source in Directory.EnumerateFiles(paths.ProjectsDirectory, "*", SearchOption.AllDirectories))
+        foreach (var (archiveFolder, directory) in ManagedDirectories())
+        foreach (var source in EnumerateManagedFiles(directory))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var relative = Path.GetRelativePath(paths.ProjectsDirectory, source);
-            var destination = Path.Combine(stagingDirectory, "projects", relative);
+            var relative = Path.GetRelativePath(directory, source);
+            var destination = Path.Combine(stagingDirectory, archiveFolder, relative);
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            await using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.ReadWrite,
-                81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
-            await using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None,
-                81920, FileOptions.Asynchronous | FileOptions.WriteThrough);
-            await input.CopyToAsync(output, cancellationToken);
-            await output.FlushAsync(cancellationToken);
+            try
+            {
+                await using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.ReadWrite,
+                    81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                await using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                    81920, FileOptions.Asynchronous | FileOptions.WriteThrough);
+                await input.CopyToAsync(output, cancellationToken);
+                await output.FlushAsync(cancellationToken);
+            }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                // O arquivo foi removido entre a listagem e a cópia (ex.: arquivo temporário concluído).
+                TryDeleteFile(destination);
+                logger.Info($"Arquivo ignorado no backup por ter sido removido durante a cópia: {source}");
+            }
         }
     }
+
+    private static IEnumerable<string> EnumerateManagedFiles(string directory) =>
+        Directory.Exists(directory)
+            ? Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories).Where(x => !IsTemporaryFile(x))
+            : Enumerable.Empty<string>();
+
+    // Arquivos temporários de escrita atômica ("*.tmp.<guid>") e de continuação de relatório ("*.tmp.docx").
+    private static bool IsTemporaryFile(string path) =>
+        Path.GetFileName(path).Contains(".tmp.", StringComparison.OrdinalIgnoreCase);
 
     private async Task WriteStatusAsync(BackupStatus status, CancellationToken cancellationToken)
     {

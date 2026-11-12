@@ -1,11 +1,21 @@
 using GeoAutoDocs.Core;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using System.Reflection;
 
 namespace GeoAutoDocs.Infrastructure;
 
 public sealed class ProjectStore : IProjectStore
 {
+    /// <summary>
+    /// Versão do esquema SQLite que esta build cria e entende. Ao mudar o esquema:
+    /// 1) acrescente a rotina Ensure* idempotente em InitializeAsync;
+    /// 2) incremente esta constante;
+    /// 3) cubra a atualização a partir da versão anterior com teste.
+    /// A versão 1 corresponde ao esquema da 1.1.0 (todas as rotinas Ensure* existentes).
+    /// </summary>
+    public const int CurrentSchemaVersion = 1;
+
     private readonly DbContextOptions<GeoAutoDocsDbContext> _options;
     private readonly string _projectsDirectory;
     private readonly string _cacheDirectory;
@@ -27,6 +37,9 @@ public sealed class ProjectStore : IProjectStore
     {
         await using var db = CreateContext();
         await db.Database.EnsureCreatedAsync(cancellationToken);
+        var storedSchemaVersion = await ReadSchemaVersionAsync(db, cancellationToken);
+        if (storedSchemaVersion > CurrentSchemaVersion)
+            throw new UnsupportedSchemaVersionException(storedSchemaVersion, CurrentSchemaVersion);
         await BackupLegacyDatabaseAsync(db, cancellationToken);
         await BackupStage4DatabaseAsync(db, cancellationToken);
         await BackupTechnicalSchemaDatabaseAsync(db, cancellationToken);
@@ -38,7 +51,57 @@ public sealed class ProjectStore : IProjectStore
         await EnsureTechnicalAnomalySchemaAsync(db, cancellationToken);
         await EnsureOccurrenceMeteragePointSchemaAsync(db, cancellationToken);
         await EnsureAnomalyCatalogAsync(db, cancellationToken);
+        await RecordSchemaVersionAsync(db, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <summary>Versão de esquema registrada no banco (0 quando o banco é anterior ao controle de versão).</summary>
+    public async Task<int> GetSchemaVersionAsync(CancellationToken cancellationToken = default)
+    {
+        await using var db = CreateContext();
+        return await ReadSchemaVersionAsync(db, cancellationToken);
+    }
+
+    private static async Task<int> ReadSchemaVersionAsync(GeoAutoDocsDbContext db, CancellationToken cancellationToken)
+    {
+        var connection = db.Database.GetDbConnection();
+        var close = connection.State != System.Data.ConnectionState.Open;
+        if (close) await connection.OpenAsync(cancellationToken);
+        try
+        {
+            await using var exists = connection.CreateCommand();
+            exists.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            exists.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'GeoAutoDocsSchemaVersion'";
+            if (Convert.ToInt64(await exists.ExecuteScalarAsync(cancellationToken)) == 0) return 0;
+
+            await using var max = connection.CreateCommand();
+            max.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            max.CommandText = "SELECT COALESCE(MAX(\"Version\"), 0) FROM \"GeoAutoDocsSchemaVersion\"";
+            return Convert.ToInt32(await max.ExecuteScalarAsync(cancellationToken));
+        }
+        finally
+        {
+            if (close) await connection.CloseAsync();
+        }
+    }
+
+    private static async Task RecordSchemaVersionAsync(GeoAutoDocsDbContext db, CancellationToken cancellationToken)
+    {
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS "GeoAutoDocsSchemaVersion" (
+                "Version" INTEGER NOT NULL CONSTRAINT "PK_GeoAutoDocsSchemaVersion" PRIMARY KEY,
+                "AppliedAtUtc" TEXT NOT NULL,
+                "AppVersion" TEXT NULL
+            );
+            """, cancellationToken);
+        var appVersion = Assembly.GetEntryAssembly()?.GetName().Version?.ToString();
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            INSERT OR IGNORE INTO "GeoAutoDocsSchemaVersion" ("Version", "AppliedAtUtc", "AppVersion")
+            VALUES ({0}, {1}, {2})
+            """,
+            new object[] { CurrentSchemaVersion, DateTime.UtcNow.ToString("O"), (object?)appVersion ?? DBNull.Value },
+            cancellationToken);
     }
 
     public async Task<IReadOnlyList<Project>> ListAsync(CancellationToken cancellationToken = default)

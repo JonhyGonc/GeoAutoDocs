@@ -43,7 +43,8 @@ public partial class App : Application
                     MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
                 await backups.RestoreAsync(availableBackup.LastBackupPath!, overwriteExisting: false, _shutdown.Token);
             try { await store.InitializeAsync(); }
-            catch when (availableBackup.HasSuccessfulBackup && MessageBox.Show(
+            catch (Exception initError) when (initError is not UnsupportedSchemaVersionException &&
+                                              availableBackup.HasSuccessfulBackup && MessageBox.Show(
                             "O banco de dados não pôde ser aberto. Restaurar o último backup válido?\n\nO banco atual será preservado antes da restauração.",
                             "Recuperar dados", MessageBoxButton.YesNo, MessageBoxImage.Error) == MessageBoxResult.Yes)
             {
@@ -59,6 +60,13 @@ public partial class App : Application
             MainWindow = window;
             window.Show();
             _ = RunStartupBackupAsync(backups, window);
+        }
+        catch (UnsupportedSchemaVersionException ex)
+        {
+            // Banco de uma versão mais nova: não oferecer restauração de backup, apenas orientar.
+            _logger.Error("Banco de dados com esquema mais novo que o suportado.", ex);
+            MessageBox.Show(ex.Message, "GeoAutoDocs", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown(1);
         }
         catch (Exception ex)
         {

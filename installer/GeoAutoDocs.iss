@@ -1,5 +1,5 @@
 #define AppName "GeoAutoDocs"
-#define AppVersion "1.0.4"
+#define AppVersion "1.1.0"
 #define AppPublisher "GeoAutoDocs"
 #define AppExeName "GeoAutoDocs.App.exe"
 
